@@ -1,0 +1,23 @@
+name: License Compliance
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  license-compliance:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@1.95.0
+      - name: Check SPDX headers
+        run: python scripts/check_spdx_headers.py
+      - name: Check ScriptScorePlus boundary
+        run: python desktop/scripts/check_scriptscoreplus_boundary.py
+      - name: Generate legal artifacts in check mode
+        run: python desktop/scripts/generate_legal_artifacts.py --check

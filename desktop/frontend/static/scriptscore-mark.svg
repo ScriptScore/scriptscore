@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">ScriptScore app mark</title>
+  <desc id="desc">A rounded square containing a scored exam page and blue check mark.</desc>
+  <defs>
+    <linearGradient id="tile" x1="96" y1="64" x2="416" y2="448" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#17356d" />
+      <stop offset="1" stop-color="#244fb0" />
+    </linearGradient>
+    <linearGradient id="paper" x1="180" y1="112" x2="332" y2="392" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#fbfdff" />
+      <stop offset="1" stop-color="#deebff" />
+    </linearGradient>
+  </defs>
+  <rect x="32" y="32" width="448" height="448" rx="108" fill="url(#tile)" />
+  <rect x="128" y="92" width="256" height="328" rx="44" fill="url(#paper)" />
+  <path d="M304 92v80c0 17.673 14.327 32 32 32h48" fill="#d3e4ff" />
+  <path d="M304 92l80 112h-48c-17.673 0-32-14.327-32-32V92z" fill="#c1d8ff" />
+  <rect x="170" y="176" width="116" height="20" rx="10" fill="#8ea8da" />
+  <rect x="170" y="220" width="168" height="20" rx="10" fill="#8ea8da" />
+  <rect x="170" y="264" width="128" height="20" rx="10" fill="#8ea8da" />
+  <path d="M189 302l44 44 93-111" fill="none" stroke="#1d4ed8" stroke-linecap="round" stroke-linejoin="round" stroke-width="34" />
+  <circle cx="350" cy="330" r="18" fill="#f8c14c" />
+</svg>

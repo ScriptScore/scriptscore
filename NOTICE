@@ -1,0 +1,10 @@
+ScriptScore
+Copyright (c) ScriptScore contributors.
+
+This repository contains the open-source ScriptScore client: the Python CLI/runtime, JSON-RPC sidecar, Tauri desktop host, Svelte/SvelteKit frontend, public documentation, and related build/compliance tooling.
+
+The ScriptScore client is licensed under AGPL-3.0-only. See LICENSE for the full license text.
+
+ScriptScorePlus is a separate hosted API service. Hosted service implementation details are not included in this repository. The public client may contain safe client-side request types, provider selection values, or coming-soon UI for hosted API support.
+
+Third-party dependencies retain their own licenses. Generate and review third-party notices and dependency inventory before distributing release artifacts. The desktop build expects bundled notices under desktop/dist/legal/.

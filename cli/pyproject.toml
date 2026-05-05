@@ -1,0 +1,148 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "scriptscore"
+version = "0.1.0.dev0"
+description = "Open-source CLI and desktop app for AI-assisted grading of handwritten exams"
+license = { text = "AGPL-3.0-only" }
+requires-python = ">=3.12,<3.14"
+dependencies = [
+  "easyocr>=1.7,<2",
+  "json-repair>=0.39,<1",
+  "numpy>=2,<3",
+  "opencv-contrib-python-headless>=4.10,<5",
+  "ollama>=0.4,<1",
+  "paddleocr>=2.9,<3",
+  "paddlepaddle>=3.0,<4",
+  "Pillow>=10.4,<12",
+  "PyMuPDF>=1.24,<2",
+  "PyYAML>=6.0,<7",
+  "pydantic>=2.10,<3.0",
+  "torch>=2.5,<3",
+]
+
+[project.urls]
+Homepage = "https://github.com/ScriptScore/scriptscore"
+
+[project.scripts]
+scriptscore = "scriptscore.cli:main"
+
+[dependency-groups]
+ci-runtime = [
+  "json-repair>=0.39,<1",
+  "numpy>=2,<3",
+  "opencv-contrib-python-headless>=4.10,<5",
+  "ollama>=0.4,<1",
+  "Pillow>=10.4,<12",
+  "PyMuPDF>=1.24,<2",
+  "PyYAML>=6.0,<7",
+  "pydantic>=2.10,<3.0",
+]
+quality = [
+  "mypy>=1.13,<2",
+  "pytest>=8.3,<9",
+  "ruff>=0.12,<0.13",
+  "types-PyYAML>=6.0,<7",
+]
+worker-test = [
+  "pytest>=8.3,<9",
+  "pytest-cov>=6.0,<7",
+  "ruff>=0.12,<0.13",
+]
+dev = [
+  "bandit>=1.8,<2",
+  "hypothesis>=6.130,<7",
+  "mypy>=1.13,<2",
+  "pip-audit>=2.9,<3",
+  "pylint>=3.3,<4",
+  "pytest>=8.3,<9",
+  "pytest-cov>=6.0,<7",
+  "radon>=6.0,<7",
+  "ruff>=0.12,<0.13",
+  "types-PyYAML>=6.0,<7",
+]
+
+[tool.hatch.build]
+ignore-vcs = true
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "src/scriptscore/**/*.py",
+  "src/scriptscore/prompts/builtin_prompts.yaml",
+]
+
+[tool.hatch.build.targets.wheel]
+include = [
+  "src/scriptscore/**/*.py",
+  "src/scriptscore/prompts/builtin_prompts.yaml",
+]
+[tool.hatch.build.targets.wheel.sources]
+"src" = ""
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "C4", "RUF"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["B018"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["scriptscore"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
+
+[tool.mypy]
+python_version = "3.12"
+files = ["src/scriptscore", "tests"]
+strict = true
+warn_unused_configs = true
+show_error_codes = true
+pretty = true
+
+[[tool.mypy.overrides]]
+module = ["tests.*"]
+disallow_untyped_defs = false
+
+[[tool.mypy.overrides]]
+module = [
+  "scriptscore.commands.scans_ocr",
+  "scriptscore.ocr.*",
+  "scriptscore.pii_scan.engine",
+  "scriptscore.pii_scan.images",
+  "scriptscore.pii_scan.reader",
+  "scriptscore.providers.aruco",
+  "tests.test_scans_align_auto",
+]
+disable_error_code = ["import-not-found", "unused-ignore"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+pythonpath = ["src"]
+
+[tool.coverage.run]
+branch = true
+source = ["scriptscore"]
+omit = [
+  "tests/*",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+fail_under = 85
+exclude_lines = [
+  "pragma: no cover",
+  "if TYPE_CHECKING:",
+  "if __name__ == .__main__.:",
+]

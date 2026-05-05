@@ -1,0 +1,832 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fast-quality:
+    name: CLI Fast Quality
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cli
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --only-group ci-runtime --only-group quality --no-install-project --frozen
+
+      - name: Ruff lint
+        run: uv run --no-sync ruff check .
+
+      - name: Ruff format check
+        run: uv run --no-sync ruff format --check .
+
+      - name: Mypy
+        run: uv run --no-sync mypy
+
+  test-and-coverage:
+    name: CLI Test And Coverage
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cli
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --group dev
+
+      - name: Pytest with coverage
+        run: uv run pytest --cov=src/scriptscore --cov-report=term-missing --cov-report=xml --cov-report=json
+
+      - name: Coverage subsystem thresholds
+        run: uv run python tests/support/check_coverage_thresholds.py coverage.json
+
+      - name: Detect artifact upload availability
+        id: artifact-upload
+        run: |
+          if [ -n "${ACTIONS_RUNTIME_TOKEN:-}" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload coverage XML artifact
+        if: ${{ steps.artifact-upload.outputs.enabled == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-xml
+          path: cli/coverage.xml
+
+  wheel-smoke-install:
+    name: CLI Wheel Smoke Install
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cli
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Build wheel
+        run: uv build
+
+      - name: Create clean wheel smoke environment
+        run: uv venv .wheel-smoke
+
+      - name: Install slim runtime dependencies
+        run: uv pip install --python .wheel-smoke/bin/python --group ci-runtime
+
+      - name: Install built wheel
+        run: uv pip install --python .wheel-smoke/bin/python --no-deps dist/*.whl
+
+      - name: Smoke installed wheel
+        run: env -u PYTHONPATH .wheel-smoke/bin/python tests/support/wheel_smoke.py --scriptscore-bin .wheel-smoke/bin/scriptscore --cwd .
+
+  desktop-frontend-quality:
+    name: Desktop Frontend Quality
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: desktop/frontend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: desktop/frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Frontend lint
+        run: npm run lint
+
+      - name: Svelte check
+        run: npm run check
+
+      - name: Frontend tests
+        run: npm test
+
+      - name: Frontend build
+        run: npm run build
+
+  desktop-frontend-coverage:
+    name: Desktop Frontend Coverage
+    runs-on: ubuntu-latest
+    needs: desktop-frontend-quality
+    defaults:
+      run:
+        working-directory: desktop/frontend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: desktop/frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Frontend coverage
+        run: npm run coverage
+
+      - name: Normalize frontend coverage paths
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          lcov_path = Path("coverage/lcov.info")
+          content = lcov_path.read_text(encoding="utf-8")
+          content = content.replace("SF:src/", "SF:desktop/frontend/src/")
+          lcov_path.write_text(content, encoding="utf-8")
+          PY
+
+      - name: Upload frontend coverage artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-frontend-coverage
+          path: |
+            desktop/frontend/coverage/lcov.info
+            desktop/frontend/coverage/coverage-summary.json
+
+  license-policy:
+    name: License Policy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: desktop/frontend/package-lock.json
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@1.95.0
+
+      - name: Install frontend dependencies
+        working-directory: desktop/frontend
+        run: npm ci
+
+      - name: Build frontend assets
+        working-directory: desktop/frontend
+        run: npm run build
+
+      - name: Prepare bundled runtime manifest
+        run: ./desktop/scripts/prepare-bundled-runtime.sh
+
+      - name: Generate legal artifacts in check mode
+        run: ./desktop/scripts/generate_legal_artifacts.py --check
+
+      - name: Check ScriptScorePlus boundary
+        run: ./desktop/scripts/check_scriptscoreplus_boundary.py
+
+      - name: Upload license policy artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: license-policy-report
+          path: desktop/dist/legal
+
+  desktop-host-quality:
+    name: Desktop Host Quality
+    runs-on: ubuntu-latest
+    env:
+      SCRIPTSCORE_PYTHON: ${{ github.workspace }}/cli/.venv/bin/python
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install CLI dependencies
+        working-directory: cli
+        run: uv sync --group dev
+
+      - name: Install Linux Tauri system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            curl \
+            file \
+            libayatana-appindicator3-dev \
+            libdbus-1-dev \
+            libssl-dev \
+            libwebkit2gtk-4.1-dev \
+            libxdo-dev \
+            librsvg2-dev \
+            pkg-config \
+            wget
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@1.95.0
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri -> target
+
+      - name: Prepare bundled runtime
+        run: ./desktop/scripts/prepare-bundled-runtime.sh
+
+      - name: Generate legal artifacts
+        run: python desktop/scripts/generate_legal_artifacts.py
+
+      - name: Rust format check
+        run: cargo fmt --check --manifest-path desktop/src-tauri/Cargo.toml
+
+      - name: Rust clippy
+        run: cargo clippy --manifest-path desktop/src-tauri/Cargo.toml --workspace --all-targets --all-features -- -D warnings
+
+      - name: Rust tests
+        run: cargo test --manifest-path desktop/src-tauri/Cargo.toml
+
+  desktop-rust-metrics:
+    name: Desktop Rust Metrics
+    runs-on: ubuntu-latest
+    needs: desktop-host-quality
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@1.95.0
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri -> target
+
+      - name: Generate rust-code-analysis report
+        run: make quality-metrics
+
+      - name: Detect artifact upload availability
+        id: artifact-upload
+        run: |
+          if [ -n "${ACTIONS_RUNTIME_TOKEN:-}" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload rust-code-analysis artifact
+        if: ${{ steps.artifact-upload.outputs.enabled == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-rust-code-analysis
+          path: |
+            artifacts/rust-code-analysis.json
+            artifacts/rust-code-analysis-summary.json
+
+  desktop-rust-coverage:
+    name: Desktop Rust Coverage
+    runs-on: ubuntu-latest
+    needs: desktop-host-quality
+    env:
+      SCRIPTSCORE_PYTHON: ${{ github.workspace }}/cli/.venv/bin/python
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install CLI dependencies
+        working-directory: cli
+        run: uv sync --group dev
+
+      - name: Install Linux Tauri system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            curl \
+            file \
+            libayatana-appindicator3-dev \
+            libdbus-1-dev \
+            libssl-dev \
+            libwebkit2gtk-4.1-dev \
+            libxdo-dev \
+            librsvg2-dev \
+            pkg-config \
+            wget
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@1.95.0
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri -> target
+
+      - name: Prepare bundled runtime
+        run: ./desktop/scripts/prepare-bundled-runtime.sh
+
+      - name: Generate legal artifacts
+        run: python desktop/scripts/generate_legal_artifacts.py
+
+      - name: Generate Rust coverage report
+        run: make coverage-rust
+
+      - name: Upload Rust coverage artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-rust-coverage
+          path: artifacts/coverage
+
+  desktop-rust-unsafe:
+    name: Desktop Rust Unsafe Report
+    runs-on: ubuntu-latest
+    needs: desktop-host-quality
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@1.95.0
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri -> target
+
+      - name: Generate cargo-geiger report
+        run: make unsafe-report
+
+      - name: Detect artifact upload availability
+        id: artifact-upload
+        run: |
+          if [ -n "${ACTIONS_RUNTIME_TOKEN:-}" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload cargo-geiger artifact
+        if: ${{ steps.artifact-upload.outputs.enabled == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-rust-unsafe-report
+          path: |
+            artifacts/cargo-geiger.json
+            artifacts/cargo-geiger.log
+
+  desktop-sonarcloud:
+    name: Desktop SonarCloud
+    runs-on: ubuntu-latest
+    needs:
+      - desktop-frontend-coverage
+      - desktop-rust-coverage
+    env:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      SONAR_ORGANIZATION: ${{ vars.SONAR_ORGANIZATION }}
+      SONAR_PROJECT_KEY: ${{ vars.SONAR_PROJECT_KEY }}
+    steps:
+      - name: Check SonarCloud availability
+        id: sonar-ready
+        run: |
+          if [[ -z "${SONAR_TOKEN:-}" || -z "${SONAR_ORGANIZATION:-}" || -z "${SONAR_PROJECT_KEY:-}" ]]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [[ "${GITHUB_EVENT_NAME}" == "pull_request" && "${{ github.event.pull_request.head.repo.full_name }}" != "${GITHUB_REPOSITORY}" ]]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "enabled=true" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout
+        if: ${{ steps.sonar-ready.outputs.enabled == 'true' }}
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        if: ${{ steps.sonar-ready.outputs.enabled == 'true' }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node
+        if: ${{ steps.sonar-ready.outputs.enabled == 'true' }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: desktop/frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        if: ${{ steps.sonar-ready.outputs.enabled == 'true' }}
+        working-directory: desktop/frontend
+        run: npm ci
+
+      - name: Generate Svelte metadata
+        if: ${{ steps.sonar-ready.outputs.enabled == 'true' }}
+        working-directory: desktop/frontend
+        run: npx svelte-kit sync
+
+      - name: Download frontend coverage artifact
+        if: ${{ steps.sonar-ready.outputs.enabled == 'true' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: desktop-frontend-coverage
+          path: desktop/frontend/coverage
+
+      - name: Download Rust coverage artifact
+        if: ${{ steps.sonar-ready.outputs.enabled == 'true' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: desktop-rust-coverage
+          path: artifacts/coverage
+
+      - name: Cache SonarCloud packages
+        if: ${{ steps.sonar-ready.outputs.enabled == 'true' }}
+        uses: actions/cache@v4
+        with:
+          path: ~/.sonar/cache
+          key: ${{ runner.os }}-sonar
+          restore-keys: ${{ runner.os }}-sonar
+
+      - name: Install Linux Tauri system dependencies
+        if: ${{ steps.sonar-ready.outputs.enabled == 'true' }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            curl \
+            file \
+            libayatana-appindicator3-dev \
+            libdbus-1-dev \
+            libssl-dev \
+            libwebkit2gtk-4.1-dev \
+            libxdo-dev \
+            librsvg2-dev \
+            pkg-config \
+            wget
+
+      - name: Set up Rust
+        if: ${{ steps.sonar-ready.outputs.enabled == 'true' }}
+        uses: dtolnay/rust-toolchain@1.95.0
+        with:
+          components: clippy
+
+      - name: Prepare bundled runtime
+        if: ${{ steps.sonar-ready.outputs.enabled == 'true' }}
+        run: ./desktop/scripts/prepare-bundled-runtime.sh
+
+      - name: Generate legal artifacts
+        if: ${{ steps.sonar-ready.outputs.enabled == 'true' }}
+        run: python desktop/scripts/generate_legal_artifacts.py
+
+      - name: Run SonarCloud scan
+        if: ${{ steps.sonar-ready.outputs.enabled == 'true' }}
+        uses: SonarSource/sonarqube-scan-action@v6
+        env:
+          SONAR_TOKEN: ${{ env.SONAR_TOKEN }}
+        with:
+          args: >
+            "-Dsonar.organization=${{ env.SONAR_ORGANIZATION }}"
+            "-Dsonar.projectKey=${{ env.SONAR_PROJECT_KEY }}"
+
+      - name: SonarCloud skipped
+        if: ${{ steps.sonar-ready.outputs.enabled != 'true' }}
+        run: echo "Skipping SonarCloud because required secrets/variables are missing or this pull request comes from a fork."
+
+  desktop-worker-runtime:
+    name: Desktop Worker Runtime
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cli
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --only-group ci-runtime --only-group worker-test --no-install-project --frozen
+
+      - name: Desktop worker lint
+        run: uv run --no-sync ruff check src/scriptscore/transport/desktop_worker.py tests/test_desktop_worker.py tests/test_desktop_worker_unit.py
+
+      - name: Desktop worker compile check
+        run: uv run --no-sync python -m py_compile src/scriptscore/transport/desktop_worker.py
+
+      - name: Desktop worker tests with coverage
+        run: uv run --no-sync pytest tests/test_desktop_worker.py tests/test_desktop_worker_unit.py --cov=scriptscore.transport.desktop_worker --cov-report=term-missing --cov-report=xml --cov-report=json --cov-fail-under=0
+
+      - name: Detect artifact upload availability
+        id: artifact-upload
+        run: |
+          if [ -n "${ACTIONS_RUNTIME_TOKEN:-}" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload desktop worker coverage artifacts
+        if: ${{ steps.artifact-upload.outputs.enabled == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-worker-coverage
+          path: |
+            cli/coverage.xml
+            cli/coverage.json
+
+  desktop-launcher-smoke:
+    name: Desktop Launcher Smoke
+    runs-on: ubuntu-latest
+    needs:
+      - fast-quality
+      - desktop-host-quality
+      - desktop-frontend-quality
+      - desktop-worker-runtime
+    defaults:
+      run:
+        working-directory: cli
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: desktop/frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: desktop/frontend
+        run: npm ci
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install CLI dependencies
+        run: uv sync --group dev
+
+      - name: Install Linux launcher dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libayatana-appindicator3-dev \
+            libssl-dev \
+            libwebkit2gtk-4.1-dev \
+            libxdo-dev \
+            librsvg2-dev \
+            xvfb
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@1.95.0
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri -> target
+
+      - name: Install cargo-tauri
+        run: cargo install tauri-cli --version '^2'
+
+      - name: Prepare bundled runtime
+        working-directory: .
+        run: ./desktop/scripts/prepare-bundled-runtime.sh
+
+      - name: Smoke bundled runtime
+        working-directory: .
+        run: ./desktop/scripts/smoke-bundled-runtime.sh
+
+      - name: Generate legal artifacts
+        working-directory: .
+        run: python desktop/scripts/generate_legal_artifacts.py
+
+      - name: Launcher smoke tests
+        env:
+          DESKTOP_HOST_START_TIMEOUT_SECONDS: "240"
+        run: uv run pytest tests/test_desktop_launchers.py
+
+  desktop-linux-package-smoke:
+    name: Desktop Linux Package Smoke
+    runs-on: ubuntu-latest
+    needs:
+      - fast-quality
+      - desktop-host-quality
+      - desktop-frontend-quality
+      - desktop-worker-runtime
+      - license-policy
+    env:
+      SCRIPTSCORE_PYTHON: ${{ github.workspace }}/cli/.venv/bin/python
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: desktop/frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: desktop/frontend
+        run: npm ci
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install CLI dependencies
+        working-directory: cli
+        run: uv sync --group dev
+
+      - name: Install Linux packaging dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            curl \
+            file \
+            libayatana-appindicator3-dev \
+            libdbus-1-dev \
+            libfuse2 \
+            libssl-dev \
+            libwebkit2gtk-4.1-dev \
+            libxdo-dev \
+            librsvg2-dev \
+            patchelf \
+            pkg-config \
+            squashfs-tools \
+            wget
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@1.95.0
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri -> target
+
+      - name: Install cargo-tauri
+        run: cargo install tauri-cli --version '^2'
+
+      - name: Prepare bundled runtime
+        run: ./desktop/scripts/prepare-bundled-runtime.sh
+
+      - name: Smoke bundled runtime
+        run: ./desktop/scripts/smoke-bundled-runtime.sh
+
+      - name: Generate legal artifacts
+        run: python desktop/scripts/generate_legal_artifacts.py
+
+      - name: Build Linux package
+        run: ./desktop/scripts/build-desktop-package.sh appimage
+
+      - name: Detect package artifact upload availability
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        id: artifact-upload
+        run: |
+          if [ -n "${ACTIONS_RUNTIME_TOKEN:-}" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload Linux package artifacts
+        if: ${{ github.event_name == 'workflow_dispatch' && steps.artifact-upload.outputs.enabled == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-linux-package
+          path: |
+            desktop/dist/bundled-runtime
+            desktop/src-tauri/target/release/bundle
+            desktop/src-tauri/target/release/scriptscore-desktop-host*
+
+  desktop-windows-runtime:
+    name: Desktop Windows Runtime
+    # Disabled until Windows desktop packaging/runtime behavior has been tested.
+    if: ${{ false }}
+    runs-on: windows-latest
+    timeout-minutes: 20
+    env:
+      SCRIPTSCORE_PYTHON: ${{ github.workspace }}\cli\.venv\Scripts\python.exe
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install CLI dependencies
+        working-directory: cli
+        run: uv sync --group dev
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@1.95.0
+        with:
+          components: rustfmt, clippy
+
+      - name: Rust tests
+        run: cargo test --manifest-path desktop/src-tauri/Cargo.toml -- --nocapture --test-threads=1
+
+      - name: Desktop worker unit tests
+        working-directory: cli
+        run: uv run pytest tests/test_desktop_worker_unit.py
