@@ -1,0 +1,521 @@
+@import '@fontsource-variable/figtree';
+@import '@fontsource-variable/inter';
+@import 'tailwindcss';
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  color-scheme: dark;
+  --font-sans:
+    'Inter Variable',
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    sans-serif;
+  --font-heading:
+    'Figtree Variable',
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    sans-serif;
+  --background: oklch(0.14 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.22 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.22 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.424 0.199 265.638);
+  --primary-foreground: oklch(0.97 0.014 254.604);
+  --secondary: oklch(0.22 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.20 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.20 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.556 0 0);
+  --chart-1: oklch(0.809 0.105 251.813);
+  --chart-2: oklch(0.623 0.214 259.815);
+  --chart-3: oklch(0.546 0.245 262.881);
+  --chart-4: oklch(0.488 0.243 264.376);
+  --chart-5: oklch(0.424 0.199 265.638);
+  --radius: 0.45rem;
+  --sidebar: oklch(0.20 0 0);
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-primary: oklch(0.623 0.214 259.815);
+  --sidebar-primary-foreground: oklch(0.97 0.014 254.604);
+  --sidebar-accent: oklch(0.20 0 0);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.556 0 0);
+  --workspace-sidebar: oklch(0.20 0 0);
+  --workspace-sidebar-foreground: oklch(0.985 0 0);
+  --workspace-sidebar-muted: oklch(0.6 0 0);
+  --workspace-sidebar-border: oklch(1 0 0 / 8%);
+  --workspace-sidebar-hover: oklch(1 0 0 / 5%);
+  --workspace-sidebar-active: oklch(1 0 0 / 7%);
+  --workspace-content: oklch(0.22 0 0);
+  --workspace-canvas: oklch(0.14 0 0);
+  --workspace-card: oklch(1 0 0 / 4%);
+  --workspace-empty: oklch(1 0 0 / 2%);
+  --workspace-question-preview: oklch(0.18 0 0);
+  --workspace-thumbnail-bg: oklch(0.155 0 0);
+  --workspace-page-bg: oklch(0.99 0 0);
+  --workspace-text-primary: oklch(0.98 0 0);
+  --workspace-text-secondary: oklch(0.75 0 0);
+  --workspace-text-muted: oklch(0.55 0 0);
+  --workspace-border: oklch(1 0 0 / 8%);
+  --workspace-border-strong: oklch(1 0 0 / 12%);
+  --workspace-pill-active: oklch(0.985 0 0);
+  --workspace-pill-active-text: oklch(0.12 0 0);
+  /* Surface tokens are the component-facing layout API; workspace tokens stay as palette foundations. */
+  --surface-app: var(--background);
+  --surface-shell: var(--surface-app);
+  --surface-rail: var(--surface-app);
+  --surface-sidebar: var(--workspace-sidebar);
+  --surface-panel: var(--workspace-content);
+  --surface-canvas: var(--workspace-canvas);
+  --surface-bottom-bar: var(--surface-sidebar);
+  --surface-card: var(--card);
+  --surface-overlay: var(--popover);
+  --surface-page: var(--workspace-page-bg);
+  --surface-message: var(--workspace-empty);
+  --surface-card-subtle: var(--workspace-card);
+  --surface-card-control: oklch(1 0 0 / 6%);
+  --surface-card-raised: var(--card);
+  --surface-card-hover: var(--workspace-sidebar-hover);
+  --border-subtle: var(--workspace-sidebar-border);
+  --border-default: var(--workspace-border);
+  --border-strong: var(--workspace-border-strong);
+  --border-focus: var(--ring);
+  --text-primary: var(--workspace-text-primary);
+  --text-secondary: var(--workspace-text-secondary);
+  --text-muted: var(--workspace-text-muted);
+  --text-inverse: var(--primary-foreground);
+  --interaction-hover: var(--workspace-sidebar-hover);
+  --interaction-active: var(--workspace-sidebar-active);
+  --interaction-selected: var(--workspace-pill-active);
+  --interaction-selected-text: var(--workspace-pill-active-text);
+  --interaction-disabled: var(--workspace-empty);
+  --focus-ring: var(--ring);
+  --overlay-scrim: oklch(0 0 0 / 45%);
+  --surface-shadow-soft:
+    0 1px 2px oklch(0 0 0 / 0.12),
+    0 6px 20px oklch(0 0 0 / 0.12);
+  --surface-shadow-button: 0 1px 2px oklch(0 0 0 / 0.16);
+  --surface-shadow-inset: inset 0 1px 2px oklch(0 0 0 / 0.12);
+  --surface-shadow-strong: 0 32px 80px oklch(0 0 0 / 0.28);
+  --surface-shadow-canvas: 0 1px 2px oklch(0.14 0 0 / 0.18);
+  --workspace-image-border: oklch(0 0 0 / 0.12);
+  --workspace-selection-name-border: oklch(0.72 0.16 70);
+  --workspace-selection-name-fill: oklch(0.72 0.16 70 / 0.16);
+  --workspace-selection-name-foreground: oklch(0.99 0 0);
+  --workspace-selection-border: color-mix(in oklch, var(--primary) 72%, transparent);
+  --workspace-selection-fill: color-mix(in oklch, var(--primary) 12%, transparent);
+  --workspace-selection-inset: oklch(0.985 0 0 / 0.38);
+  --workspace-selection-hatch:
+    repeating-linear-gradient(
+      135deg,
+      color-mix(in oklch, var(--primary) 24%, transparent),
+      color-mix(in oklch, var(--primary) 24%, transparent) 7px,
+      transparent 7px,
+      transparent 14px
+    );
+  --workspace-selection-hatch-opacity: 0.38;
+  --workspace-selection-handle-fill: var(--workspace-page-bg);
+  --workspace-selection-handle-border: var(--primary);
+  --message-error-bg: oklch(0.25 0.08 25);
+  --message-error-text: oklch(0.95 0.02 25);
+  --message-error-border: oklch(0.5 0.2 25 / 40%);
+  --message-warning-bg: oklch(0.25 0.06 75);
+  --message-warning-selection-fill: oklch(0.7 0.15 75 / 0.18);
+  --message-warning-text: oklch(0.95 0.02 75);
+  --message-warning-border: oklch(0.7 0.15 75 / 40%);
+  --toggle-active-bg: var(--primary-foreground);
+  --toggle-active-text: var(--primary);
+  --toggle-active-border: color-mix(in oklch, var(--primary) 35%, transparent);
+  --message-info-bg: oklch(0.25 0.06 240);
+  --message-info-text: oklch(0.95 0.02 240);
+  --message-info-border: oklch(0.6 0.15 240 / 40%);
+  --message-success-bg: oklch(0.27 0.05 155 / 92%);
+  --message-success-text: oklch(0.96 0.02 155);
+  --message-success-border: oklch(0.62 0.12 155 / 40%);
+}
+
+.light {
+  color-scheme: light;
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: oklch(0.488 0.243 264.376);
+  --primary-foreground: oklch(0.97 0.014 254.604);
+  --secondary: oklch(0.967 0.001 286.375);
+  --secondary-foreground: oklch(0.21 0.006 285.885);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.708 0 0);
+  --chart-1: oklch(0.809 0.105 251.813);
+  --chart-2: oklch(0.623 0.214 259.815);
+  --chart-3: oklch(0.546 0.245 262.881);
+  --chart-4: oklch(0.488 0.243 264.376);
+  --chart-5: oklch(0.424 0.199 265.638);
+  --sidebar: oklch(0.985 0 0);
+  --sidebar-foreground: oklch(0.145 0 0);
+  --sidebar-primary: oklch(0.546 0.245 262.881);
+  --sidebar-primary-foreground: oklch(0.97 0.014 254.604);
+  --sidebar-accent: oklch(0.97 0 0);
+  --sidebar-accent-foreground: oklch(0.205 0 0);
+  --sidebar-border: oklch(0.922 0 0);
+  --sidebar-ring: oklch(0.708 0 0);
+  --workspace-sidebar: oklch(0.98 0 0);
+  --workspace-sidebar-foreground: oklch(0.145 0 0);
+  --workspace-sidebar-muted: oklch(0.556 0 0);
+  --workspace-sidebar-border: oklch(0 0 0 / 8%);
+  --workspace-sidebar-hover: oklch(0 0 0 / 4%);
+  --workspace-sidebar-active: oklch(0 0 0 / 6%);
+  --workspace-content: oklch(0.965 0 0);
+  --workspace-canvas: oklch(0.94 0 0);
+  --workspace-card: oklch(0 0 0 / 3%);
+  --workspace-empty: oklch(0 0 0 / 2%);
+  --workspace-question-preview: oklch(0.92 0 0);
+  --workspace-thumbnail-bg: oklch(0.97 0 0);
+  --workspace-page-bg: oklch(1 0 0);
+  --workspace-text-primary: oklch(0.145 0 0);
+  --workspace-text-secondary: oklch(0.556 0 0);
+  --workspace-text-muted: oklch(0.708 0 0);
+  --workspace-border: oklch(0 0 0 / 8%);
+  --workspace-border-strong: oklch(0 0 0 / 12%);
+  --workspace-pill-active: oklch(0.145 0 0);
+  --workspace-pill-active-text: oklch(0.985 0 0);
+  /* Keep surface role mappings aligned with :root unless the theme intentionally diverges. */
+  --surface-app: var(--background);
+  --surface-shell: var(--surface-app);
+  --surface-rail: var(--workspace-sidebar);
+  --surface-sidebar: var(--workspace-sidebar);
+  --surface-panel: var(--workspace-content);
+  --surface-canvas: var(--workspace-canvas);
+  --surface-bottom-bar: var(--surface-sidebar);
+  --surface-card: var(--card);
+  --surface-overlay: var(--popover);
+  --surface-page: var(--workspace-page-bg);
+  --surface-message: var(--workspace-empty);
+  --surface-card-subtle: var(--workspace-card);
+  --surface-card-control: oklch(0 0 0 / 5%);
+  --surface-card-raised: var(--card);
+  --surface-card-hover: var(--workspace-sidebar-hover);
+  --border-subtle: var(--workspace-sidebar-border);
+  --border-default: var(--workspace-border);
+  --border-strong: var(--workspace-border-strong);
+  --border-focus: var(--ring);
+  --text-primary: var(--workspace-text-primary);
+  --text-secondary: var(--workspace-text-secondary);
+  --text-muted: var(--workspace-text-muted);
+  --text-inverse: var(--primary-foreground);
+  --interaction-hover: var(--workspace-sidebar-hover);
+  --interaction-active: var(--workspace-sidebar-active);
+  --interaction-selected: var(--workspace-pill-active);
+  --interaction-selected-text: var(--workspace-pill-active-text);
+  --interaction-disabled: var(--workspace-empty);
+  --focus-ring: var(--ring);
+  --overlay-scrim: oklch(0 0 0 / 22%);
+  --surface-shadow-soft:
+    0 1px 2px oklch(0 0 0 / 0.06),
+    0 6px 20px oklch(0 0 0 / 0.06);
+  --surface-shadow-button: 0 1px 2px oklch(0 0 0 / 0.08);
+  --surface-shadow-inset: inset 0 1px 2px oklch(0 0 0 / 0.08);
+  --surface-shadow-strong: 0 32px 80px oklch(0 0 0 / 0.18);
+  --surface-shadow-canvas: 0 1px 2px oklch(0.25 0.02 260 / 0.12);
+  --workspace-image-border: oklch(0 0 0 / 0.12);
+  --workspace-selection-name-border: oklch(0.7 0.15 70);
+  --workspace-selection-name-fill: oklch(0.85 0.08 70 / 0.28);
+  --workspace-selection-name-foreground: oklch(0.18 0.02 60);
+  --workspace-selection-border: color-mix(in oklch, var(--primary) 72%, transparent);
+  --workspace-selection-fill: color-mix(in oklch, var(--primary) 10%, transparent);
+  --workspace-selection-inset: oklch(1 0 0 / 0.55);
+  --workspace-selection-hatch:
+    repeating-linear-gradient(
+      135deg,
+      color-mix(in oklch, var(--primary) 18%, transparent),
+      color-mix(in oklch, var(--primary) 18%, transparent) 7px,
+      transparent 7px,
+      transparent 14px
+    );
+  --workspace-selection-hatch-opacity: 0.34;
+  --workspace-selection-handle-fill: var(--workspace-page-bg);
+  --workspace-selection-handle-border: var(--primary);
+  --message-error-bg: oklch(0.95 0.02 25);
+  --message-error-text: oklch(0.2 0.06 25);
+  --message-error-border: oklch(0.5 0.2 25 / 40%);
+  --message-warning-bg: oklch(0.95 0.03 75);
+  --message-warning-selection-fill: oklch(0.74 0.14 75 / 0.22);
+  --message-warning-text: oklch(0.3 0.08 75);
+  --message-warning-border: oklch(0.6 0.18 75 / 40%);
+  --toggle-active-bg: var(--primary-foreground);
+  --toggle-active-text: var(--primary);
+  --toggle-active-border: color-mix(in oklch, var(--primary) 25%, transparent);
+  --message-info-bg: oklch(0.95 0.02 240);
+  --message-info-text: oklch(0.2 0.06 240);
+  --message-info-border: oklch(0.5 0.15 240 / 40%);
+  --message-success-bg: oklch(0.95 0.02 155 / 96%);
+  --message-success-text: oklch(0.24 0.08 155);
+  --message-success-border: oklch(0.55 0.12 155 / 40%);
+}
+
+/* ── Desktop shell typography scale ──
+   Larger tiers use clamp() so text shrinks gradually as the
+   viewport narrows.  Smaller tiers stay near their floor to
+   keep labels and metadata readable.  A narrow-shell breakpoint
+   tightens line-height and letter-spacing for headlines. */
+
+.shell-eyebrow {
+  font-size: 0.75rem;
+  line-height: 1.4;
+  letter-spacing: 0.18em;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.shell-meta {
+  font-size: clamp(0.75rem, 0.6875rem + 0.25vw, 0.875rem);
+  line-height: 1.5;
+}
+
+.shell-sidebar {
+  font-size: clamp(0.6875rem, 0.5rem + 0.25vw, 0.8125rem);
+  line-height: 1.4;
+}
+
+.shell-body {
+  font-size: clamp(0.875rem, 0.8125rem + 0.25vw, 1rem);
+  line-height: 1.55;
+}
+
+.shell-body-lg {
+  font-size: clamp(0.9375rem, 0.8rem + 0.55vw, 1.125rem);
+  line-height: 1.6;
+}
+
+.shell-section-title {
+  font-size: clamp(0.875rem, 0.75rem + 0.5vw, 1.125rem);
+  line-height: 1.35;
+  font-weight: 500;
+}
+
+.shell-title {
+  font-size: clamp(1.125rem, 0.3rem + 3vw, 1.875rem);
+  line-height: 1.25;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+
+.shell-title-lg {
+  font-size: clamp(1.5rem, 0.5rem + 3.5vw, 2.25rem);
+  line-height: 1.2;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+}
+
+.shell-hero {
+  font-size: clamp(1.75rem, 0.5rem + 4vw, 3rem);
+  line-height: 1.1;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+}
+
+.shell-stat {
+  font-size: clamp(1.5rem, 0.8rem + 3vw, 2.5rem);
+  line-height: 1.15;
+  font-weight: 600;
+}
+
+.shell-topbar {
+  font-size: 1rem;
+  line-height: 1.5;
+  font-weight: 500;
+}
+
+@media (max-width: 1100px) {
+  .shell-hero {
+    line-height: 1.15;
+    letter-spacing: -0.02em;
+  }
+
+  .shell-title-lg {
+    line-height: 1.25;
+  }
+
+  .shell-title {
+    font-size: clamp(1rem, 0.3rem + 2.5vw, 1.5rem);
+    line-height: 1.3;
+  }
+
+  .shell-sidebar {
+    font-size: clamp(0.5625rem, 0.3rem + 1vw, 0.6875rem);
+    line-height: 1.4;
+  }
+}
+
+@media (max-width: 960px) {
+  .shell-sidebar {
+    font-size: clamp(0.5rem, 0.25rem + 1vw, 0.625rem);
+    line-height: 1.35;
+  }
+}
+
+@media (max-width: 768px) {
+  .shell-sidebar {
+    font-size: 0.5625rem;
+    line-height: 1.3;
+  }
+}
+
+@theme inline {
+  --font-sans: var(--font-sans);
+  --font-heading: var(--font-heading);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-foreground: var(--foreground);
+  --color-background: var(--background);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+  --color-workspace-sidebar: var(--workspace-sidebar);
+  --color-workspace-sidebar-foreground: var(--workspace-sidebar-foreground);
+  --color-workspace-sidebar-muted: var(--workspace-sidebar-muted);
+  --color-workspace-sidebar-border: var(--workspace-sidebar-border);
+  --color-workspace-sidebar-hover: var(--workspace-sidebar-hover);
+  --color-workspace-sidebar-active: var(--workspace-sidebar-active);
+  --color-workspace-content: var(--workspace-content);
+  --color-workspace-canvas: var(--workspace-canvas);
+  --color-workspace-card: var(--workspace-card);
+  --color-workspace-empty: var(--workspace-empty);
+  --color-workspace-question-preview: var(--workspace-question-preview);
+  --color-workspace-thumbnail-bg: var(--workspace-thumbnail-bg);
+  --color-workspace-text-primary: var(--workspace-text-primary);
+  --color-workspace-text-secondary: var(--workspace-text-secondary);
+  --color-workspace-text-muted: var(--workspace-text-muted);
+  --color-workspace-border: var(--workspace-border);
+  --color-workspace-border-strong: var(--workspace-border-strong);
+  --color-workspace-pill-active: var(--workspace-pill-active);
+  --color-workspace-pill-active-text: var(--workspace-pill-active-text);
+  --color-surface-app: var(--surface-app);
+  --color-surface-shell: var(--surface-shell);
+  --color-surface-rail: var(--surface-rail);
+  --color-surface-sidebar: var(--surface-sidebar);
+  --color-surface-panel: var(--surface-panel);
+  --color-surface-canvas: var(--surface-canvas);
+  --color-surface-bottom-bar: var(--surface-bottom-bar);
+  --color-surface-card: var(--surface-card);
+  --color-surface-overlay: var(--surface-overlay);
+  --color-surface-page: var(--surface-page);
+  --color-surface-message: var(--surface-message);
+  --color-surface-card-subtle: var(--surface-card-subtle);
+  --color-surface-card-control: var(--surface-card-control);
+  --color-surface-card-raised: var(--surface-card-raised);
+  --color-surface-card-hover: var(--surface-card-hover);
+  --color-border-subtle: var(--border-subtle);
+  --color-border-default: var(--border-default);
+  --color-border-strong: var(--border-strong);
+  --color-border-focus: var(--border-focus);
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-muted: var(--text-muted);
+  --color-text-inverse: var(--text-inverse);
+  --color-interaction-hover: var(--interaction-hover);
+  --color-interaction-active: var(--interaction-active);
+  --color-interaction-selected: var(--interaction-selected);
+  --color-interaction-selected-text: var(--interaction-selected-text);
+  --color-interaction-disabled: var(--interaction-disabled);
+  --color-focus-ring: var(--focus-ring);
+  --color-overlay-scrim: var(--overlay-scrim);
+  --color-message-error-bg: var(--message-error-bg);
+  --color-message-error-text: var(--message-error-text);
+  --color-message-error-border: var(--message-error-border);
+  --color-message-warning-bg: var(--message-warning-bg);
+  --color-message-warning-text: var(--message-warning-text);
+  --color-message-warning-border: var(--message-warning-border);
+  --color-toggle-active-bg: var(--toggle-active-bg);
+  --color-toggle-active-text: var(--toggle-active-text);
+  --color-toggle-active-border: var(--toggle-active-border);
+  --color-message-info-bg: var(--message-info-bg);
+  --color-message-info-text: var(--message-info-text);
+  --color-message-info-border: var(--message-info-border);
+  --color-message-success-bg: var(--message-success-bg);
+  --color-message-success-text: var(--message-success-text);
+  --color-message-success-border: var(--message-success-border);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  html,
+  body {
+    min-height: 100%;
+  }
+
+  html {
+    @apply font-sans;
+  }
+
+  body {
+    @apply bg-surface-app text-foreground antialiased;
+    font-size: 17px;
+    line-height: 1.55;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-family: var(--font-heading);
+  }
+}
