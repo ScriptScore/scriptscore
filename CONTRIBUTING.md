@@ -20,6 +20,13 @@ python scripts/check_spdx_headers.py
 python desktop/scripts/check_scriptscoreplus_boundary.py
 ```
 
+For Rust/Tauri changes, run the same clippy command enforced by CI before pushing:
+
+```bash
+cd desktop/src-tauri
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+```
+
 ## DCO
 
 Every commit must include a Developer Certificate of Origin sign-off:

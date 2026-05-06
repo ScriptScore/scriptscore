@@ -34,7 +34,7 @@ npm run build
 ```bash
 cd desktop/src-tauri
 cargo fmt --check
-cargo clippy --all-targets --all-features -- -D warnings
+cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --all-targets
 ```
 
