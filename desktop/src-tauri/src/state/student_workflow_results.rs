@@ -1260,3 +1260,619 @@ fn highlight_span_from_value(row: &Value) -> Option<StudentWorkflowHighlightSpan
         text: row.get("text")?.as_str()?.to_string(),
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use serde_json::{json, Value};
+
+    use super::*;
+    use crate::models::{
+        ProjectConfig, ProjectSummary, QuestionAnalysisState, QuestionRecord, RubricCriterion,
+        RubricState, StudentWorkflowDetectRegion, TemplatePageArtifactSummary,
+        TemplateQuestionRegion, WorkerJobResult,
+    };
+
+    fn completed_with_data(data: Value) -> CompletedWorkerJob {
+        CompletedWorkerJob {
+            job_id: "job-1".into(),
+            result: WorkerJobResult {
+                terminal_type: "job_finished".into(),
+                terminal_payload: json!({}),
+                envelope: json!({ "data": data }),
+                events: Vec::new(),
+            },
+        }
+    }
+
+    fn workflow_question(question_id: &str, question_number: i64) -> QuestionRecord {
+        QuestionRecord {
+            question_id: question_id.into(),
+            question_number,
+            page_number: question_number,
+            max_points: Some(5),
+            text: format!("Question {question_number}"),
+            baseline_pdf_text: format!("Baseline {question_number}"),
+            region: Some(TemplateQuestionRegion {
+                x: 10 * question_number,
+                y: 20 * question_number,
+                width: 100,
+                height: 50,
+            }),
+            source_artifact_id: None,
+            image_path: Some(format!("/tmp/template-{question_id}.png")),
+            analysis: QuestionAnalysisState {
+                question_text_clean: Some(format!("Clean question {question_number}")),
+                question_context: Some("Show your work".into()),
+                ..QuestionAnalysisState::default()
+            },
+            rubric: RubricState {
+                criteria: vec![
+                    RubricCriterion {
+                        criterion_id: format!("{question_id}-c1"),
+                        label: "Accuracy".into(),
+                        points: 3,
+                        partial_credit_guidance: "Award for correct answer".into(),
+                        source: "manual".into(),
+                    },
+                    RubricCriterion {
+                        criterion_id: format!("{question_id}-c2"),
+                        label: "Reasoning".into(),
+                        points: 2,
+                        partial_credit_guidance: "Award for explanation".into(),
+                        source: "manual".into(),
+                    },
+                ],
+                ..RubricState::default()
+            },
+        }
+    }
+
+    fn workspace() -> ExamWorkspaceState {
+        ExamWorkspaceState {
+            project: ProjectSummary {
+                project_id: "project-1".into(),
+                display_name: "Midterm".into(),
+                subject: Some("Chemistry".into()),
+                course_code: None,
+                lms_course_id: None,
+                project_path: "/tmp/project".into(),
+                created_at: "0".into(),
+                updated_at: "0".into(),
+            },
+            status: "ready".into(),
+            status_label: "Ready".into(),
+            failure_message: None,
+            template_preview_artifacts: vec![
+                TemplatePageArtifactSummary {
+                    artifact_id: "page-1".into(),
+                    page_number: 1,
+                    image_path: "/tmp/template-page-1.png".into(),
+                    label: "Page 1".into(),
+                },
+                TemplatePageArtifactSummary {
+                    artifact_id: "page-2".into(),
+                    page_number: 2,
+                    image_path: "/tmp/template-page-2.png".into(),
+                    label: "Page 2".into(),
+                },
+            ],
+            aruco_status: Default::default(),
+            questions: vec![workflow_question("q1", 1), workflow_question("q2", 2)],
+            redaction_regions: Vec::new(),
+            warnings: Vec::new(),
+            can_approve: false,
+            can_approve_rubric: false,
+            project_config: ProjectConfig::default(),
+            student_roster: Vec::new(),
+            student_intake: Default::default(),
+            student_workflow: Default::default(),
+            moderation_state: Default::default(),
+            results_lms_state: Default::default(),
+            results_lms_rows: Vec::new(),
+            results_lms_metrics: None,
+            results_lms_review_summary: None,
+            workflow_stage: String::new(),
+            workflow_label: String::new(),
+        }
+    }
+
+    fn submission() -> StudentWorkflowSubmission {
+        StudentWorkflowSubmission {
+            student_ref: "student-1".into(),
+            canonical_pdf_path: "/tmp/student-1.pdf".into(),
+            page_count: 2,
+            stage: "detect".into(),
+            latest_job_id: None,
+            failure_message: None,
+            warnings: Vec::new(),
+            page_artifacts: vec![
+                StudentWorkflowPage {
+                    page_number: 1,
+                    image_path: "/tmp/student-page-1.png".into(),
+                    source_pdf_path: Some("/tmp/student-1.pdf".into()),
+                    ocr_metadata_path: None,
+                },
+                StudentWorkflowPage {
+                    page_number: 2,
+                    image_path: "/tmp/student-page-2.png".into(),
+                    source_pdf_path: Some("/tmp/student-1.pdf".into()),
+                    ocr_metadata_path: None,
+                },
+            ],
+            alignment_pages: vec![StudentWorkflowAlignmentPage {
+                page_number: 1,
+                confidence: Some(0.98),
+                low_confidence: false,
+                review_exempt: false,
+                review_exempt_reason: None,
+                question_count: 1,
+                transform: StudentWorkflowTransform {
+                    rotation: 1.0,
+                    scale: 0.9,
+                    translate_x: 2.0,
+                    translate_y: 3.0,
+                },
+                warnings: Vec::new(),
+            }],
+            detect_review: None,
+            answers: Vec::new(),
+        }
+    }
+
+    fn answer(question_id: &str, verified: bool) -> StudentWorkflowAnswer {
+        StudentWorkflowAnswer {
+            question_id: question_id.into(),
+            question_number: if question_id == "q1" { 1 } else { 2 },
+            crop_image_path: Some(format!("/tmp/{question_id}.png")),
+            pii_prescreen: None,
+            manual_grading_required: false,
+            manual_grading_reason: None,
+            moderation_eligible: false,
+            parse_status: "ok".into(),
+            parse_confidence: None,
+            parse_confidence_source: None,
+            raw_parsed_text: None,
+            verified_text: Some(format!("answer for {question_id}")),
+            review_required: false,
+            verified,
+            stale: false,
+            grading_status: "not_started".into(),
+            grading_confidence: None,
+            grading_confidence_reason: None,
+            question_max_points: Some(5),
+            total_points_awarded: None,
+            feedback_text: None,
+            criterion_results: Vec::new(),
+            highlights: Vec::new(),
+            warnings: Vec::new(),
+        }
+    }
+
+    fn question_by_id(workspace: &ExamWorkspaceState) -> HashMap<String, &QuestionRecord> {
+        workspace
+            .questions
+            .iter()
+            .map(|question| (question.question_id.clone(), question))
+            .collect()
+    }
+
+    #[test]
+    fn parse_alignment_pages_handles_success_failed_and_missing_transform() {
+        let completed = completed_with_data(json!({
+            "alignment_results": [
+                {
+                    "page_number": 1,
+                    "status": "ok",
+                    "confidence": 0.91,
+                    "transform": {
+                        "rotation": 1.5,
+                        "scale": 0.99,
+                        "translate_x": 4.0,
+                        "translate_y": -2.0
+                    }
+                },
+                {
+                    "page_number": 2,
+                    "status": "failed"
+                }
+            ]
+        }));
+
+        let pages = parse_alignment_pages(&completed).expect("alignment pages should parse");
+
+        assert_eq!(pages.len(), 2);
+        assert_eq!(pages[0].transform.rotation, 1.5);
+        assert!(pages[1].low_confidence);
+        assert_eq!(pages[1].transform.scale, 1.0);
+
+        let missing_transform = completed_with_data(json!({
+            "alignment_results": [
+                {
+                    "page_number": 1,
+                    "status": "ok"
+                }
+            ]
+        }));
+        assert!(parse_alignment_pages(&missing_transform)
+            .expect_err("non-failed rows require transform")
+            .to_string()
+            .contains("missing transform"));
+    }
+
+    #[test]
+    fn canonicalize_targets_and_page_results_preserve_pdf_and_ocr_metadata() {
+        let workspace = workspace();
+        let intake = crate::models::StudentIntakeSummary {
+            student_ref: "student-1".into(),
+            local_display_name: None,
+            canonical_pdf_path: "/tmp/student-1.pdf".into(),
+            ingest_status: "ready".into(),
+            page_count: 2,
+            exam_page_paths: vec!["/tmp/raw-1.png".into(), "/tmp/raw-2.png".into()],
+            warnings: Vec::new(),
+            binding_token_hex: None,
+        };
+        let mut submission = submission();
+
+        let targets = build_canonicalize_targets(&workspace, &intake, &submission)
+            .expect("canonical targets should build");
+        assert_eq!(targets[0]["page"]["image_path"], "/tmp/raw-1.png");
+        assert_eq!(
+            targets[0]["template_page"]["image_path"],
+            "/tmp/template-page-1.png"
+        );
+
+        let data = json!({
+            "canonicalize_results": [
+                {
+                    "status": "ok",
+                    "output_page": {
+                        "page_number": 1,
+                        "image_path": "/tmp/canonical-1.png",
+                        "source_pdf_path": "/tmp/student-1.pdf"
+                    }
+                },
+                {
+                    "status": "failed",
+                    "output_page": {
+                        "page_number": 2,
+                        "image_path": "/tmp/ignored.png"
+                    }
+                }
+            ]
+        });
+        let pages = parse_canonicalized_pages(data.as_object().unwrap())
+            .expect("canonicalized pages should parse");
+        assert_eq!(pages.len(), 1);
+        assert_eq!(
+            pages[0].source_pdf_path.as_deref(),
+            Some("/tmp/student-1.pdf")
+        );
+
+        submission.page_artifacts = pages;
+        apply_detect_page_ocr_results(
+            &mut submission,
+            json!({
+                "page_ocr_results": [
+                    {"page_number": 1, "ocr_metadata_path": "/tmp/ocr-1.json"}
+                ]
+            })
+            .as_object()
+            .unwrap(),
+        )
+        .expect("ocr metadata should apply");
+        assert_eq!(
+            submission.page_artifacts[0].ocr_metadata_path.as_deref(),
+            Some("/tmp/ocr-1.json")
+        );
+    }
+
+    #[test]
+    fn detect_targets_crop_targets_and_review_fallbacks_are_built() {
+        let workspace = workspace();
+        let submission = submission();
+        let detect_targets =
+            build_detect_targets(&workspace, &submission).expect("detect targets should build");
+        assert_eq!(detect_targets.len(), 2);
+        assert_eq!(detect_targets[0]["question_hints"][0]["question_id"], "q1");
+        assert_eq!(
+            detect_targets[0]["page"]["source_pdf_path"],
+            "/tmp/student-1.pdf"
+        );
+
+        let detect_data = json!({
+            "detect_results": [
+                {
+                    "student_ref": "student-1",
+                    "question_id": "q1",
+                    "page_number": 1,
+                    "status": "ok",
+                    "region_source": "ocr_refined",
+                    "region": {
+                        "x": 1,
+                        "y": 2,
+                        "width": 30,
+                        "height": 40,
+                        "units": "rendered_page_pixels"
+                    }
+                },
+                {
+                    "question_id": "q2",
+                    "page_number": 2,
+                    "status": "warning",
+                    "warnings": [{"code": "low_confidence", "message": "Review"}]
+                }
+            ]
+        });
+
+        let crop_targets =
+            build_crop_targets(detect_data.as_object().unwrap()).expect("crop targets");
+        assert_eq!(crop_targets.len(), 1);
+        assert_eq!(crop_targets[0]["student_ref"], "student-1");
+
+        let mut review =
+            build_detect_review(&workspace, &submission, detect_data.as_object().unwrap())
+                .expect("review should build")
+                .expect("one row needs review");
+        assert_eq!(review.trusted_crop_targets.len(), 1);
+        assert_eq!(review.pending_rows[0].template_region.x, 20);
+        assert_eq!(
+            review.pending_rows[0].warnings[0].code.as_deref(),
+            Some("low_confidence")
+        );
+
+        assert!(crop_targets_from_detect_review(&review, "student-1")
+            .expect_err("missing resolved region should fail")
+            .to_string()
+            .contains("missing a resolved detect region"));
+        review.pending_rows[0].resolved_region = Some(StudentWorkflowDetectRegion {
+            x: 4,
+            y: 5,
+            width: 60,
+            height: 70,
+            units: "rendered_page_pixels".into(),
+        });
+        let resolved =
+            crop_targets_from_detect_review(&review, "student-1").expect("resolved targets");
+        assert_eq!(resolved.len(), 2);
+        assert_eq!(resolved[1]["region"]["width"], 60);
+
+        let invalid = StudentWorkflowDetectRegion {
+            x: 0,
+            y: 0,
+            width: 0,
+            height: 1,
+            units: "rendered_page_pixels".into(),
+        };
+        assert!(validate_detect_region(&invalid)
+            .expect_err("zero width should fail")
+            .to_string()
+            .contains("positive size"));
+    }
+
+    #[test]
+    fn pii_results_seed_answers_and_parse_targets_skip_safe_prescreen() {
+        let workspace = workspace();
+        let crop_rows = vec![
+            json!({
+                "question_id": "q2",
+                "status": "ok",
+                "question_crop_path": "/tmp/q2.png"
+            }),
+            json!({
+                "question_id": "q1",
+                "status": "failed",
+                "warnings": [{"code": "crop_error", "message": "Could not crop"}]
+            }),
+        ];
+        let pii_data = json!({
+            "pii_results": [
+                {
+                    "question_id": "q2",
+                    "status": "ok",
+                    "contains_handwriting": "no",
+                    "contains_pii": false,
+                    "pii_types_detected": []
+                }
+            ]
+        });
+        let answers =
+            build_answers_from_pii_results(&workspace, &crop_rows, pii_data.as_object().unwrap())
+                .expect("answers should seed");
+
+        assert_eq!(answers[0].question_id, "q1");
+        assert_eq!(
+            answers[0].manual_grading_reason.as_deref(),
+            Some("crop_failed")
+        );
+        assert_eq!(answers[1].question_id, "q2");
+        assert!(!answers[1].manual_grading_required);
+        assert_eq!(answers[1].parse_status, "not_started");
+
+        let mut submission = submission();
+        submission.answers = answers;
+        let parse_targets = build_parse_targets(
+            &workspace,
+            &submission,
+            &[json!({
+                "question_id": "q2",
+                "status": "ok",
+                "question_crop_path": "/tmp/q2.png"
+            })],
+        )
+        .expect("parse target should build");
+        assert_eq!(parse_targets[0]["student_ref"], "student-1");
+        assert_eq!(parse_targets[0]["pii_prescreen"]["status"], "ok");
+        assert_eq!(
+            parse_targets[0]["parse_question_context"]["question_text_clean"],
+            "Clean question 2"
+        );
+    }
+
+    #[test]
+    fn parse_results_update_review_and_verified_state() {
+        let mut submission = submission();
+        submission.answers = vec![answer("q1", false), answer("q2", false)];
+        let parse_data = json!({
+            "parse_results": [
+                {
+                    "question_id": "q1",
+                    "status": "warning",
+                    "confidence": "low",
+                    "confidence_source": "handwriting",
+                    "parsed_text": "needs review"
+                },
+                {
+                    "question_id": "q2",
+                    "status": "ok",
+                    "confidence": "high"
+                }
+            ]
+        });
+
+        merge_parse_results_into_answers(&mut submission, parse_data.as_object().unwrap())
+            .expect("parse rows should merge");
+
+        assert!(submission.answers[0].review_required);
+        assert!(!submission.answers[0].verified);
+        assert_eq!(
+            submission.answers[0].verified_text.as_deref(),
+            Some("needs review")
+        );
+        assert!(!submission.answers[1].review_required);
+        assert!(submission.answers[1].verified);
+        assert_eq!(submission.answers[1].verified_text.as_deref(), Some(""));
+    }
+
+    #[test]
+    fn preliminary_final_feedback_and_markup_rows_shape_answer_state() {
+        let workspace = workspace();
+        let question_by_id = question_by_id(&workspace);
+        let mut submission = submission();
+        submission.answers = vec![answer("q1", true), answer("q2", false)];
+        let preliminary_rows = vec![
+            json!({
+                "question_id": "q1",
+                "criterion_index": 0,
+                "points_awarded": 2,
+                "rationale": "Mostly correct",
+                "confidence": "high",
+                "confidence_reason": "Clear answer"
+            }),
+            json!({
+                "question_id": "q1",
+                "criterion_index": 1,
+                "points_awarded": 1,
+                "rationale": "Some reasoning",
+                "confidence": "low",
+                "confidence_reason": "Brief explanation"
+            }),
+        ];
+
+        apply_preliminary_confidence_to_answers(&mut submission, &preliminary_rows)
+            .expect("preliminary confidence should apply");
+        assert_eq!(
+            submission.answers[0].grading_confidence.as_deref(),
+            Some("low")
+        );
+        assert_eq!(
+            submission.answers[0].grading_confidence_reason.as_deref(),
+            Some("Brief explanation")
+        );
+
+        let score_requests =
+            build_preliminary_answer_score_requests(&workspace, &submission, &question_by_id)
+                .expect("score requests should build");
+        assert_eq!(score_requests.len(), 1);
+        assert_eq!(score_requests[0]["subject"], "Chemistry");
+        assert_eq!(score_requests[0]["rubric_criteria"][0]["label"], "Accuracy");
+
+        let final_rows = final_rows_from_preliminary(
+            &workspace,
+            &submission,
+            &question_by_id,
+            &preliminary_rows,
+        )
+        .expect("final rows should build");
+        assert_eq!(final_rows[0]["total_points_awarded"], 3);
+        assert_eq!(final_rows[0]["question_max_points"], 5);
+
+        let feedback_request = feedback_request_json(&final_rows[0]);
+        assert_eq!(feedback_request["student_answer"], "answer for q1");
+        assert_eq!(
+            feedback_request["criterion_results"][0]["rationale"],
+            "Mostly correct"
+        );
+
+        apply_feedback_and_markup(
+            &mut submission,
+            final_rows,
+            &[json!({
+                "question_id": "q1",
+                "feedback_text": "Good structure."
+            })],
+            &[json!({
+                "question_id": "q1",
+                "highlights": [
+                    {
+                        "kind": "strength",
+                        "start_char": 0,
+                        "end_char": 4,
+                        "text": "Good"
+                    }
+                ]
+            })],
+        )
+        .expect("feedback and markup should apply");
+
+        assert_eq!(submission.answers[0].grading_status, "draft_ready");
+        assert_eq!(submission.answers[0].total_points_awarded, Some(3));
+        assert_eq!(submission.answers[0].criterion_results.len(), 2);
+        assert_eq!(
+            submission.answers[0].feedback_text.as_deref(),
+            Some("Good structure.")
+        );
+        assert_eq!(submission.answers[0].highlights[0].kind, "strength");
+        assert_eq!(submission.answers[1].grading_status, "not_started");
+    }
+
+    #[test]
+    fn manual_pii_block_and_aggregate_helpers_cover_edge_cases() {
+        let workspace = workspace();
+        let warning = WorkspaceWarning {
+            code: Some("pii_prescreen_unavailable".into()),
+            message: "Prescreen unavailable".into(),
+            scope: Some("answer".into()),
+        };
+        let answers = build_answers_for_manual_pii_block(
+            &workspace,
+            &[json!({
+                "question_id": "q1",
+                "status": "ok",
+                "question_crop_path": "/tmp/q1.png"
+            })],
+            warning,
+        )
+        .expect("manual pii block answers should build");
+        assert_eq!(
+            answers[0].manual_grading_reason.as_deref(),
+            Some("pii_ambiguous")
+        );
+        assert_eq!(
+            answers[0].warnings[0].code.as_deref(),
+            Some("pii_prescreen_unavailable")
+        );
+
+        let rows = [
+            json!({"confidence": "medium", "confidence_reason": "usable"}),
+            json!({"confidence": "nonsense", "confidence_reason": "ignored"}),
+            json!({"confidence": "low", "confidence_reason": "weak evidence"}),
+        ];
+        let refs = rows.iter().collect::<Vec<_>>();
+        let (confidence, reason) = aggregate_preliminary_confidence(&refs);
+        assert_eq!(confidence.as_deref(), Some("low"));
+        assert_eq!(reason.as_deref(), Some("weak evidence"));
+    }
+}

@@ -934,17 +934,21 @@ mod tests {
     use rusqlite::Connection;
 
     use crate::models::{
-        AppSettings, InstructorProfile, LmsUploadAttemptResult, LmsUploadMode,
-        LmsUploadPublishOutcome, LmsUploadStudentResult, LmsUploadStudentStatus, ResultsLmsState,
-        ResultsLmsTarget, RuntimeJobEvent, WorkerStatus,
+        AppSettings, ExamWorkspaceState, InstructorProfile, LmsRosterCacheSnapshot,
+        LmsRosterCacheStatus, LmsUploadAttemptResult, LmsUploadMode, LmsUploadPublishOutcome,
+        LmsUploadStudentResult, LmsUploadStudentStatus, ProjectConfig, ProjectSummary,
+        ResultsLmsState, ResultsLmsTarget, RuntimeJobEvent, StudentIntakeState, StudentRosterRow,
+        StudentWorkflowState, WorkerStatus,
     };
     use crate::test_support::{lock_env_vars, EnvVarGuard};
 
     use super::{
-        apply_published_asset_bindings, build_upload_preparation_row,
+        apply_published_asset_bindings, build_upload_attempt, build_upload_preparation_row,
         emit_results_lms_upload_batch_failed, emit_results_lms_upload_batch_started,
         emit_results_lms_upload_student_finished, emit_results_lms_upload_student_started,
-        sync_results_lms_assignment_context, trim_upload_attempt_history, validate_retry_target,
+        normalize_requested_student_refs, resolve_transient_user_ids,
+        sync_results_lms_assignment_context, tracked_upload_student_refs,
+        trim_upload_attempt_history, validate_retry_target, validate_roster_cache,
         UploadPreparationContext,
     };
     use std::collections::HashMap;
@@ -1002,6 +1006,61 @@ mod tests {
         crate::project_store::save_project_config(&transaction, &project_config)
             .expect("config should save");
         transaction.commit().expect("transaction should commit");
+    }
+
+    fn workspace_for_lms(project_path: &str, course_id: &str) -> ExamWorkspaceState {
+        ExamWorkspaceState {
+            project: ProjectSummary {
+                project_id: "proj_1".into(),
+                display_name: "Results LMS".into(),
+                subject: None,
+                course_code: None,
+                lms_course_id: Some(course_id.into()),
+                project_path: project_path.into(),
+                created_at: "1".into(),
+                updated_at: "1".into(),
+            },
+            status: "ready".into(),
+            status_label: "Ready".into(),
+            failure_message: None,
+            template_preview_artifacts: Vec::new(),
+            aruco_status: Default::default(),
+            questions: Vec::new(),
+            redaction_regions: Vec::new(),
+            warnings: Vec::new(),
+            can_approve: false,
+            can_approve_rubric: false,
+            project_config: ProjectConfig {
+                lms_course_id: Some(course_id.into()),
+                ..ProjectConfig::default()
+            },
+            student_roster: Vec::new(),
+            student_intake: StudentIntakeState::not_started(),
+            student_workflow: StudentWorkflowState::not_started(),
+            moderation_state: Default::default(),
+            results_lms_state: ResultsLmsState::default(),
+            results_lms_rows: Vec::new(),
+            results_lms_metrics: None,
+            results_lms_review_summary: None,
+            workflow_stage: "ready".into(),
+            workflow_label: "Ready".into(),
+        }
+    }
+
+    fn ready_roster_cache(
+        project_path: &str,
+        provider: &str,
+        course_id: &str,
+    ) -> LmsRosterCacheSnapshot {
+        LmsRosterCacheSnapshot {
+            status: LmsRosterCacheStatus::Ready,
+            project_path: Some(project_path.into()),
+            lms_provider: Some(provider.into()),
+            course_id: Some(course_id.into()),
+            rows: Vec::new(),
+            last_error: None,
+            idle_reason: None,
+        }
     }
 
     #[test]
@@ -1165,6 +1224,207 @@ mod tests {
             .as_deref()
             .unwrap()
             .contains("graded submission"));
+    }
+
+    #[test]
+    fn validate_roster_cache_rejects_not_ready_project_course_and_provider_mismatches() {
+        let workspace = workspace_for_lms("/tmp/project-a", "course-a");
+        let ready = ready_roster_cache("/tmp/project-a", "canvas", "course-a");
+        let selected_target = ResultsLmsTarget {
+            provider: "canvas".into(),
+            course_id: "course-a".into(),
+            assignment_id: "assignment-1".into(),
+        };
+        validate_roster_cache(&ready, &workspace, &selected_target)
+            .expect("matching ready roster cache should validate");
+
+        let mut not_ready = ready.clone();
+        not_ready.status = LmsRosterCacheStatus::Loading;
+        assert!(
+            validate_roster_cache(&not_ready, &workspace, &selected_target)
+                .unwrap_err()
+                .to_string()
+                .contains("not ready")
+        );
+
+        let wrong_project = ready_roster_cache("/tmp/project-b", "canvas", "course-a");
+        assert!(
+            validate_roster_cache(&wrong_project, &workspace, &selected_target)
+                .unwrap_err()
+                .to_string()
+                .contains("different project")
+        );
+
+        let wrong_course = ready_roster_cache("/tmp/project-a", "canvas", "course-b");
+        assert!(
+            validate_roster_cache(&wrong_course, &workspace, &selected_target)
+                .unwrap_err()
+                .to_string()
+                .contains("selected course")
+        );
+
+        let wrong_provider = ready_roster_cache("/tmp/project-a", "schoology", "course-a");
+        assert!(
+            validate_roster_cache(&wrong_provider, &workspace, &selected_target)
+                .unwrap_err()
+                .to_string()
+                .contains("selected provider")
+        );
+    }
+
+    #[test]
+    fn resolve_transient_user_ids_maps_roster_tokens_to_persisted_student_refs() {
+        let _guard = lock_env_vars();
+        let secret = vec![7_u8; 32];
+        crate::secrets::__test_set_binding_hmac_secret_bytes(secret.clone());
+        let selected_target = ResultsLmsTarget {
+            provider: "canvas".into(),
+            course_id: "course-a".into(),
+            assignment_id: "assignment-1".into(),
+        };
+        let token_context = crate::binding_token::canvas_course_context(&selected_target.course_id);
+        let matched_token = crate::binding_token::compute_binding_token_hex(
+            &secret,
+            &token_context,
+            "42",
+            crate::binding_token::TOKEN_VERSION,
+        )
+        .expect("binding token should compute");
+        let mut workspace = workspace_for_lms("/tmp/project-a", "course-a");
+        workspace.student_roster = vec![
+            StudentRosterRow {
+                student_ref: "student_1".into(),
+                binding_token_hex: matched_token,
+            },
+            StudentRosterRow {
+                student_ref: "student_2".into(),
+                binding_token_hex: "unmatched".into(),
+            },
+        ];
+        let mut roster_cache = ready_roster_cache("/tmp/project-a", "canvas", "course-a");
+        roster_cache.rows = vec![crate::lms::LmsRosterRow {
+            user_id: "42".into(),
+            display_name: "Amy First".into(),
+            sort_key: "first, amy".into(),
+            email: None,
+            login_id: None,
+        }];
+
+        let resolved = resolve_transient_user_ids(
+            &AppSettings::default(),
+            &selected_target,
+            &workspace,
+            &roster_cache,
+        )
+        .expect("transient user ids should resolve");
+
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(resolved.get("student_1").map(String::as_str), Some("42"));
+        assert!(!resolved.contains_key("student_2"));
+        crate::secrets::__test_clear_binding_hmac_secret_cache();
+    }
+
+    #[test]
+    fn normalize_requested_student_refs_deduplicates_trims_and_rejects_unknown_rows() {
+        let rows = vec![
+            result_row("student_1", true, false, Some("fp-1")),
+            result_row("student_2", true, false, Some("fp-2")),
+        ];
+
+        let all = normalize_requested_student_refs(&[], &rows).expect("empty means all selected");
+        assert!(all.is_empty());
+
+        let requested_refs = vec![
+            " student_1 ".to_string(),
+            "".to_string(),
+            "student_1".to_string(),
+            "student_2".to_string(),
+        ];
+        let requested = normalize_requested_student_refs(&requested_refs, &rows)
+            .expect("known requested refs should normalize");
+
+        assert_eq!(requested.len(), 2);
+        assert!(requested.contains("student_1"));
+        assert!(requested.contains("student_2"));
+        assert!(
+            normalize_requested_student_refs(&["missing".to_string()], &rows)
+                .unwrap_err()
+                .to_string()
+                .contains("Result row 'missing' was not found")
+        );
+    }
+
+    #[test]
+    fn upload_attempt_counts_ready_uploaded_and_failed_results() {
+        let selected_target = ResultsLmsTarget {
+            provider: "canvas".into(),
+            course_id: "course-a".into(),
+            assignment_id: "assignment-1".into(),
+        };
+        let attempt = build_upload_attempt(
+            &selected_target,
+            LmsUploadMode::DryRun,
+            "1".into(),
+            "2".into(),
+            vec![
+                LmsUploadStudentResult {
+                    student_ref: "student_1".into(),
+                    result_fingerprint: "fp-1".into(),
+                    status: LmsUploadStudentStatus::Ready,
+                    sanitized_error: None,
+                },
+                LmsUploadStudentResult {
+                    student_ref: "student_2".into(),
+                    result_fingerprint: "fp-2".into(),
+                    status: LmsUploadStudentStatus::Uploaded,
+                    sanitized_error: None,
+                },
+                LmsUploadStudentResult {
+                    student_ref: "student_3".into(),
+                    result_fingerprint: "fp-3".into(),
+                    status: LmsUploadStudentStatus::Failed,
+                    sanitized_error: Some("failed".into()),
+                },
+            ],
+        );
+
+        assert_eq!(attempt.mode, LmsUploadMode::DryRun);
+        assert_eq!(attempt.attempted_count, 3);
+        assert_eq!(attempt.success_count, 2);
+        assert_eq!(attempt.failure_count, 1);
+    }
+
+    #[test]
+    fn tracked_upload_student_refs_merges_sort_and_deduplicates_publish_and_preflight_refs() {
+        let preparation_rows = vec![
+            crate::models::LmsUploadPreparationRow {
+                student_ref: "student_2".into(),
+                ..Default::default()
+            },
+            crate::models::LmsUploadPreparationRow {
+                student_ref: "student_1".into(),
+                ..Default::default()
+            },
+        ];
+        let preflight_failures = vec![
+            LmsUploadStudentResult {
+                student_ref: "student_2".into(),
+                result_fingerprint: "fp-2".into(),
+                status: LmsUploadStudentStatus::Failed,
+                sanitized_error: Some("failed".into()),
+            },
+            LmsUploadStudentResult {
+                student_ref: "student_3".into(),
+                result_fingerprint: "fp-3".into(),
+                status: LmsUploadStudentStatus::Failed,
+                sanitized_error: Some("failed".into()),
+            },
+        ];
+
+        assert_eq!(
+            tracked_upload_student_refs(&preparation_rows, &preflight_failures),
+            vec!["student_1", "student_2", "student_3"]
+        );
     }
 
     #[test]

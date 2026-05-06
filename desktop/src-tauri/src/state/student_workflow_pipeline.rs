@@ -2861,14 +2861,20 @@ fn emit_workflow_state_updated(
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_alignment_results, apply_detect_batch_results, apply_parse_batch_results,
-        build_crop_targets, build_detect_review, crop_targets_for_cli,
-        emit_ready_for_empty_batch_continuation, ensure_submission_row, failed_resume_point,
-        filtered_completed_by_student, intake_map, mark_refs_failed_with_message,
-        mark_refs_stopped_and_emit, preliminary_grading_request_payload,
-        preliminary_grading_runtime_config, resolve_pii_model_dir_candidates, save_workflow_state,
-        save_workflow_state_and_emit, split_detect_refs_by_reusable_crop_targets,
-        FailedResumePoint,
+        apply_alignment_results, apply_canonicalize_batch_results, apply_detect_batch_results,
+        apply_parse_batch_results, apply_pii_batch_results, build_batch_answer_score_requests,
+        build_canonicalize_batch_targets, build_crop_targets, build_detect_review,
+        classify_batch_resume_points, completed_was_cancelled, crop_rows_from_answers,
+        crop_targets_for_cli, emit_ready_for_empty_batch_continuation, ensure_submission_row,
+        failed_resume_point, feedback_request_rows, filtered_completed_by_student,
+        finish_batch_grading, intake_map, mark_refs_failed_with_message,
+        mark_refs_stopped_and_emit, persist_batch_feedback_rows, persist_batch_preliminary_rows,
+        pii_identity_unavailable_warning, preliminary_grading_request_payload,
+        preliminary_grading_runtime_config, prepare_pii_batch_inputs, record_submission_job_id,
+        reset_submission_for_restart, resolve_pii_model_dir_candidates, rows_for_student,
+        sanitized_pii_batch_request_payload, sanitized_pii_request_payload, save_workflow_state,
+        save_workflow_state_and_emit, settle_empty_grading_refs, sorted_keys,
+        split_detect_refs_by_reusable_crop_targets, FailedResumePoint,
     };
     use crate::models::{
         AppSettings, ExamWorkspaceState, InstructorProfile, ProjectConfig, ProjectSummary,
@@ -2876,13 +2882,15 @@ mod tests {
         StudentWorkflowAlignmentPage, StudentWorkflowAnswer, StudentWorkflowDetectRegion,
         StudentWorkflowDetectReview, StudentWorkflowDetectReviewRow, StudentWorkflowPage,
         StudentWorkflowState, StudentWorkflowSubmission, StudentWorkflowTransform,
-        TemplateQuestionRegion, WorkerJobResult, WorkerStatus,
+        TemplatePageArtifactSummary, TemplateQuestionRegion, WorkerJobResult, WorkerStatus,
+        WorkspaceWarning,
     };
     use crate::project_store;
     use crate::test_support::{lock_env_vars, EnvVarGuard};
     use crate::worker::CompletedWorkerJob;
     use image::{ImageBuffer, Rgba};
     use serde_json::json;
+    use std::collections::HashMap;
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::sync::{Arc, Mutex};
@@ -3003,6 +3011,33 @@ mod tests {
         }
     }
 
+    fn alignment_page(page_number: i64) -> StudentWorkflowAlignmentPage {
+        StudentWorkflowAlignmentPage {
+            page_number,
+            confidence: Some(0.94),
+            low_confidence: false,
+            review_exempt: false,
+            review_exempt_reason: None,
+            question_count: 1,
+            transform: StudentWorkflowTransform {
+                rotation: 1.5,
+                scale: 0.98,
+                translate_x: 2.0,
+                translate_y: -3.0,
+            },
+            warnings: Vec::new(),
+        }
+    }
+
+    fn workflow_page(student_ref: &str, page_number: i64) -> StudentWorkflowPage {
+        StudentWorkflowPage {
+            page_number,
+            image_path: format!("/tmp/{student_ref}-page-{page_number}.png"),
+            source_pdf_path: Some(format!("/tmp/{student_ref}.pdf")),
+            ocr_metadata_path: None,
+        }
+    }
+
     fn minimal_workspace_with_question() -> ExamWorkspaceState {
         ExamWorkspaceState {
             project: ProjectSummary {
@@ -3054,6 +3089,25 @@ mod tests {
             workflow_stage: "ready".into(),
             workflow_label: "Ready".into(),
         }
+    }
+
+    fn minimal_workspace_with_template_pages() -> ExamWorkspaceState {
+        let mut workspace = minimal_workspace_with_question();
+        workspace.template_preview_artifacts = vec![
+            TemplatePageArtifactSummary {
+                artifact_id: "template-page-1".into(),
+                page_number: 1,
+                image_path: "/tmp/template-1.png".into(),
+                label: "Page 1".into(),
+            },
+            TemplatePageArtifactSummary {
+                artifact_id: "template-page-2".into(),
+                page_number: 2,
+                image_path: "/tmp/template-2.png".into(),
+                label: "Page 2".into(),
+            },
+        ];
+        workspace
     }
 
     fn write_sample_png(path: &Path, width: u32, height: u32) {
@@ -3164,6 +3218,155 @@ mod tests {
             failed_resume_point(&submission),
             FailedResumePoint::AfterParse
         );
+    }
+
+    #[test]
+    fn classify_batch_resume_points_groups_students_by_restart_stage() {
+        let mut from_start = workflow_submission("student_1");
+        let mut after_alignment = workflow_submission("student_2");
+        after_alignment.alignment_pages = vec![alignment_page(1)];
+        let mut after_canonicalize = workflow_submission("student_3");
+        after_canonicalize.alignment_pages = vec![alignment_page(1)];
+        after_canonicalize.page_artifacts = vec![workflow_page("student_3", 1)];
+        let mut after_parse = workflow_submission("student_4");
+        after_parse.answers = vec![answer_seed("q1")];
+        after_parse.answers[0].verified = true;
+        after_parse.answers[0].parse_status = "ok".into();
+        from_start.stage = "failed".into();
+        after_alignment.stage = "failed".into();
+        after_canonicalize.stage = "failed".into();
+        after_parse.stage = "failed".into();
+        let mut state = StudentWorkflowState {
+            status: "attention".into(),
+            latest_job_id: None,
+            submissions: vec![from_start, after_alignment, after_canonicalize, after_parse],
+        };
+
+        let plan = classify_batch_resume_points(
+            &mut state,
+            vec![
+                "student_1".into(),
+                "student_2".into(),
+                "student_3".into(),
+                "student_4".into(),
+            ],
+        )
+        .expect("resume points should classify");
+
+        assert_eq!(plan.from_start, vec!["student_1"]);
+        assert_eq!(plan.after_alignment, vec!["student_2"]);
+        assert_eq!(plan.after_canonicalize, vec!["student_3"]);
+        assert_eq!(plan.after_parse, vec!["student_4"]);
+        let error = match classify_batch_resume_points(&mut state, vec!["missing".into()]) {
+            Ok(_) => panic!("missing submission should fail validation"),
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains("missing"));
+    }
+
+    #[test]
+    fn canonicalize_batch_targets_use_intake_pages_template_pages_and_transforms() {
+        let workspace = minimal_workspace_with_template_pages();
+        let mut intake_by_ref = HashMap::new();
+        intake_by_ref.insert("student_1".to_string(), intake_summary("student_1"));
+        let mut submission = workflow_submission("student_1");
+        submission.alignment_pages = vec![alignment_page(1), alignment_page(2)];
+        let mut state = StudentWorkflowState {
+            status: "running".into(),
+            latest_job_id: None,
+            submissions: vec![submission],
+        };
+
+        let targets = build_canonicalize_batch_targets(
+            &workspace,
+            &intake_by_ref,
+            &mut state,
+            &["student_1".to_string()],
+        )
+        .expect("canonicalize targets should build");
+
+        assert_eq!(targets.len(), 2);
+        assert_eq!(targets[0]["page"]["student_ref"], "student_1");
+        assert_eq!(targets[0]["page"]["source_pdf_path"], "/tmp/student_1.pdf");
+        assert_eq!(
+            targets[0]["template_page"]["image_path"],
+            "/tmp/template-1.png"
+        );
+        assert_eq!(
+            targets[1]["template_page"]["image_path"],
+            "/tmp/template-2.png"
+        );
+        assert_eq!(targets[0]["transform"]["rotation"], json!(1.5));
+
+        let error = build_canonicalize_batch_targets(
+            &workspace,
+            &HashMap::new(),
+            &mut state,
+            &["student_1".to_string()],
+        )
+        .expect_err("missing intake should fail");
+        assert!(error
+            .to_string()
+            .contains("Student intake 'student_1' was missing"));
+    }
+
+    #[test]
+    fn apply_canonicalize_batch_results_continues_complete_and_fails_partial_outputs() {
+        let _guard = lock_env_vars();
+        let test_root = temp_root("scriptscore-canonicalize-batch-results");
+        std::fs::create_dir_all(&test_root).expect("test root should exist");
+        let project_path = create_project(&test_root);
+        let sink = RecordingEventSink::default();
+        let mut complete = workflow_submission("student_1");
+        complete.alignment_pages = vec![alignment_page(1), alignment_page(2)];
+        let mut partial = workflow_submission("student_2");
+        partial.alignment_pages = vec![alignment_page(1), alignment_page(2)];
+        let mut state = StudentWorkflowState {
+            status: "running".into(),
+            latest_job_id: None,
+            submissions: vec![complete, partial],
+        };
+        let refs = vec!["student_1".to_string(), "student_2".to_string()];
+        let completed = CompletedWorkerJob {
+            job_id: "canonicalize-batch".into(),
+            result: WorkerJobResult {
+                terminal_type: "job_finished".into(),
+                terminal_payload: json!({}),
+                envelope: json!({
+                    "data": {
+                        "canonicalize_results": [
+                            {"student_ref": "student_1", "status": "ok", "output_page": {"page_number": 1, "image_path": "/tmp/student_1-1.png", "source_pdf_path": "/tmp/student_1.pdf"}},
+                            {"student_ref": "student_1", "status": "ok", "output_page": {"page_number": 2, "image_path": "/tmp/student_1-2.png", "source_pdf_path": "/tmp/student_1.pdf"}},
+                            {"student_ref": "student_2", "status": "ok", "output_page": {"page_number": 1, "image_path": "/tmp/student_2-1.png", "source_pdf_path": "/tmp/student_2.pdf"}},
+                            {"student_ref": "student_2", "status": "error"}
+                        ]
+                    }
+                }),
+                events: Vec::new(),
+            },
+        };
+
+        let continue_refs =
+            apply_canonicalize_batch_results(&project_path, &sink, &mut state, &refs, &completed)
+                .expect("canonicalize batch should apply");
+
+        assert_eq!(continue_refs, vec!["student_1".to_string()]);
+        assert_eq!(state.submissions[0].stage, "detect");
+        assert_eq!(state.submissions[0].page_artifacts.len(), 2);
+        assert_eq!(
+            state.submissions[0].latest_job_id.as_deref(),
+            Some("canonicalize-batch")
+        );
+        assert_eq!(state.submissions[1].stage, "failed");
+        assert_eq!(
+            state.submissions[1].failure_message.as_deref(),
+            Some("Canonicalize failed for one or more student pages.")
+        );
+        let events = sink.snapshot();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].payload["studentRefs"], json!(refs));
+
+        let _ = std::fs::remove_dir_all(&test_root);
     }
 
     #[test]
@@ -3713,7 +3916,7 @@ mod tests {
         assert_eq!(events[0].payload["studentRefs"], json!(refs));
         assert_eq!(events[0].payload["workflowStatus"], "attention");
 
-        std::fs::remove_dir_all(&test_root).expect("test project should clean up");
+        let _ = std::fs::remove_dir_all(&test_root);
     }
 
     #[test]
@@ -3773,7 +3976,7 @@ mod tests {
         assert!(workflow_state.submissions[2].answers[0].verified);
         assert_eq!(sink.snapshot()[0].payload["workflowStatus"], "attention");
 
-        std::fs::remove_dir_all(&test_root).expect("test project should clean up");
+        let _ = std::fs::remove_dir_all(&test_root);
     }
 
     #[test]
@@ -3807,7 +4010,7 @@ mod tests {
         assert!(matches!(events[1].worker_status, WorkerStatus::Ready));
         assert_eq!(events[1].payload["workflowStatus"], "attention");
 
-        std::fs::remove_dir_all(&test_root).expect("test project should clean up");
+        let _ = std::fs::remove_dir_all(&test_root);
     }
 
     #[test]
@@ -3825,6 +4028,497 @@ mod tests {
         assert_eq!(stripped.len(), 1);
         assert!(stripped[0].get("student_ref").is_none());
         assert_eq!(stripped[0]["question_id"].as_str(), Some("q1"));
+    }
+
+    #[test]
+    fn split_detect_refs_reuses_resolved_review_crop_targets_only() {
+        let mut reusable = workflow_submission("student_1");
+        reusable.stage = "crop".into();
+        reusable.detect_review = Some(StudentWorkflowDetectReview {
+            trusted_crop_targets: vec![json!({
+                "student_ref": "student_1",
+                "question_id": "q_trusted",
+                "page_number": 1,
+                "region": {"x": 1, "y": 2, "width": 3, "height": 4, "units": "rendered_page_pixels"}
+            })],
+            pending_rows: vec![StudentWorkflowDetectReviewRow {
+                question_id: "q_resolved".into(),
+                page_number: 1,
+                source_page_image_path: "/tmp/page.png".into(),
+                template_region: StudentWorkflowDetectRegion {
+                    x: 5,
+                    y: 6,
+                    width: 7,
+                    height: 8,
+                    units: "rendered_page_pixels".into(),
+                },
+                warnings: Vec::new(),
+                resolved_region: Some(StudentWorkflowDetectRegion {
+                    x: 9,
+                    y: 10,
+                    width: 11,
+                    height: 12,
+                    units: "rendered_page_pixels".into(),
+                }),
+            }],
+        });
+        let mut unresolved = workflow_submission("student_2");
+        unresolved.stage = "crop".into();
+        unresolved.detect_review = Some(StudentWorkflowDetectReview {
+            trusted_crop_targets: Vec::new(),
+            pending_rows: vec![StudentWorkflowDetectReviewRow {
+                question_id: "q_pending".into(),
+                page_number: 1,
+                source_page_image_path: "/tmp/page.png".into(),
+                template_region: StudentWorkflowDetectRegion {
+                    x: 1,
+                    y: 1,
+                    width: 2,
+                    height: 2,
+                    units: "rendered_page_pixels".into(),
+                },
+                warnings: Vec::new(),
+                resolved_region: None,
+            }],
+        });
+        let mut fresh_detect = workflow_submission("student_3");
+        fresh_detect.stage = "detect".into();
+        let mut state = StudentWorkflowState {
+            status: "running".into(),
+            latest_job_id: None,
+            submissions: vec![reusable, unresolved, fresh_detect],
+        };
+
+        let split = split_detect_refs_by_reusable_crop_targets(
+            &mut state,
+            &[
+                "student_1".to_string(),
+                "student_2".to_string(),
+                "student_3".to_string(),
+            ],
+        )
+        .expect("detect refs should split");
+
+        assert_eq!(split.detect_refs, vec!["student_2", "student_3"]);
+        let reused = split
+            .crop_targets_by_ref
+            .get("student_1")
+            .expect("resolved review should be reused");
+        assert_eq!(reused.len(), 2);
+        assert_eq!(reused[0]["question_id"], "q_trusted");
+        assert_eq!(reused[1]["question_id"], "q_resolved");
+        assert_eq!(reused[1]["region"]["x"], json!(9));
+    }
+
+    #[test]
+    fn sanitized_pii_batch_payload_keeps_only_student_refs_question_ids_and_counts() {
+        let mut crop_rows = HashMap::new();
+        crop_rows.insert(
+            "student_2".to_string(),
+            vec![
+                json!({"status": "ok", "question_id": "q2", "question_crop_path": "/secret/q2.png"}),
+                json!({"status": "error", "question_id": "q3", "question_crop_path": "/secret/q3.png"}),
+            ],
+        );
+        crop_rows.insert(
+            "student_1".to_string(),
+            vec![json!({"status": "ok", "question_id": "q1", "question_crop_path": "/secret/q1.png"})],
+        );
+
+        let payload = sanitized_pii_batch_request_payload(&crop_rows);
+
+        assert_eq!(payload["pii_runtime"], "local_paddle");
+        assert_eq!(payload["students"][0]["student_ref"], "student_1");
+        assert_eq!(payload["students"][0]["question_ids"], json!(["q1"]));
+        assert_eq!(payload["students"][0]["pii_target_count"], json!(1));
+        assert_eq!(payload["students"][1]["student_ref"], "student_2");
+        assert_eq!(payload["students"][1]["question_ids"], json!(["q2"]));
+        assert!(!payload.to_string().contains("/secret/"));
+    }
+
+    #[test]
+    fn small_pipeline_helpers_reset_filter_record_and_sanitize_payloads() {
+        let warning = WorkspaceWarning {
+            code: Some("intake_warning".into()),
+            message: "Check page order".into(),
+            scope: Some("student".into()),
+        };
+        let intake = StudentIntakeSummary {
+            student_ref: "student_1".into(),
+            local_display_name: Some("Ada Local".into()),
+            canonical_pdf_path: "/new/student.pdf".into(),
+            ingest_status: "ready".into(),
+            page_count: 3,
+            exam_page_paths: vec!["/new/page-1.png".into()],
+            warnings: vec![warning.clone()],
+            binding_token_hex: None,
+        };
+        let mut submission = workflow_submission("student_1");
+        submission.canonical_pdf_path = "/old/student.pdf".into();
+        submission.page_count = 1;
+        submission.stage = "failed".into();
+        submission.latest_job_id = Some("old-job".into());
+        submission.failure_message = Some("old failure".into());
+        submission.warnings = vec![warning];
+        submission.page_artifacts = vec![workflow_page("student_1", 1)];
+        submission.alignment_pages = vec![alignment_page(1)];
+        submission.detect_review = Some(StudentWorkflowDetectReview {
+            pending_rows: Vec::new(),
+            trusted_crop_targets: Vec::new(),
+        });
+        submission.answers = vec![answer_seed("q1")];
+
+        reset_submission_for_restart(&mut submission, &intake);
+
+        assert_eq!(submission.canonical_pdf_path, "/new/student.pdf");
+        assert_eq!(submission.page_count, 3);
+        assert_eq!(submission.stage, "intake_ready");
+        assert_eq!(submission.latest_job_id.as_deref(), Some("old-job"));
+        assert!(submission.failure_message.is_none());
+        assert!(submission.warnings.is_empty());
+        assert!(submission.page_artifacts.is_empty());
+        assert!(submission.alignment_pages.is_empty());
+        assert!(submission.detect_review.is_none());
+        assert!(submission.answers.is_empty());
+
+        let rows = vec![
+            json!({"student_ref": "student_2", "question_id": "q2"}),
+            json!({"student_ref": "student_1", "question_id": "q1"}),
+            json!({"student_ref": "student_1", "question_id": "q3"}),
+            json!({"question_id": "missing_student"}),
+        ];
+        let filtered = rows_for_student(&rows, "student_1");
+        assert_eq!(filtered.len(), 2);
+        assert_eq!(filtered[0]["question_id"], "q1");
+
+        let mut workflow_state = StudentWorkflowState {
+            status: "ready".into(),
+            latest_job_id: None,
+            submissions: vec![workflow_submission("student_1")],
+        };
+        record_submission_job_id(&mut workflow_state, "student_1", "job-123")
+            .expect("job id should record");
+        assert_eq!(
+            workflow_state.submissions[0].latest_job_id.as_deref(),
+            Some("job-123")
+        );
+        assert!(record_submission_job_id(&mut workflow_state, "missing", "job-456").is_err());
+
+        let mut keyed_rows = HashMap::new();
+        keyed_rows.insert("b".to_string(), vec![json!({})]);
+        keyed_rows.insert("a".to_string(), vec![json!({})]);
+        assert_eq!(sorted_keys(&keyed_rows), vec!["a", "b"]);
+
+        let warning = pii_identity_unavailable_warning();
+        assert_eq!(warning.code.as_deref(), Some("pii_identity_unavailable"));
+        assert_eq!(warning.scope.as_deref(), Some("answer"));
+
+        let single_payload = sanitized_pii_request_payload(
+            "student_1",
+            &[
+                json!({"status": "ok", "question_id": "q1", "question_crop_path": "/secret/q1.png"}),
+                json!({"status": "error", "question_id": "q2", "question_crop_path": "/secret/q2.png"}),
+            ],
+        );
+        assert_eq!(single_payload["student_ref"], "student_1");
+        assert_eq!(single_payload["question_ids"], json!(["q1"]));
+        assert_eq!(single_payload["pii_target_count"], json!(1));
+        assert!(!single_payload.to_string().contains("/secret/"));
+
+        let feedback_rows = feedback_request_rows(&[
+            json!({"student_ref": "student_1", "question_id": "q1", "score": 4, "feedback": "keep"}),
+        ]);
+        assert_eq!(feedback_rows.len(), 1);
+        assert_eq!(feedback_rows[0]["student_ref"], "student_1");
+    }
+
+    #[test]
+    fn settle_empty_grading_refs_routes_manual_blocks_and_no_answer_failures() {
+        let _guard = lock_env_vars();
+        let test_root = temp_root("scriptscore-empty-grading-refs");
+        std::fs::create_dir_all(&test_root).expect("test root should exist");
+        let project_path = create_project(&test_root);
+        let sink = RecordingEventSink::default();
+        let mut manual = workflow_submission("student_1");
+        manual.stage = "grading".into();
+        manual.answers = vec![answer_seed("q1")];
+        manual.answers[0].manual_grading_required = true;
+        let mut missing_verified = workflow_submission("student_2");
+        missing_verified.stage = "grading".into();
+        missing_verified.answers = vec![answer_seed("q1")];
+        let mut state = StudentWorkflowState {
+            status: "running".into(),
+            latest_job_id: None,
+            submissions: vec![manual, missing_verified],
+        };
+        let refs = vec!["student_1".to_string(), "student_2".to_string()];
+        let score_requests = refs
+            .iter()
+            .map(|student_ref| (student_ref.clone(), Vec::new()))
+            .collect::<HashMap<_, _>>();
+
+        settle_empty_grading_refs(&project_path, &sink, &mut state, &refs, &score_requests)
+            .expect("empty grading refs should settle");
+
+        assert_eq!(state.submissions[0].stage, "manual_grading");
+        assert_eq!(state.submissions[0].failure_message, None);
+        assert_eq!(state.submissions[1].stage, "failed");
+        assert_eq!(
+            state.submissions[1].failure_message.as_deref(),
+            Some("No verified answers were available for grading.")
+        );
+        assert_eq!(sink.snapshot()[0].payload["workflowStatus"], "attention");
+
+        let _ = std::fs::remove_dir_all(&test_root);
+    }
+
+    #[test]
+    fn completed_was_cancelled_matches_only_cancel_terminal_type() {
+        let cancelled = CompletedWorkerJob {
+            job_id: "job-cancelled".into(),
+            result: WorkerJobResult {
+                terminal_type: "job_cancelled".into(),
+                terminal_payload: json!({}),
+                envelope: json!({"data": {}}),
+                events: Vec::new(),
+            },
+        };
+        let finished = CompletedWorkerJob {
+            job_id: "job-finished".into(),
+            result: WorkerJobResult {
+                terminal_type: "job_finished".into(),
+                terminal_payload: json!({}),
+                envelope: json!({"data": {}}),
+                events: Vec::new(),
+            },
+        };
+
+        assert!(completed_was_cancelled(&cancelled));
+        assert!(!completed_was_cancelled(&finished));
+    }
+
+    #[test]
+    fn pii_batch_preparation_blocks_missing_identity_and_applies_clean_results() {
+        let _guard = lock_env_vars();
+        let test_root = temp_root("scriptscore-pii-batch-prep");
+        std::fs::create_dir_all(&test_root).expect("test root should exist");
+        let project_path = create_project(&test_root);
+        let sink = RecordingEventSink::default();
+        let workspace = minimal_workspace_with_question();
+        let mut state = StudentWorkflowState {
+            status: "running".into(),
+            latest_job_id: None,
+            submissions: vec![
+                workflow_submission("student_1"),
+                workflow_submission("student_2"),
+                workflow_submission("student_3"),
+            ],
+        };
+        for submission in &mut state.submissions {
+            submission.stage = "pii".into();
+        }
+        let crop_rows_by_ref = HashMap::from([
+            (
+                "student_1".to_string(),
+                vec![json!({
+                    "student_ref": "student_1",
+                    "question_id": "q1",
+                    "status": "ok",
+                    "question_crop_path": "/tmp/student_1-q1.png"
+                })],
+            ),
+            (
+                "student_2".to_string(),
+                vec![json!({
+                    "student_ref": "student_2",
+                    "question_id": "q1",
+                    "status": "error"
+                })],
+            ),
+            (
+                "student_3".to_string(),
+                vec![json!({
+                    "student_ref": "student_3",
+                    "question_id": "q1",
+                    "status": "ok",
+                    "question_crop_path": "/tmp/student_3-q1.png"
+                })],
+            ),
+        ]);
+        let trigger_words_by_ref =
+            HashMap::from([("student_3".to_string(), vec!["Ada".to_string()])]);
+
+        let pii_inputs = prepare_pii_batch_inputs(
+            &project_path,
+            &sink,
+            &workspace,
+            &mut state,
+            &trigger_words_by_ref,
+            &crop_rows_by_ref,
+        )
+        .expect("pii batch inputs should prepare");
+
+        assert_eq!(pii_inputs.len(), 1);
+        assert_eq!(pii_inputs[0]["student_ref"], "student_3");
+        assert_eq!(pii_inputs[0]["pii_targets"][0]["question_id"], "q1");
+        assert_eq!(state.submissions[0].stage, "manual_grading");
+        assert_eq!(state.submissions[1].stage, "manual_grading");
+        assert_eq!(
+            state.submissions[0].answers[0]
+                .manual_grading_reason
+                .as_deref(),
+            Some("pii_ambiguous")
+        );
+
+        let completed = CompletedWorkerJob {
+            job_id: "pii-batch".into(),
+            result: WorkerJobResult {
+                terminal_type: "job_finished".into(),
+                terminal_payload: json!({}),
+                envelope: json!({
+                    "data": {
+                        "pii_results": [
+                            {
+                                "student_ref": "student_3",
+                                "question_id": "q1",
+                                "status": "ok",
+                                "contains_handwriting": "no",
+                                "contains_pii": false,
+                                "pii_types_detected": []
+                            }
+                        ]
+                    }
+                }),
+                events: Vec::new(),
+            },
+        };
+
+        let parse_refs = apply_pii_batch_results(
+            &project_path,
+            &sink,
+            &workspace,
+            &mut state,
+            &crop_rows_by_ref,
+            &completed,
+        )
+        .expect("pii results should apply");
+
+        assert_eq!(parse_refs, vec!["student_3"]);
+        assert_eq!(state.submissions[2].stage, "parse");
+        assert_eq!(
+            state.submissions[2].latest_job_id.as_deref(),
+            Some("pii-batch")
+        );
+        assert!(!state.submissions[2].answers[0].manual_grading_required);
+        assert_eq!(sink.snapshot().len(), 2);
+
+        let _ = std::fs::remove_dir_all(&test_root);
+    }
+
+    #[test]
+    fn batch_grading_persistence_applies_scores_feedback_and_highlights() {
+        let _guard = lock_env_vars();
+        let test_root = temp_root("scriptscore-batch-grading-persist");
+        std::fs::create_dir_all(&test_root).expect("test root should exist");
+        let project_path = create_project(&test_root);
+        let sink = RecordingEventSink::default();
+        let workspace = minimal_workspace_with_question();
+        let question_by_id = workspace
+            .questions
+            .iter()
+            .map(|question| (question.question_id.clone(), question))
+            .collect::<HashMap<_, _>>();
+        let mut submission = workflow_submission("student_1");
+        submission.stage = "grading".into();
+        submission.answers = vec![answer_seed("q1")];
+        submission.answers[0].verified = true;
+        submission.answers[0].verified_text = Some("A clear verified answer".into());
+        let mut state = StudentWorkflowState {
+            status: "running".into(),
+            latest_job_id: None,
+            submissions: vec![submission],
+        };
+        let refs = vec!["student_1".to_string()];
+
+        let score_requests =
+            build_batch_answer_score_requests(&workspace, &mut state, &question_by_id, &refs)
+                .expect("score requests should build");
+        assert_eq!(score_requests["student_1"].len(), 1);
+        assert_eq!(
+            crop_rows_from_answers(&state.submissions[0])[0]["question_crop_path"],
+            "/tmp/q1.png"
+        );
+
+        let preliminary_rows = vec![json!({
+            "student_ref": "student_1",
+            "question_id": "q1",
+            "criterion_index": 0,
+            "criterion_label": "Correctness",
+            "points_awarded": 4,
+            "rationale": "Correct answer with minor omission.",
+            "confidence": "medium",
+            "confidence_reason": "Enough evidence"
+        })];
+        let final_rows = persist_batch_preliminary_rows(
+            &project_path,
+            &sink,
+            &workspace,
+            &mut state,
+            &question_by_id,
+            &refs,
+            &preliminary_rows,
+        )
+        .expect("preliminary rows should persist");
+        assert_eq!(final_rows[0]["total_points_awarded"], 4);
+        assert_eq!(
+            state.submissions[0].answers[0].total_points_awarded,
+            Some(4)
+        );
+
+        let feedback_rows = vec![json!({
+            "student_ref": "student_1",
+            "question_id": "q1",
+            "feedback_text": "Solid answer."
+        })];
+        persist_batch_feedback_rows(&project_path, &sink, &mut state, &refs, &feedback_rows)
+            .expect("feedback rows should persist");
+        assert_eq!(
+            state.submissions[0].answers[0].feedback_text.as_deref(),
+            Some("Solid answer.")
+        );
+
+        let highlight_rows = vec![json!({
+            "student_ref": "student_1",
+            "question_id": "q1",
+            "highlights": [
+                {
+                    "kind": "strength",
+                    "start_char": 0,
+                    "end_char": 5,
+                    "text": "Solid"
+                }
+            ]
+        })];
+        finish_batch_grading(
+            &project_path,
+            &sink,
+            &mut state,
+            &refs,
+            final_rows,
+            &feedback_rows,
+            &highlight_rows,
+        )
+        .expect("batch grading should finish");
+
+        assert_eq!(state.submissions[0].stage, "graded");
+        assert_eq!(
+            state.submissions[0].answers[0].highlights[0].kind,
+            "strength"
+        );
+        assert_eq!(state.status, "graded");
+        assert_eq!(sink.snapshot().len(), 3);
+
+        let _ = std::fs::remove_dir_all(&test_root);
     }
 
     fn answer_seed(question_id: &str) -> StudentWorkflowAnswer {

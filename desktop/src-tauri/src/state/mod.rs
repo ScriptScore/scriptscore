@@ -1300,6 +1300,142 @@ fn recover_abandoned_project_jobs(project_path: &Path) -> HostResult<Option<Stri
 mod tests {
     use super::AppState;
 
+    struct NoopEventSink;
+
+    impl super::RuntimeEventSink for NoopEventSink {
+        fn emit_runtime_event(&self, _event: crate::models::RuntimeJobEvent) {}
+    }
+
+    fn assert_no_open_project<T: std::fmt::Debug>(result: crate::errors::HostResult<T>) {
+        let error = result.expect_err("operation should require an open project");
+        assert!(
+            error.to_string().contains("No project is currently open"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn app_state_project_scoped_facade_methods_reject_without_open_project() {
+        let state = AppState::bootstrap_with_args([std::ffi::OsString::from("scriptscore")]);
+        let sink = NoopEventSink;
+        let settings = crate::models::AppSettings::default();
+
+        assert_no_open_project(state.workspace_state());
+        assert_no_open_project(state.current_project_path_for_commands());
+        assert_no_open_project(state.replace_template_pdf("template.pdf".into(), &sink));
+        assert_no_open_project(state.export_stamped_template_pdf("template.pdf".into(), &sink));
+        assert_no_open_project(state.run_results_export(
+            crate::models::RunResultsExportInput {
+                format: crate::models::ResultsExportFormat::Csv,
+                student_refs: vec!["student_1".into()],
+                destination_path: "results.csv".into(),
+            },
+            &sink,
+        ));
+        assert_no_open_project(state.save_question_edits(Vec::new()));
+        assert_no_open_project(state.save_redaction_regions(Vec::new()));
+        assert_no_open_project(state.approve_template_setup(&settings));
+        assert_no_open_project(state.skip_template_redaction());
+        assert_no_open_project(
+            state.save_project_config(crate::models::ProjectConfig::default(), &settings),
+        );
+        assert_no_open_project(state.generate_question_rubric(
+            "q1".into(),
+            false,
+            settings.clone(),
+            &sink,
+        ));
+        assert_no_open_project(state.reanalyze_question("q1".into(), settings.clone(), &sink));
+        assert_no_open_project(state.save_rubric_update(crate::models::RubricUpdateInput {
+            question_id: "q1".into(),
+            criteria: Vec::new(),
+            approve: false,
+            rubric_edit_impact: None,
+        }));
+        assert_no_open_project(state.save_criterion_score(
+            crate::models::SaveCriterionScoreInput {
+                student_ref: "student_1".into(),
+                question_id: "q1".into(),
+                criterion_index: 0,
+                points_awarded: 0,
+            },
+        ));
+        assert_no_open_project(state.save_moderated_score(
+            crate::models::SaveModeratedScoreInput {
+                student_ref: "student_1".into(),
+                question_id: "q1".into(),
+                moderated_total_points: 0,
+            },
+        ));
+        assert_no_open_project(state.save_moderated_feedback(
+            crate::models::SaveModeratedFeedbackInput {
+                student_ref: "student_1".into(),
+                question_id: "q1".into(),
+                feedback_text: "feedback".into(),
+            },
+        ));
+        assert_no_open_project(state.set_moderation_question_reviewed(
+            crate::models::SetModerationQuestionReviewedInput {
+                question_id: "q1".into(),
+                reviewed: true,
+            },
+        ));
+        assert_no_open_project(state.run_student_intake(Vec::new(), &sink));
+        assert_no_open_project(state.save_student_intake_page_order(
+            crate::models::StudentIntakePageOrderUpdateInput {
+                student_ref: "student_1".into(),
+                exam_page_paths: Vec::new(),
+            },
+        ));
+        assert_no_open_project(state.delete_student_submission(
+            crate::models::DeleteStudentSubmissionInput {
+                student_ref: "student_1".into(),
+            },
+        ));
+        assert_no_open_project(state.save_student_alignment_review(
+            super::student_workflow::StudentWorkflowAlignmentUpdateInput {
+                student_ref: "student_1".into(),
+                pages: Vec::new(),
+            },
+        ));
+        assert_no_open_project(state.save_student_parse_review(
+            super::student_workflow::StudentWorkflowParseReviewInput {
+                student_ref: "student_1".into(),
+                question_id: "q1".into(),
+                corrected_text: "answer".into(),
+            },
+        ));
+        assert_no_open_project(state.save_student_detect_review(
+            super::student_workflow::StudentWorkflowDetectReviewInput {
+                student_ref: "student_1".into(),
+                resolutions: Vec::new(),
+            },
+        ));
+        assert_no_open_project(state.save_results_lms_assignment(
+            &settings,
+            crate::models::SaveResultsLmsAssignmentInput {
+                assignment_id: Some("assignment_1".into()),
+            },
+        ));
+        assert_no_open_project(state.set_submission_result_finalized(
+            crate::models::SetSubmissionResultFinalizedInput {
+                student_ref: "student_1".into(),
+                finalized: true,
+            },
+        ));
+        assert_no_open_project(state.finalize_ready_results(
+            crate::models::FinalizeReadyResultsInput {
+                student_refs: vec!["student_1".into()],
+            },
+        ));
+        assert_no_open_project(state.load_job_trace(None, None));
+        assert_no_open_project(state.list_job_traces());
+
+        state
+            .ensure_automatic_rubric_jobs(settings, &sink)
+            .expect("no open project should make automatic rubric enqueue a no-op");
+    }
+
     #[test]
     fn resolve_lms_student_ref_uses_persisted_student_roster() {
         use std::path::Path;

@@ -759,22 +759,28 @@ fn template_raster_sizes_for_redaction_pages(
 #[cfg(test)]
 mod tests {
     use super::{
-        add_replaced_warning_if_needed, exam_page_paths_from_ingest_pdf_result,
-        invalidate_workflow_progress_for_intake_reorder, merge_prior_intake_items,
-        normalized_desired_page_order, page_order_change_is_locked, persist_student_ingest_results,
-        persisted_local_display_name, read_png_raster_dimensions, resolved_redaction_payloads,
-        sanitized_ingest_request_payload, submission_has_downstream_progress,
-        validate_reordered_paths_match_existing,
+        add_replaced_warning_if_needed, build_intake_default_pdf_rects_request,
+        exam_page_paths_from_ingest_pdf_result, input_raster_sizes_json,
+        input_redaction_regions_json, invalidate_workflow_progress_for_intake_reorder,
+        merge_prior_intake_items, normalized_desired_page_order, page_order_change_is_locked,
+        persist_student_ingest_results, persisted_local_display_name, raster_sizes_by_page_json,
+        read_png_raster_dimensions, resolved_redaction_payloads, sanitized_ingest_request_payload,
+        submission_has_downstream_progress, template_redaction_regions_json,
+        validate_page_order_update_input, validate_reordered_paths_match_existing,
+        workflow_status_for_submissions,
     };
     use crate::models::{
-        StudentIntakeInput, StudentIntakeRasterSize, StudentIntakeRedactionRegionInput,
-        StudentIntakeState, StudentIntakeSummary, StudentWorkflowAlignmentPage,
-        StudentWorkflowAnswer, StudentWorkflowPage, StudentWorkflowState,
-        StudentWorkflowSubmission, StudentWorkflowTransform, WorkerJobResult,
+        InstructorProfile, StudentIntakeInput, StudentIntakePageOrderUpdateInput,
+        StudentIntakeRasterSize, StudentIntakeRedactionRegionInput, StudentIntakeState,
+        StudentIntakeSummary, StudentWorkflowAlignmentPage, StudentWorkflowAnswer,
+        StudentWorkflowPage, StudentWorkflowState, StudentWorkflowSubmission,
+        StudentWorkflowTransform, TemplateRedactionRegion, TemplateRedactionRegionInput,
+        WorkerJobResult,
     };
     use crate::worker::CompletedWorkerJob;
     use std::collections::{HashMap, HashSet};
     use std::fs;
+    use std::path::{Path, PathBuf};
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
     fn summary(student_ref: &str, canonical_pdf_path: &str) -> StudentIntakeSummary {
@@ -800,6 +806,63 @@ mod tests {
         ))
     }
 
+    fn temp_project_root(prefix: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "{prefix}-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or(Duration::from_secs(0))
+                .as_millis()
+        ))
+    }
+
+    fn tiny_png_header(width: u32, height: u32) -> Vec<u8> {
+        let mut bytes = vec![
+            0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, b'I', b'H', b'D', b'R',
+        ];
+        bytes.extend(width.to_be_bytes());
+        bytes.extend(height.to_be_bytes());
+        bytes
+    }
+
+    fn insert_template_page_artifact(project_path: &Path, page_number: i64, image_path: &Path) {
+        let relative_path = image_path
+            .strip_prefix(project_path)
+            .expect("image should live in project")
+            .to_string_lossy()
+            .into_owned();
+        let connection =
+            rusqlite::Connection::open(crate::project_store::schema::project_db_path(project_path))
+                .expect("project db should open");
+        connection
+            .execute(
+                "INSERT INTO artifact (
+                    artifact_id,
+                    job_id,
+                    kind,
+                    role,
+                    relative_path,
+                    mime_type,
+                    sha256,
+                    byte_size,
+                    metadata_json,
+                    created_at
+                ) VALUES (?1, ?2, 'image', 'rendered_template_page', ?3, 'image/png', NULL, ?4, ?5, CURRENT_TIMESTAMP)",
+                rusqlite::params![
+                    format!("template-page-{page_number}"),
+                    "job-1",
+                    relative_path,
+                    fs::metadata(image_path).expect("png metadata").len() as i64,
+                    serde_json::json!({
+                        "page_number": page_number,
+                        "label": format!("Page {page_number}")
+                    })
+                    .to_string(),
+                ],
+            )
+            .expect("artifact should insert");
+    }
+
     #[test]
     fn add_replaced_warning_only_when_prior_canonical_exists() {
         let mut next_summary = summary("student_1", "/tmp/new.pdf");
@@ -814,6 +877,88 @@ mod tests {
         assert_eq!(
             next_summary.warnings[0].code.as_deref(),
             Some("student_intake_replaced")
+        );
+    }
+
+    #[test]
+    fn default_redaction_payload_uses_template_regions_and_png_sizes() {
+        let test_root = temp_project_root("scriptscore-intake-default-redaction");
+        let created = crate::project_store::create_project_in_root(
+            test_root.clone(),
+            "Intake Redaction",
+            Some("Biology".into()),
+            None,
+            None,
+            &InstructorProfile::default(),
+        )
+        .expect("project should be created");
+        let project_path = PathBuf::from(&created.project_path);
+        let template_dir = project_path.join("artifacts").join("template_pages");
+        fs::create_dir_all(&template_dir).expect("template dir should create");
+        let page_path = template_dir.join("page-1.png");
+        fs::write(&page_path, tiny_png_header(320, 240)).expect("png should write");
+        insert_template_page_artifact(&project_path, 1, &page_path);
+        crate::project_store::save_redaction_regions(
+            &project_path,
+            &[TemplateRedactionRegionInput {
+                region_id: Some("redact-1".into()),
+                page_number: 1,
+                x: 7,
+                y: 8,
+                width: 90,
+                height: 30,
+            }],
+        )
+        .expect("redaction region should save");
+
+        let payload = build_intake_default_pdf_rects_request(&project_path)
+            .expect("default redaction payload should build")
+            .expect("redaction payload should be present");
+
+        assert_eq!(
+            payload,
+            serde_json::json!({
+                "regions": [
+                    {
+                        "page_number": 1,
+                        "x": 7,
+                        "y": 8,
+                        "width": 90,
+                        "height": 30
+                    }
+                ],
+                "raster_sizes_by_page": {
+                    "1": {
+                        "width_px": 320,
+                        "height_px": 240
+                    }
+                }
+            })
+        );
+
+        fs::remove_dir_all(&test_root).expect("test project should clean up");
+    }
+
+    #[test]
+    fn page_order_update_input_rejects_blank_student_and_empty_paths() {
+        assert!(
+            validate_page_order_update_input(&StudentIntakePageOrderUpdateInput {
+                student_ref: "  ".into(),
+                exam_page_paths: vec!["/tmp/a.png".into()],
+            })
+            .expect_err("blank student ref should fail")
+            .to_string()
+            .contains("student_ref is required")
+        );
+
+        assert!(
+            validate_page_order_update_input(&StudentIntakePageOrderUpdateInput {
+                student_ref: "student_1".into(),
+                exam_page_paths: Vec::new(),
+            })
+            .expect_err("empty page paths should fail")
+            .to_string()
+            .contains("at least one page image")
         );
     }
 
@@ -940,6 +1085,79 @@ mod tests {
         };
 
         assert_eq!(normalized_desired_page_order(&input), vec![3, 2]);
+    }
+
+    #[test]
+    fn redaction_region_and_raster_json_helpers_preserve_numeric_fields() {
+        let template_regions = vec![TemplateRedactionRegion {
+            region_id: "r1".into(),
+            page_number: 2,
+            x: 11,
+            y: 12,
+            width: 101,
+            height: 52,
+            label: "privacy_protection".into(),
+            sort_order: 1,
+        }];
+        assert_eq!(
+            template_redaction_regions_json(&template_regions),
+            vec![serde_json::json!({
+                "page_number": 2,
+                "x": 11,
+                "y": 12,
+                "width": 101,
+                "height": 52
+            })]
+        );
+        assert_eq!(
+            raster_sizes_by_page_json(&HashMap::from([(2, (640, 480))])),
+            serde_json::json!({
+                "2": {
+                    "width_px": 640,
+                    "height_px": 480
+                }
+            })
+        );
+
+        let input = StudentIntakeInput {
+            student_ref: "student_1".into(),
+            local_student_name: None,
+            raw_pdf_path: "/tmp/student_1.pdf".into(),
+            desired_page_order: Vec::new(),
+            redaction_regions_px: vec![StudentIntakeRedactionRegionInput {
+                page_number: 3,
+                x: 21,
+                y: 22,
+                width: 31,
+                height: 32,
+            }],
+            raster_sizes_by_page: HashMap::from([(
+                3,
+                StudentIntakeRasterSize {
+                    width_px: 800,
+                    height_px: 600,
+                },
+            )]),
+        };
+        assert_eq!(
+            input_redaction_regions_json(&input),
+            vec![serde_json::json!({
+                "page_number": 3,
+                "x": 21,
+                "y": 22,
+                "width": 31,
+                "height": 32
+            })]
+        );
+        assert_eq!(
+            input_raster_sizes_json(&input),
+            serde_json::json!({
+                "3": {
+                    "width_px": 800,
+                    "height_px": 600
+                }
+            })
+        );
     }
 
     #[test]
@@ -1202,5 +1420,32 @@ mod tests {
         workflow_state.submissions[0].stage = "parse".into();
         assert!(page_order_change_is_locked(&workflow_state, "student_1"));
         assert!(!page_order_change_is_locked(&workflow_state, "student_2"));
+    }
+
+    #[test]
+    fn workflow_status_for_submissions_covers_empty_ready_running_attention_and_graded() {
+        let mut state = StudentWorkflowState {
+            status: String::new(),
+            latest_job_id: None,
+            submissions: Vec::new(),
+        };
+        assert_eq!(workflow_status_for_submissions(&state), "not_started");
+
+        state.submissions = vec![workflow_submission("student_1")];
+        state.submissions[0].stage = "intake_ready".into();
+        assert_eq!(workflow_status_for_submissions(&state), "ready");
+
+        state.submissions[0].stage = "detect".into();
+        assert_eq!(workflow_status_for_submissions(&state), "running");
+
+        state.submissions[0].stage = "alignment_review".into();
+        assert_eq!(workflow_status_for_submissions(&state), "attention");
+
+        state.submissions[0].stage = "graded".into();
+        assert_eq!(workflow_status_for_submissions(&state), "graded");
+
+        state.submissions.push(workflow_submission("student_2"));
+        state.submissions[1].stage = "manual_grading".into();
+        assert_eq!(workflow_status_for_submissions(&state), "attention");
     }
 }
