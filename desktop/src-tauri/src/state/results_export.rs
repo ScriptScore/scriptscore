@@ -602,6 +602,7 @@ fn sanitize_file_component(file_name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use std::io::Read;
+    use std::sync::Mutex;
 
     use super::*;
     use crate::models::{
@@ -610,6 +611,36 @@ mod tests {
         StudentWorkflowAnswer, StudentWorkflowState, TemplatePageArtifactSummary,
         TemplateRedactionRegion, WorkspaceWarning,
     };
+
+    struct RecordingEventSink {
+        events: Mutex<Vec<RuntimeJobEvent>>,
+    }
+
+    impl RecordingEventSink {
+        fn new() -> Self {
+            Self {
+                events: Mutex::new(Vec::new()),
+            }
+        }
+
+        fn event_types(&self) -> Vec<String> {
+            self.events
+                .lock()
+                .expect("events lock should not be poisoned")
+                .iter()
+                .map(|event| event.event_type.clone())
+                .collect()
+        }
+    }
+
+    impl RuntimeEventSink for RecordingEventSink {
+        fn emit_runtime_event(&self, event: RuntimeJobEvent) {
+            self.events
+                .lock()
+                .expect("events lock should not be poisoned")
+                .push(event);
+        }
+    }
 
     fn ready_row(student_ref: &str) -> ResultStudentRow {
         ResultStudentRow {
@@ -722,6 +753,106 @@ mod tests {
         assert!(csv.contains("\"'=Ada, Local\""));
         assert!(csv.contains("\"'+Good, \"\"clear\"\"\nwork\""));
         assert!(!csv.contains("do-not-export"));
+    }
+
+    #[test]
+    fn results_export_helpers_validate_shape_and_sanitize_csv_zip_fields() {
+        assert!(validate_destination_path(" ")
+            .unwrap_err()
+            .to_string()
+            .contains("Choose a destination path"));
+
+        let root = std::env::temp_dir().join(format!(
+            "scriptscore-results-export-helpers-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let destination = root.join("nested").join("results.csv");
+        let validated =
+            validate_destination_path(destination.to_str().expect("path should be utf-8")).unwrap();
+        assert_eq!(validated, destination);
+        assert!(root.join("nested").is_dir());
+
+        let workspace = workspace_with_rows(vec![ready_row("student_1"), ready_row("student_2")]);
+        let rows = selected_ready_rows(
+            &workspace,
+            &[
+                " student_1 ".into(),
+                String::new(),
+                "student_1".into(),
+                "student_2".into(),
+            ],
+        )
+        .expect("ready rows should be selected once each");
+        assert_eq!(rows.len(), 2);
+        assert!(selected_ready_rows(&workspace, &["missing".into()])
+            .unwrap_err()
+            .to_string()
+            .contains("was not found"));
+
+        let questions = vec![("q1", 1), ("q2", 2)];
+        let header = csv_header(&questions);
+        assert_eq!(header[4], "q1_score");
+        assert_eq!(header[7], "q2_feedback");
+
+        let local_names = local_display_names_by_ref(&workspace.student_intake.items);
+        let record = csv_record_for_row(rows[0], &local_names, &questions);
+        assert_eq!(record[1], "Ada, Local");
+        assert_eq!(record[4], "8");
+        assert_eq!(record[6], "");
+        assert_eq!(record[7], "");
+
+        let mut missing_max = ready_row("student_3");
+        missing_max.question_rows[0].max_points = None;
+        assert_eq!(aggregate_percent(&missing_max), None);
+        missing_max.question_rows[0].max_points = Some(0);
+        assert_eq!(aggregate_percent(&missing_max), None);
+
+        assert_eq!(neutralize_csv_formula("@handle"), "'@handle");
+        assert_eq!(neutralize_csv_formula("-12"), "'-12");
+        assert_eq!(escape_csv_field("plain"), "plain");
+        assert_eq!(
+            sanitize_zip_entry_name("../../A B?.html"),
+            ".._.._A_B_.html"
+        );
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn csv_export_runtime_events_cover_success_and_failure() {
+        let root = std::env::temp_dir().join(format!(
+            "scriptscore-results-export-events-{}",
+            uuid::Uuid::new_v4()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let workspace = workspace_with_rows(vec![ready_row("student_1")]);
+        let rows = selected_ready_rows(&workspace, &["student_1".into()]).unwrap();
+
+        let success_sink = RecordingEventSink::new();
+        run_csv_export_with_runtime_events(
+            &success_sink,
+            &workspace,
+            &rows,
+            &root.join("results.csv"),
+        )
+        .expect("CSV export should succeed");
+        assert_eq!(
+            success_sink.event_types(),
+            vec!["job_started", "job_finished"]
+        );
+
+        let failure_sink = RecordingEventSink::new();
+        let error = run_csv_export_with_runtime_events(&failure_sink, &workspace, &rows, &root)
+            .unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("Could not write Results CSV export"));
+        assert_eq!(
+            failure_sink.event_types(),
+            vec!["job_started", "job_failed"]
+        );
+
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]

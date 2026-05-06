@@ -967,6 +967,29 @@ fn canvas_publish_error_message(status: reqwest::StatusCode, body: &str) -> Stri
 mod tests {
     use super::*;
 
+    struct NoopEventSink;
+
+    impl crate::state::RuntimeEventSink for NoopEventSink {
+        fn emit_runtime_event(&self, _event: crate::models::RuntimeJobEvent) {}
+    }
+
+    fn test_client() -> reqwest::Client {
+        reqwest::Client::builder()
+            .https_only(true)
+            .build()
+            .expect("client should build")
+    }
+
+    fn test_context<'a>(client: &'a reqwest::Client) -> CanvasAssignmentContext<'a> {
+        CanvasAssignmentContext {
+            client,
+            base_url: "https://canvas.example.edu/courses/123",
+            access_token: "token",
+            course_numeric: 123,
+            assignment_numeric: 456,
+        }
+    }
+
     #[test]
     fn roster_parses_canvas_users_json() {
         let json = r#"[
@@ -982,6 +1005,15 @@ mod tests {
     #[test]
     fn validate_course_id_accepts_numeric() {
         assert_eq!(validate_course_id(" 12345 ").unwrap(), 12345);
+    }
+
+    #[test]
+    fn validate_assignment_id_accepts_trimmed_numeric_and_rejects_empty() {
+        assert_eq!(validate_assignment_id(" 98765 ").unwrap(), 98765);
+        assert!(validate_assignment_id("")
+            .unwrap_err()
+            .to_string()
+            .contains("assignment id is required"));
     }
 
     #[test]
@@ -1012,6 +1044,19 @@ mod tests {
     #[test]
     fn validate_assignment_id_rejects_non_numeric() {
         assert!(validate_assignment_id("abc").is_err());
+    }
+
+    #[test]
+    fn canvas_file_download_url_uses_normalized_canvas_file_path() {
+        let client = test_client();
+        let context = test_context(&client);
+
+        let url = canvas_file_download_url(&context, "789").expect("download URL should build");
+
+        assert_eq!(
+            url,
+            "https://canvas.example.edu/files/789/download?download_frd=1"
+        );
     }
 
     #[test]
@@ -1052,6 +1097,228 @@ mod tests {
         assert!(comment_is_generated_report(&marked_comment));
         assert!(!comment_is_generated_report(&legacy_report_comment));
         assert!(!comment_is_generated_report(&regular_comment));
+    }
+
+    #[test]
+    fn build_publish_outcome_carries_row_status_error_and_bindings() {
+        let row = LmsUploadPreparationRow {
+            student_ref: "student-a".into(),
+            user_id: "canvas-user-42".into(),
+            result_fingerprint: "result-fp".into(),
+            ..LmsUploadPreparationRow::default()
+        };
+        let binding = ResultsLmsAssetBinding {
+            provider: "canvas".into(),
+            course_id: "123".into(),
+            assignment_id: "456".into(),
+            student_ref: "student-a".into(),
+            local_asset_name: "q1.jpg".into(),
+            asset_fingerprint: "asset-fp".into(),
+            provider_file_id: "file-1".into(),
+        };
+
+        let target = submission_target(&row);
+        let outcome = build_publish_outcome(
+            &row,
+            LmsUploadStudentStatus::Failed,
+            Some("Canvas rejected the score".into()),
+            vec![binding.clone()],
+        );
+
+        assert_eq!(target.user_id, "canvas-user-42");
+        assert_eq!(outcome.student_result.student_ref, "student-a");
+        assert_eq!(outcome.student_result.result_fingerprint, "result-fp");
+        assert_eq!(
+            outcome.student_result.status,
+            LmsUploadStudentStatus::Failed
+        );
+        assert_eq!(
+            outcome.student_result.sanitized_error.as_deref(),
+            Some("Canvas rejected the score")
+        );
+        assert_eq!(outcome.active_asset_bindings[0].provider_file_id, "file-1");
+        assert_eq!(
+            outcome.active_asset_bindings[0].asset_fingerprint,
+            "asset-fp"
+        );
+    }
+
+    #[test]
+    fn canvas_public_entrypoints_reject_missing_auth_and_bad_ids_before_network() {
+        let courses =
+            tauri::async_runtime::block_on(list_teacher_courses("https://canvas.example.edu", " "));
+        assert!(courses
+            .unwrap_err()
+            .to_string()
+            .contains("access token is required"));
+
+        let roster_missing_auth = tauri::async_runtime::block_on(list_course_roster(
+            "https://canvas.example.edu",
+            "",
+            "123",
+        ));
+        assert!(roster_missing_auth
+            .unwrap_err()
+            .to_string()
+            .contains("access token is required"));
+
+        let roster_bad_course = tauri::async_runtime::block_on(list_course_roster(
+            "https://canvas.example.edu",
+            "token",
+            "abc",
+        ));
+        assert!(roster_bad_course
+            .unwrap_err()
+            .to_string()
+            .contains("numeric course id"));
+
+        let assignments_missing_auth = tauri::async_runtime::block_on(list_course_assignments(
+            "https://canvas.example.edu",
+            " ",
+            "123",
+        ));
+        assert!(assignments_missing_auth
+            .unwrap_err()
+            .to_string()
+            .contains("access token is required"));
+
+        let assignments_bad_course = tauri::async_runtime::block_on(list_course_assignments(
+            "https://canvas.example.edu",
+            "token",
+            "not-numeric",
+        ));
+        assert!(assignments_bad_course
+            .unwrap_err()
+            .to_string()
+            .contains("numeric course id"));
+
+        let sink = NoopEventSink;
+        let publish = tauri::async_runtime::block_on(publish_assignment_results(
+            CanvasResultsPublisherConfig {
+                base_url: "https://canvas.example.edu",
+                access_token: " ",
+                course_id: "123",
+                assignment_id: "456",
+            },
+            LmsUploadMode::DryRun,
+            &[],
+            CanvasUploadProgress {
+                event_sink: &sink,
+                batch_id: "batch-1",
+            },
+        ));
+        assert!(publish
+            .unwrap_err()
+            .to_string()
+            .contains("access token is required"));
+    }
+
+    #[test]
+    fn prepare_report_assets_reuses_matching_bindings_without_uploading() {
+        let client = test_client();
+        let context = test_context(&client);
+        let row = LmsUploadPreparationRow {
+            student_ref: "student-a".into(),
+            report_assets: vec![crate::models::LmsUploadReportAsset {
+                question_id: "q1".into(),
+                local_asset_name: "q1.jpg".into(),
+                asset_fingerprint: "asset-fp".into(),
+                local_file_path: "/unused/q1.jpg".into(),
+            }],
+            existing_asset_bindings: vec![ResultsLmsAssetBinding {
+                provider: "canvas".into(),
+                course_id: "123".into(),
+                assignment_id: "456".into(),
+                student_ref: "student-a".into(),
+                local_asset_name: "q1.jpg".into(),
+                asset_fingerprint: "asset-fp".into(),
+                provider_file_id: "987".into(),
+            }],
+            ..LmsUploadPreparationRow::default()
+        };
+
+        let prepared =
+            tauri::async_runtime::block_on(prepare_report_assets_for_publish(&context, &row))
+                .expect("matching asset should be reused");
+
+        assert_eq!(prepared.len(), 1);
+        assert!(prepared[0].reused);
+        assert_eq!(prepared[0].binding.provider_file_id, "987");
+        assert_eq!(
+            prepared[0].url,
+            "https://canvas.example.edu/files/987/download?download_frd=1"
+        );
+    }
+
+    #[test]
+    fn asset_cleanup_helpers_skip_when_everything_is_reused_or_current() {
+        let client = test_client();
+        let context = test_context(&client);
+        let binding = ResultsLmsAssetBinding {
+            provider: "canvas".into(),
+            course_id: "123".into(),
+            assignment_id: "456".into(),
+            student_ref: "student-a".into(),
+            local_asset_name: "q1.jpg".into(),
+            asset_fingerprint: "asset-fp".into(),
+            provider_file_id: "987".into(),
+        };
+        let prepared_assets = vec![CanvasPreparedAsset {
+            binding: binding.clone(),
+            url: "https://canvas.example.edu/files/987/download?download_frd=1".into(),
+            reused: true,
+        }];
+        let row = LmsUploadPreparationRow {
+            existing_asset_bindings: vec![binding],
+            ..LmsUploadPreparationRow::default()
+        };
+
+        tauri::async_runtime::block_on(delete_newly_uploaded_files(&context, &prepared_assets))
+            .expect("reused assets should not be deleted");
+        tauri::async_runtime::block_on(delete_stale_generated_files(
+            &context,
+            &row,
+            &prepared_assets,
+        ))
+        .expect("current assets should not be deleted as stale");
+    }
+
+    #[test]
+    fn generated_report_comment_plan_sorts_existing_generated_comment_ids() {
+        let comments = vec![
+            CanvasSubmissionComment {
+                id: 3,
+                comment: Some("Teacher note".into()),
+                html_comment: Some(
+                    "<div style=\"display:none\">results-report:v1; fingerprint=fp_3</div>".into(),
+                ),
+            },
+            CanvasSubmissionComment {
+                id: 1,
+                comment: Some(
+                    "\u{2063}\u{2063}\u{200B}\u{200D}\u{2060}\u{200C}\u{2063}\u{200B}report".into(),
+                ),
+                html_comment: None,
+            },
+            CanvasSubmissionComment {
+                id: 2,
+                comment: Some("Regular note".into()),
+                html_comment: None,
+            },
+        ];
+        let mut existing_report_comments = comments
+            .into_iter()
+            .filter(comment_is_generated_report)
+            .collect::<Vec<_>>();
+        existing_report_comments.sort_by_key(|comment| comment.id);
+        let plan = GeneratedReportCommentPlan {
+            generated_comment_ids: existing_report_comments
+                .into_iter()
+                .map(|comment| comment.id)
+                .collect(),
+        };
+
+        assert_eq!(plan.generated_comment_ids, vec![1, 3]);
     }
 
     #[test]
@@ -1117,5 +1384,20 @@ mod tests {
 
         assert!(rendered.contains("https://canvas.example.edu/files/1"));
         assert!(rendered.contains("__RESULTS_LMS_ASSET_missing.jpg__"));
+    }
+
+    #[test]
+    fn render_submission_comment_rejects_canvas_comment_limit() {
+        let row = LmsUploadPreparationRow {
+            report_html_template: "x".repeat(65_536),
+            ..LmsUploadPreparationRow::default()
+        };
+
+        let error =
+            render_report_comment_html(&row, &[]).expect_err("overlong Canvas comment should fail");
+
+        assert!(error
+            .to_string()
+            .contains("Canvas generated report comment is too long"));
     }
 }
