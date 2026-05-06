@@ -156,6 +156,7 @@ jobs:
   desktop-frontend-coverage:
     name: Desktop Frontend Coverage
     runs-on: ubuntu-latest
+    needs: desktop-frontend-quality
     defaults:
       run:
         working-directory: desktop/frontend
@@ -204,7 +205,7 @@ jobs:
           cache-dependency-path: desktop/frontend/package-lock.json
 
       - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.95.0
 
       - name: Install frontend dependencies
         working-directory: desktop/frontend
@@ -269,7 +270,7 @@ jobs:
             wget
 
       - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.95.0
         with:
           components: rustfmt, clippy
 
@@ -277,6 +278,12 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: desktop/src-tauri -> target
+
+      - name: Prepare bundled runtime
+        run: ./desktop/scripts/prepare-bundled-runtime.sh
+
+      - name: Generate legal artifacts
+        run: python desktop/scripts/generate_legal_artifacts.py
 
       - name: Rust format check
         run: cargo fmt --check --manifest-path desktop/src-tauri/Cargo.toml
@@ -290,12 +297,13 @@ jobs:
   desktop-rust-metrics:
     name: Desktop Rust Metrics
     runs-on: ubuntu-latest
+    needs: desktop-host-quality
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.95.0
 
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@v2
@@ -326,6 +334,7 @@ jobs:
   desktop-rust-coverage:
     name: Desktop Rust Coverage
     runs-on: ubuntu-latest
+    needs: desktop-host-quality
     env:
       SCRIPTSCORE_PYTHON: ${{ github.workspace }}/cli/.venv/bin/python
     steps:
@@ -363,12 +372,18 @@ jobs:
             wget
 
       - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.95.0
 
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: desktop/src-tauri -> target
+
+      - name: Prepare bundled runtime
+        run: ./desktop/scripts/prepare-bundled-runtime.sh
+
+      - name: Generate legal artifacts
+        run: python desktop/scripts/generate_legal_artifacts.py
 
       - name: Generate Rust coverage report
         run: make coverage-rust
@@ -382,12 +397,13 @@ jobs:
   desktop-rust-unsafe:
     name: Desktop Rust Unsafe Report
     runs-on: ubuntu-latest
+    needs: desktop-host-quality
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.95.0
 
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@v2
@@ -486,7 +502,7 @@ jobs:
 
       - name: Set up Rust
         if: ${{ steps.sonar-ready.outputs.enabled == 'true' }}
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.95.0
         with:
           components: clippy
 
@@ -557,6 +573,11 @@ jobs:
   desktop-launcher-smoke:
     name: Desktop Launcher Smoke
     runs-on: ubuntu-latest
+    needs:
+      - fast-quality
+      - desktop-host-quality
+      - desktop-frontend-quality
+      - desktop-worker-runtime
     defaults:
       run:
         working-directory: cli
@@ -600,7 +621,7 @@ jobs:
             xvfb
 
       - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.95.0
 
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@v2
@@ -610,6 +631,18 @@ jobs:
       - name: Install cargo-tauri
         run: cargo install tauri-cli --version '^2'
 
+      - name: Prepare bundled runtime
+        working-directory: .
+        run: ./desktop/scripts/prepare-bundled-runtime.sh
+
+      - name: Smoke bundled runtime
+        working-directory: .
+        run: ./desktop/scripts/smoke-bundled-runtime.sh
+
+      - name: Generate legal artifacts
+        working-directory: .
+        run: python desktop/scripts/generate_legal_artifacts.py
+
       - name: Launcher smoke tests
         env:
           DESKTOP_HOST_START_TIMEOUT_SECONDS: "240"
@@ -618,6 +651,12 @@ jobs:
   desktop-linux-package-smoke:
     name: Desktop Linux Package Smoke
     runs-on: ubuntu-latest
+    needs:
+      - fast-quality
+      - desktop-host-quality
+      - desktop-frontend-quality
+      - desktop-worker-runtime
+      - license-policy
     env:
       SCRIPTSCORE_PYTHON: ${{ github.workspace }}/cli/.venv/bin/python
     steps:
@@ -669,7 +708,7 @@ jobs:
             wget
 
       - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.95.0
 
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@v2
@@ -684,6 +723,9 @@ jobs:
 
       - name: Smoke bundled runtime
         run: ./desktop/scripts/smoke-bundled-runtime.sh
+
+      - name: Generate legal artifacts
+        run: python desktop/scripts/generate_legal_artifacts.py
 
       - name: Build Linux package
         run: ./desktop/scripts/build-desktop-package.sh appimage
@@ -735,7 +777,7 @@ jobs:
         run: uv sync --group dev
 
       - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.95.0
         with:
           components: rustfmt, clippy
 

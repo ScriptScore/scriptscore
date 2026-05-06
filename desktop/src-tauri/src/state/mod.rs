@@ -1386,7 +1386,7 @@ mod tests {
         use std::sync::Arc;
         use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-        use crate::lms::{ActiveLmsRosterLoader, LmsRosterRow, __test_set_roster_fetch_override};
+        use crate::lms::{__test_set_roster_fetch_override, ActiveLmsRosterLoader, LmsRosterRow};
         use crate::models::{AppSettings, InstructorProfile, LmsRosterCacheStatus};
 
         struct OverrideGuard;
