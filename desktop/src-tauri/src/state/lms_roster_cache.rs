@@ -21,6 +21,35 @@ const LMS_ROSTER_RETRY_DELAY: Duration = Duration::from_secs(15);
 const LMS_ROSTER_CACHE_COMMAND_NAME: &str = "lms.roster-cache";
 const LMS_ROSTER_CACHE_EVENT_TYPE: &str = "lms_roster_cache_updated";
 
+#[cfg(test)]
+type RetryErrorObserver = std::sync::Arc<dyn Fn() + Send + Sync>;
+
+#[cfg(test)]
+fn retry_error_observer() -> std::sync::MutexGuard<'static, Option<RetryErrorObserver>> {
+    static OBSERVER: std::sync::OnceLock<std::sync::Mutex<Option<RetryErrorObserver>>> =
+        std::sync::OnceLock::new();
+    OBSERVER
+        .get_or_init(|| std::sync::Mutex::new(None))
+        .lock()
+        .expect("retry error observer lock")
+}
+
+#[cfg(test)]
+fn set_retry_error_observer_for_test(observer: Option<RetryErrorObserver>) {
+    *retry_error_observer() = observer;
+}
+
+#[cfg(test)]
+fn notify_retry_error_observer_for_test() {
+    let observer = {
+        let guard = retry_error_observer();
+        guard.as_ref().cloned()
+    };
+    if let Some(observer) = observer {
+        observer();
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub(crate) struct ProjectLmsRosterCache {
     generation: u64,
@@ -229,6 +258,8 @@ async fn run_roster_preload_loop(
                     return;
                 }
                 emit_cache_event(&state);
+                #[cfg(test)]
+                notify_retry_error_observer_for_test();
             }
         }
 
@@ -446,6 +477,7 @@ pub(crate) fn cached_rows_if_ready(
 mod tests {
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::mpsc;
     use std::sync::{Arc, Condvar, Mutex};
     use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -459,6 +491,7 @@ mod tests {
     impl Drop for OverrideGuard {
         fn drop(&mut self) {
             __test_set_roster_fetch_override(None);
+            super::set_retry_error_observer_for_test(None);
         }
     }
 
@@ -554,6 +587,18 @@ mod tests {
         cvar.notify_all();
     }
 
+    fn install_retry_error_observer() -> mpsc::SyncSender<()> {
+        let (observed_tx, observed_rx) = mpsc::sync_channel(1);
+        let observed_rx = Arc::new(Mutex::new(observed_rx));
+        super::set_retry_error_observer_for_test(Some(Arc::new(move || {
+            let _ = observed_rx
+                .lock()
+                .expect("retry error observer lock")
+                .recv_timeout(Duration::from_secs(2));
+        })));
+        observed_tx
+    }
+
     #[test]
     fn open_project_preloads_and_reuses_cached_rows() {
         let _guard = lock_env_vars();
@@ -639,6 +684,7 @@ mod tests {
         let project_path = create_project_with_course("course-retry");
         let attempts = Arc::new(AtomicUsize::new(0));
         let attempts_for_override = Arc::clone(&attempts);
+        let observed_retry_error = install_retry_error_observer();
         __test_set_roster_fetch_override(Some(Arc::new(move |_| {
             let attempt = attempts_for_override.fetch_add(1, Ordering::SeqCst);
             if attempt == 0 {
@@ -669,6 +715,7 @@ mod tests {
                 .expect("cache snapshot should load");
             if snapshot.status == LmsRosterCacheStatus::Error {
                 saw_error = true;
+                let _ = observed_retry_error.try_send(());
             }
             if snapshot.status == LmsRosterCacheStatus::Ready {
                 assert!(
