@@ -130,11 +130,7 @@ fn workflow_page_paths(page: &crate::models::StudentWorkflowPage) -> Vec<PathBuf
 
 fn is_under_project_artifacts(project_path: &Path, path: &Path) -> bool {
     let artifacts_root = project_path.join(crate::project_store::schema::ARTIFACTS_DIR_NAME);
-    if let (Ok(root), Ok(candidate)) = (artifacts_root.canonicalize(), path.canonicalize()) {
-        return candidate.starts_with(root);
-    }
-
-    path.is_absolute() && path.starts_with(artifacts_root)
+    crate::path_utils::is_under_existing_dir(&artifacts_root, path)
 }
 
 fn delete_project_owned_paths_best_effort(paths: &[PathBuf]) {

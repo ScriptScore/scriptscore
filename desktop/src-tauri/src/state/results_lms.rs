@@ -1104,6 +1104,7 @@ mod tests {
         crate::project_store::save_project_config(&transaction, &project_config)
             .expect("config should save");
         transaction.commit().expect("transaction should commit");
+        drop(connection);
 
         let cleared = sync_results_lms_assignment_context(&project_path, &settings)
             .expect("sync should succeed after course change");
@@ -1123,6 +1124,7 @@ mod tests {
         assert_eq!(project_config.lms_assignment_id, None);
         assert!(results_state.selected_target.is_none());
 
+        drop(connection);
         std::fs::remove_dir_all(&test_root).expect("test project should clean up");
     }
 

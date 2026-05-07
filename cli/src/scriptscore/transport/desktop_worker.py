@@ -25,6 +25,7 @@ from scriptscore.runtime import CancellationToken, CommandRunner, RunResult, utc
 
 FRAME_LENGTH_BYTES = 4
 PROTOCOL_VERSION = "desktop.sidecar.v1"
+WINDOWS_PIPE_WRITE_CHUNK_BYTES = 16 * 1024
 SUPPORTED_COMMANDS = frozenset(
     {
         "exam.analyze",
@@ -67,6 +68,34 @@ class DuplexStream(Protocol):
     def flush(self) -> None: ...
 
     def close(self) -> None: ...
+
+
+class WindowsNamedPipeStream:
+    """Unbuffered Windows named-pipe stream backed by os.read/os.write."""
+
+    def __init__(self, read_fd: int, write_fd: int) -> None:
+        self._read_fd = read_fd
+        self._write_fd = write_fd
+
+    def read(self, length: int = -1) -> bytes:
+        return os.read(self._read_fd, length)
+
+    def write(self, data: bytes | memoryview) -> int:
+        return os.write(self._write_fd, data)
+
+    def flush(self) -> None:
+        return None
+
+    def close(self) -> None:
+        os.close(self._read_fd)
+        os.close(self._write_fd)
+
+    def __enter__(self) -> WindowsNamedPipeStream:
+        return self
+
+    def __exit__(self, exc_type: Any, exc: Any, traceback: Any) -> None:
+        del exc_type, exc, traceback
+        self.close()
 
 
 class HelloPayload(BaseModel):
@@ -153,6 +182,27 @@ def encode_frame(payload: dict[str, Any]) -> bytes:
     return len(message).to_bytes(FRAME_LENGTH_BYTES, byteorder="big") + message
 
 
+def _write_all(stream: DuplexStream, data: bytes) -> None:
+    view = memoryview(data)
+    offset = 0
+    while offset < len(view):
+        chunk = view[offset : offset + WINDOWS_PIPE_WRITE_CHUNK_BYTES]
+        written = stream.write(chunk.tobytes())
+        if written is None:
+            written = len(chunk)
+        if written <= 0:
+            raise ProtocolError(
+                code="transport_write_failed", message="Transport write made no progress."
+            )
+        offset += written
+
+
+def _write_frame(stream: DuplexStream, payload: dict[str, Any]) -> None:
+    message = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    _write_all(stream, len(message).to_bytes(FRAME_LENGTH_BYTES, byteorder="big"))
+    _write_all(stream, message)
+
+
 def _read_exact(stream: DuplexStream, length: int) -> bytes:
     chunks: list[bytes] = []
     remaining = length
@@ -210,7 +260,7 @@ class DesktopWorkerServer:
 
     def _write_message(self, payload: dict[str, Any], *, stream: DuplexStream) -> None:
         with self._write_lock:
-            stream.write(encode_frame(payload))
+            _write_frame(stream, payload)
             stream.flush()
 
     def _write_error(
@@ -568,14 +618,23 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _connect_unix_socket(socket_path: Path) -> tuple[socket.socket, DuplexStream]:
-    client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    client = socket.socket(socket.AddressFamily(cast(Any, socket).AF_UNIX), socket.SOCK_STREAM)
     client.connect(str(socket_path))
     return client, cast(DuplexStream, client.makefile("rwb", buffering=0))
 
 
-def _connect_named_pipe(pipe_name: str) -> DuplexStream:
-    pipe_path = Path(rf"\\.\pipe\{pipe_name}")
-    return pipe_path.open("r+b", buffering=0)
+def _connect_named_pipe(pipe_name: str) -> WindowsNamedPipeStream:
+    request_pipe_path = Path(rf"\\.\pipe\{pipe_name}-request")
+    response_pipe_path = Path(rf"\\.\pipe\{pipe_name}-response")
+    binary_flag = getattr(os, "O_BINARY", 0)
+    read_fd = os.open(str(request_pipe_path), os.O_RDONLY | binary_flag)
+    try:
+        write_fd = os.open(str(response_pipe_path), os.O_WRONLY | binary_flag)
+    except OSError:
+        os.close(read_fd)
+        raise
+    stream = WindowsNamedPipeStream(read_fd, write_fd)
+    return stream
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -586,15 +645,15 @@ def main(argv: list[str] | None = None) -> int:
     if args.pipe_name:
         if sys.platform != "win32":
             parser.error("--pipe-name is only supported on Windows.")
-        with _connect_named_pipe(args.pipe_name) as stream:
-            return server.serve(stream=stream)
+        with _connect_named_pipe(args.pipe_name) as pipe_stream:
+            return server.serve(stream=pipe_stream)
     if args.socket_path is None:
         parser.error("--socket-path is required on non-Windows platforms.")
-    client, stream = _connect_unix_socket(args.socket_path)
+    client, socket_stream = _connect_unix_socket(args.socket_path)
     try:
-        return server.serve(stream=stream)
+        return server.serve(stream=socket_stream)
     finally:
-        stream.close()
+        socket_stream.close()
         client.close()
 
 

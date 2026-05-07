@@ -241,10 +241,9 @@ fn parse_question_region(value: &Value) -> HostResult<Option<TemplateQuestionReg
 }
 
 fn relative_project_path(project_path: &Path, absolute_path: &Path) -> HostResult<String> {
-    absolute_path
-        .strip_prefix(project_path)
+    crate::path_utils::relative_existing_path(project_path, absolute_path)
         .map(|path| path.to_string_lossy().into_owned())
-        .map_err(|_| {
+        .ok_or_else(|| {
             HostError::Project(format!(
                 "Artifact '{}' is outside the project directory '{}'.",
                 absolute_path.display(),

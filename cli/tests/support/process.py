@@ -14,7 +14,7 @@ import threading
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from scriptscore.transport.desktop_worker import decode_frame, encode_frame
 
@@ -146,7 +146,9 @@ class DesktopWorkerSession:
     def __init__(self, *, env_overrides: dict[str, str] | None = None) -> None:
         self._tmpdir = tempfile.TemporaryDirectory()
         self._socket_path = Path(self._tmpdir.name) / "desktop-worker.sock"
-        self._listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self._listener = socket.socket(
+            socket.AddressFamily(cast(Any, socket).AF_UNIX), socket.SOCK_STREAM
+        )
         try:
             self._listener.bind(str(self._socket_path))
         except PermissionError as exc:

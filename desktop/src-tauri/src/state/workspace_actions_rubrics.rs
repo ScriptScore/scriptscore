@@ -655,6 +655,7 @@ mod tests {
             .expect("workflow should load");
         assert!(workflow.submissions[0].answers[0].stale);
 
+        drop(connection);
         std::fs::remove_dir_all(&project_path).expect("project dir should clean up");
     }
 }

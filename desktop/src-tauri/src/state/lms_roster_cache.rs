@@ -14,7 +14,7 @@ use crate::project_store;
 use super::{app_jobs, AppState, AppStateInner};
 
 #[cfg(test)]
-const LMS_ROSTER_RETRY_DELAY: Duration = Duration::from_millis(25);
+const LMS_ROSTER_RETRY_DELAY: Duration = Duration::from_millis(250);
 #[cfg(not(test))]
 const LMS_ROSTER_RETRY_DELAY: Duration = Duration::from_secs(15);
 
