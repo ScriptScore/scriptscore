@@ -4,6 +4,7 @@ mod commands;
 pub mod errors;
 mod lms;
 pub mod models;
+mod path_utils;
 mod project_store;
 mod protocol;
 mod secrets;

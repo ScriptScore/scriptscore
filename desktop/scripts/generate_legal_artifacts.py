@@ -362,6 +362,7 @@ def cargo_metadata(manifest_path: Path, metadata_file: Path | None) -> dict[str,
         check=True,
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=60,
     )
     return json.loads(completed.stdout)

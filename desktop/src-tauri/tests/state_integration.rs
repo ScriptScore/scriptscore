@@ -1163,7 +1163,7 @@ fn export_stamped_template_job_returns_while_active_runtime_job_finishes_before_
     let slow_handle = thread::spawn(move || {
         slow_state.run_smoke_ping_job(
             &slow_events,
-            json!({"message": "slow", "steps": 2, "sleep_ms": 350}),
+            json!({"message": "slow", "steps": 10, "sleep_ms": 10_000}),
         )
     });
     event_sink.wait_for("job_started", "smoke.ping");
@@ -1171,7 +1171,6 @@ fn export_stamped_template_job_returns_while_active_runtime_job_finishes_before_
     let exported_path = test_root
         .join("exports")
         .join("queued-stamped-template.pdf");
-    let export_started_at = Instant::now();
     let export_job_id = state
         .start_export_stamped_template_pdf_job(
             exported_path.to_string_lossy().into_owned(),
@@ -1179,8 +1178,10 @@ fn export_stamped_template_job_returns_while_active_runtime_job_finishes_before_
         )
         .expect("template export job should be accepted while runtime is busy");
     assert!(
-        export_started_at.elapsed() < Duration::from_millis(100),
-        "template export command should return immediately with a background job id"
+        !event_sink.snapshot().iter().any(|event| {
+            event.command_name == "smoke.ping" && event.event_type == "job_finished"
+        }),
+        "template export command should return before the active runtime job finishes"
     );
     assert!(
         !export_job_id.is_empty(),

@@ -1513,6 +1513,7 @@ mod tests {
             .expect("count should query");
         assert_eq!(count_student_2, 1);
 
+        drop(connection);
         std::fs::remove_dir_all(&test_root).expect("test project should clean up");
     }
 

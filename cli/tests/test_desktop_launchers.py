@@ -121,8 +121,13 @@ def _wait_for_output_marker(
 
 
 def _launcher_process(script_name: str, *, port: int) -> subprocess.Popen[bytes]:
+    bash = shutil.which("bash")
+    if bash is None and Path("/bin/bash").is_file():
+        bash = "/bin/bash"
+    if bash is None:
+        pytest.skip("bash is required for shell launcher smoke tests")
     return subprocess.Popen(
-        ["/bin/bash", str(SCRIPTS_DIR / script_name)],
+        [bash, str(SCRIPTS_DIR / script_name)],
         cwd=PROJECT_ROOT,
         env=_frontend_env(port=port),
         stdout=subprocess.PIPE,

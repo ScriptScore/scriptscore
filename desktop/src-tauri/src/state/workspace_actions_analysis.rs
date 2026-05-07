@@ -457,6 +457,7 @@ mod tests {
                 params!["question", "question_1", "question_rubric"],
             )
             .expect("cleanup query should run");
+        drop(connection);
         std::fs::remove_dir_all(&project_path).expect("project dir should clean up");
     }
 }

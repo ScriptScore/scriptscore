@@ -795,8 +795,6 @@ jobs:
 
   desktop-windows-runtime:
     name: Desktop Windows Runtime
-    # Disabled until Windows desktop packaging/runtime behavior has been tested.
-    if: ${{ false }}
     runs-on: windows-latest
     timeout-minutes: 20
     env:
@@ -823,6 +821,12 @@ jobs:
         uses: dtolnay/rust-toolchain@1.95.0
         with:
           components: rustfmt, clippy
+
+      - name: Generate legal artifacts
+        run: python desktop/scripts/generate_legal_artifacts.py
+
+      - name: Prepare bundled runtime resource directory
+        run: New-Item -ItemType Directory -Force -Path desktop/dist/bundled-runtime | Out-Null
 
       - name: Rust tests
         run: cargo test --manifest-path desktop/src-tauri/Cargo.toml -- --nocapture --test-threads=1

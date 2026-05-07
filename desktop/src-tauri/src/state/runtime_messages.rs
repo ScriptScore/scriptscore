@@ -387,6 +387,7 @@ mod tests {
         assert_eq!(events[0].payload["studentRef"], "student_1");
         assert_eq!(events[0].payload["scope"]["student_ref"], "student_1");
 
+        drop(connection);
         std::fs::remove_dir_all(&test_root).expect("test project should clean up");
     }
 

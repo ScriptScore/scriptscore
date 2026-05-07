@@ -119,10 +119,12 @@ class PreparePortablePythonTests(unittest.TestCase):
             self.assertEqual(root, managed_root)
 
     def test_install_locked_requirements_allows_uv_managed_python(self) -> None:
+        python_path = Path("/portable/bin/python3")
+        requirements_path = Path("/tmp/runtime-requirements.txt")
         with mock.patch.object(MODULE.subprocess, "run") as run:
             MODULE.install_locked_requirements(
-                Path("/portable/bin/python3"),
-                Path("/tmp/runtime-requirements.txt"),
+                python_path,
+                requirements_path,
                 "cpu",
             )
 
@@ -132,12 +134,12 @@ class PreparePortablePythonTests(unittest.TestCase):
                 "pip",
                 "install",
                 "--python",
-                "/portable/bin/python3",
+                str(python_path),
                 "--break-system-packages",
                 "--torch-backend",
                 "cpu",
                 "-r",
-                "/tmp/runtime-requirements.txt",
+                str(requirements_path),
             ],
             check=True,
             env=mock.ANY,
@@ -185,12 +187,18 @@ class PreparePortablePythonTests(unittest.TestCase):
             target_bin.mkdir(parents=True)
             (target_bin / "python3").write_text("", encoding="utf-8")
             uv_alias = base / "managed" / "cpython-3.12-linux-x86_64-gnu"
-            uv_alias.symlink_to(target, target_is_directory=True)
+            try:
+                uv_alias.symlink_to(target, target_is_directory=True)
+            except OSError as exc:
+                self.skipTest(f"symlink creation is unavailable: {exc}")
 
             output = base / "dist" / "portable-python"
             stale_target = base / "gone" / "python"
             output.parent.mkdir(parents=True)
-            output.symlink_to(stale_target, target_is_directory=True)
+            try:
+                output.symlink_to(stale_target, target_is_directory=True)
+            except OSError as exc:
+                self.skipTest(f"symlink creation is unavailable: {exc}")
 
             MODULE.publish_staged_root(uv_alias, output)
 

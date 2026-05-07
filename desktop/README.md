@@ -25,7 +25,21 @@ cargo test --all-targets
 
 Use the scripts under `desktop/scripts/` for local desktop development and packaging experiments. Public preview packaging must include generated legal artifacts under `desktop/dist/legal/`.
 
-Linux is the only verified desktop packaging target for the current public preview. Windows and macOS desktop runtime and installer paths are in progress and unverified.
+On Linux, launch the desktop app with:
+
+```bash
+./desktop/scripts/dev-desktop.sh
+```
+
+On Windows, launch the desktop app with:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\desktop\scripts\dev-desktop.ps1
+```
+
+The Windows launcher does not require `cargo-tauri`; it starts the Vite frontend, builds the Rust host with Cargo, opens the desktop app, and cleans up the frontend server it started when the app exits.
+
+Linux is the only verified desktop packaging target for the current public preview. Windows desktop runtime development is in progress, and Windows installer packaging remains unverified. macOS desktop runtime and installer paths are in progress and unverified.
 
 ## Provider Modes
 

@@ -27,17 +27,17 @@ use std::mem;
 #[cfg(windows)]
 use std::os::windows::ffi::OsStrExt;
 #[cfg(windows)]
-use std::os::windows::io::{FromRawHandle, OwnedHandle, RawHandle};
+use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle, RawHandle};
 #[cfg(windows)]
 use std::ptr;
 #[cfg(windows)]
 use windows_sys::Win32::Foundation::{
-    ERROR_IO_PENDING, ERROR_PIPE_CONNECTED, HANDLE, INVALID_HANDLE_VALUE, WAIT_OBJECT_0,
-    WAIT_TIMEOUT,
+    ERROR_BROKEN_PIPE, ERROR_IO_PENDING, ERROR_PIPE_CONNECTED, HANDLE, INVALID_HANDLE_VALUE,
+    WAIT_OBJECT_0, WAIT_TIMEOUT,
 };
 #[cfg(windows)]
 use windows_sys::Win32::Storage::FileSystem::{
-    FILE_FLAG_FIRST_PIPE_INSTANCE, FILE_FLAG_OVERLAPPED, PIPE_ACCESS_DUPLEX,
+    ReadFile, WriteFile, FILE_FLAG_FIRST_PIPE_INSTANCE, FILE_FLAG_OVERLAPPED, PIPE_ACCESS_DUPLEX,
 };
 #[cfg(windows)]
 use windows_sys::Win32::System::Pipes::{
@@ -49,6 +49,8 @@ use windows_sys::Win32::System::Threading::{CreateEventW, WaitForSingleObject};
 use windows_sys::Win32::System::IO::{CancelIoEx, GetOverlappedResult, OVERLAPPED};
 
 const WORKER_MARKER_PREFIX: &str = "scriptscore-desktop-worker-";
+#[cfg(windows)]
+const WINDOWS_PIPE_WRITE_CHUNK_BYTES: usize = 16 * 1024;
 
 fn worker_marker_path(worker_pid: u32) -> PathBuf {
     std::env::temp_dir().join(format!("{WORKER_MARKER_PREFIX}{worker_pid}.pid"))
@@ -193,7 +195,10 @@ impl WorkerClient {
         #[cfg(windows)]
         {
             let pipe_name = pipe_name();
-            let handle = create_named_pipe_server(&pipe_name)?;
+            let request_pipe_name = format!("{pipe_name}-request");
+            let response_pipe_name = format!("{pipe_name}-response");
+            let request_handle = create_named_pipe_server(&request_pipe_name)?;
+            let response_handle = create_named_pipe_server(&response_pipe_name)?;
             let mut command = Command::new(&launch_spec.python_executable);
             command
                 .current_dir(&launch_spec.current_dir)
@@ -212,11 +217,20 @@ impl WorkerClient {
             let mut child = match command.spawn() {
                 Ok(child) => child,
                 Err(err) => {
-                    close_pipe_handle(handle);
+                    close_pipe_handle(request_handle);
+                    close_pipe_handle(response_handle);
                     return Err(err.into());
                 }
             };
-            let stream = WorkerStream::Pipe(accept_worker_named_pipe(handle, &mut child)?);
+            let writer = match accept_worker_named_pipe(request_handle, &mut child) {
+                Ok(pipe) => pipe,
+                Err(err) => {
+                    close_pipe_handle(response_handle);
+                    return Err(err);
+                }
+            };
+            let reader = accept_worker_named_pipe(response_handle, &mut child)?;
+            let stream = WorkerStream::Pipe(WindowsPipeStream::new(reader, writer));
             let marker_path = write_worker_marker(child.id());
             let mut client = Self {
                 child,
@@ -433,7 +447,7 @@ enum WorkerStream {
     #[cfg(not(windows))]
     Unix(UnixStream),
     #[cfg(windows)]
-    Pipe(File),
+    Pipe(WindowsPipeStream),
 }
 
 impl WorkerStream {
@@ -442,7 +456,7 @@ impl WorkerStream {
             #[cfg(not(windows))]
             Self::Unix(stream) => Ok(Self::Unix(stream.try_clone()?)),
             #[cfg(windows)]
-            Self::Pipe(file) => Ok(Self::Pipe(file.try_clone()?)),
+            Self::Pipe(pipe) => Ok(Self::Pipe(pipe.try_clone()?)),
         }
     }
 }
@@ -453,7 +467,7 @@ impl Read for WorkerStream {
             #[cfg(not(windows))]
             Self::Unix(stream) => stream.read(buf),
             #[cfg(windows)]
-            Self::Pipe(file) => file.read(buf),
+            Self::Pipe(pipe) => pipe.read(buf),
         }
     }
 }
@@ -464,7 +478,7 @@ impl Write for WorkerStream {
             #[cfg(not(windows))]
             Self::Unix(stream) => stream.write(buf),
             #[cfg(windows)]
-            Self::Pipe(file) => file.write(buf),
+            Self::Pipe(pipe) => pipe.write(buf),
         }
     }
 
@@ -473,9 +487,126 @@ impl Write for WorkerStream {
             #[cfg(not(windows))]
             Self::Unix(stream) => stream.flush(),
             #[cfg(windows)]
-            Self::Pipe(file) => file.flush(),
+            Self::Pipe(pipe) => pipe.flush(),
         }
     }
+}
+
+#[cfg(windows)]
+struct WindowsPipeStream {
+    reader: File,
+    writer: File,
+}
+
+#[cfg(windows)]
+impl WindowsPipeStream {
+    fn new(reader: File, writer: File) -> Self {
+        Self { reader, writer }
+    }
+
+    fn try_clone(&self) -> std::io::Result<Self> {
+        Ok(Self::new(
+            self.reader.try_clone()?,
+            self.writer.try_clone()?,
+        ))
+    }
+
+    fn read_handle(&self) -> HANDLE {
+        self.reader.as_raw_handle() as HANDLE
+    }
+
+    fn write_handle(&self) -> HANDLE {
+        self.writer.as_raw_handle() as HANDLE
+    }
+}
+
+#[cfg(windows)]
+impl Read for WindowsPipeStream {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        if buf.is_empty() {
+            return Ok(0);
+        }
+
+        let event_handle = unsafe { CreateEventW(ptr::null(), 1, 0, ptr::null()) };
+        if event_handle.is_null() {
+            return Err(std::io::Error::last_os_error());
+        }
+        let _event = unsafe { OwnedHandle::from_raw_handle(event_handle as RawHandle) };
+        let mut overlapped: OVERLAPPED = unsafe { mem::zeroed() };
+        overlapped.hEvent = event_handle;
+
+        let read = unsafe {
+            ReadFile(
+                self.read_handle(),
+                buf.as_mut_ptr().cast(),
+                buf.len().try_into().unwrap_or(u32::MAX),
+                ptr::null_mut(),
+                &mut overlapped,
+            )
+        };
+        wait_for_overlapped_pipe_io(self.read_handle(), &mut overlapped, read)
+    }
+}
+
+#[cfg(windows)]
+impl Write for WindowsPipeStream {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        if buf.is_empty() {
+            return Ok(0);
+        }
+
+        let chunk_len = buf.len().min(WINDOWS_PIPE_WRITE_CHUNK_BYTES);
+        let chunk = &buf[..chunk_len];
+        let event_handle = unsafe { CreateEventW(ptr::null(), 1, 0, ptr::null()) };
+        if event_handle.is_null() {
+            return Err(std::io::Error::last_os_error());
+        }
+        let _event = unsafe { OwnedHandle::from_raw_handle(event_handle as RawHandle) };
+        let mut overlapped: OVERLAPPED = unsafe { mem::zeroed() };
+        overlapped.hEvent = event_handle;
+
+        let written = unsafe {
+            WriteFile(
+                self.write_handle(),
+                chunk.as_ptr().cast(),
+                chunk.len().try_into().unwrap_or(u32::MAX),
+                ptr::null_mut(),
+                &mut overlapped,
+            )
+        };
+        wait_for_overlapped_pipe_io(self.write_handle(), &mut overlapped, written)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+#[cfg(windows)]
+fn wait_for_overlapped_pipe_io(
+    handle: HANDLE,
+    overlapped: &mut OVERLAPPED,
+    immediate_result: i32,
+) -> std::io::Result<usize> {
+    if immediate_result == 0 {
+        let error = std::io::Error::last_os_error();
+        match error.raw_os_error() {
+            Some(code) if code == ERROR_IO_PENDING as i32 => {}
+            Some(code) if code == ERROR_BROKEN_PIPE as i32 => return Ok(0),
+            _ => return Err(error),
+        }
+    }
+
+    let mut transferred = 0;
+    let completed = unsafe { GetOverlappedResult(handle, overlapped, &mut transferred, 1) };
+    if completed == 0 {
+        let error = std::io::Error::last_os_error();
+        if error.raw_os_error() == Some(ERROR_BROKEN_PIPE as i32) {
+            return Ok(0);
+        }
+        return Err(error);
+    }
+    Ok(transferred as usize)
 }
 
 #[cfg(not(windows))]
@@ -527,18 +658,18 @@ fn accept_worker_named_pipe(handle: HANDLE, child: &mut Child) -> HostResult<Fil
 
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
-        match wait_for_named_pipe_connect(handle, &connect_state.overlapped, 20)? {
+        match wait_for_named_pipe_connect(handle, connect_state.overlapped.as_ref(), 20)? {
             PipeConnectPoll::Connected => return Ok(file_from_pipe_handle(handle)),
             PipeConnectPoll::Pending => {
                 if child.try_wait()?.is_some() {
-                    cancel_named_pipe_connect(handle, &connect_state.overlapped);
+                    cancel_named_pipe_connect(handle, connect_state.overlapped.as_ref());
                     close_pipe_handle(handle);
                     return Err(HostError::Worker(
                         "Desktop worker exited before connecting to the named pipe.".into(),
                     ));
                 }
                 if Instant::now() >= deadline {
-                    cancel_named_pipe_connect(handle, &connect_state.overlapped);
+                    cancel_named_pipe_connect(handle, connect_state.overlapped.as_ref());
                     close_pipe_handle(handle);
                     return Err(HostError::Worker(
                         "Timed out waiting for the desktop worker to connect.".into(),
@@ -552,7 +683,7 @@ fn accept_worker_named_pipe(handle: HANDLE, child: &mut Child) -> HostResult<Fil
 #[cfg(windows)]
 struct PendingNamedPipeConnect {
     connected: bool,
-    overlapped: OVERLAPPED,
+    overlapped: Box<OVERLAPPED>,
     _event: OwnedHandle,
 }
 
@@ -570,10 +701,10 @@ fn begin_named_pipe_connect(handle: HANDLE) -> HostResult<PendingNamedPipeConnec
     }
 
     let event = unsafe { OwnedHandle::from_raw_handle(event_handle as RawHandle) };
-    let mut overlapped: OVERLAPPED = unsafe { mem::zeroed() };
+    let mut overlapped: Box<OVERLAPPED> = Box::new(unsafe { mem::zeroed() });
     overlapped.hEvent = event_handle;
 
-    let connected = unsafe { ConnectNamedPipe(handle, &mut overlapped) };
+    let connected = unsafe { ConnectNamedPipe(handle, overlapped.as_mut()) };
     if connected != 0 {
         return Ok(PendingNamedPipeConnect {
             connected: true,

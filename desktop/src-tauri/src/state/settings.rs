@@ -48,7 +48,11 @@ pub(crate) fn list_llm_models(
         .and_then(|value| value.get("models"))
         .and_then(Value::as_array)
         .ok_or_else(|| {
-            HostError::Protocol("runtime.list-llm-models response was missing data.models.".into())
+            missing_runtime_data_error(
+                &completed.result.envelope,
+                "runtime.list-llm-models",
+                "data.models",
+            )
         })?;
 
     raw_models
@@ -104,8 +108,10 @@ pub(crate) fn validate_llm_model(
         .get("data")
         .cloned()
         .ok_or_else(|| {
-            HostError::Protocol(
-                "runtime.validate-llm-model response was missing envelope data.".into(),
+            missing_runtime_data_error(
+                &completed.result.envelope,
+                "runtime.validate-llm-model",
+                "envelope data",
             )
         })?;
 
@@ -114,4 +120,18 @@ pub(crate) fn validate_llm_model(
             "runtime.validate-llm-model returned an invalid validation payload: {err}"
         ))
     })
+}
+
+fn missing_runtime_data_error(envelope: &Value, command_name: &str, field_name: &str) -> HostError {
+    if let Some(message) = envelope
+        .get("error")
+        .and_then(Value::as_object)
+        .and_then(|error| error.get("message"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|message| !message.is_empty())
+    {
+        return HostError::Protocol(format!("{command_name} failed: {message}"));
+    }
+    HostError::Protocol(format!("{command_name} response was missing {field_name}."))
 }
