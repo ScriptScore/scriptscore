@@ -171,14 +171,36 @@ fn dev_checkout_paddle_model_dir() -> HostResult<PathBuf> {
 }
 
 fn paddle_model_env(candidate: PathBuf) -> Vec<(OsString, OsString)> {
-    if candidate.is_dir() {
-        vec![(
-            OsString::from("SCRIPTSCORE_OCR_PADDLE_MODEL_DIR"),
-            candidate.into_os_string(),
-        )]
+    if is_valid_paddle_model_dir(&candidate) {
+        let candidate = candidate.into_os_string();
+        vec![
+            (
+                OsString::from("SCRIPTSCORE_DETECT_PADDLE_MODEL_DIR"),
+                candidate.clone(),
+            ),
+            (
+                OsString::from("SCRIPTSCORE_OCR_PADDLE_MODEL_DIR"),
+                candidate.clone(),
+            ),
+            (
+                OsString::from("SCRIPTSCORE_PII_PADDLE_MODEL_DIR"),
+                candidate,
+            ),
+        ]
     } else {
         Vec::new()
     }
+}
+
+fn is_valid_paddle_model_dir(path: &Path) -> bool {
+    ["det", "rec"].iter().all(|name| {
+        let model_dir = path.join(name);
+        model_dir.is_dir()
+            && (model_dir.join("inference.json").is_file()
+                || model_dir.join("inference.pdmodel").is_file())
+            && (!model_dir.join("inference.pdmodel").is_file()
+                || model_dir.join("inference.pdiparams").is_file())
+    })
 }
 
 #[cfg(test)]
@@ -207,8 +229,7 @@ mod tests {
         let runtime_root = resource_dir.join("runtime");
         fs::create_dir_all(runtime_root.join("python/bin")).expect("runtime dir should create");
         fs::create_dir_all(runtime_root.join("cli-src")).expect("cli source dir should create");
-        fs::create_dir_all(resource_dir.join("models/paddle"))
-            .expect("bundled paddle model dir should create");
+        write_paddle_model_layout(&resource_dir.join("models/paddle"));
         fs::write(
             runtime_root.join("runtime-manifest.json"),
             r#"{
@@ -232,10 +253,20 @@ mod tests {
         assert_eq!(python_path, runtime_root.join("cli-src").into_os_string());
         assert_eq!(
             spec.extra_env,
-            vec![(
-                "SCRIPTSCORE_OCR_PADDLE_MODEL_DIR".into(),
-                resource_dir.join("models/paddle").into_os_string(),
-            )]
+            vec![
+                (
+                    "SCRIPTSCORE_DETECT_PADDLE_MODEL_DIR".into(),
+                    resource_dir.join("models/paddle").into_os_string(),
+                ),
+                (
+                    "SCRIPTSCORE_OCR_PADDLE_MODEL_DIR".into(),
+                    resource_dir.join("models/paddle").into_os_string(),
+                ),
+                (
+                    "SCRIPTSCORE_PII_PADDLE_MODEL_DIR".into(),
+                    resource_dir.join("models/paddle").into_os_string(),
+                ),
+            ]
         );
 
         let _ = fs::remove_dir_all(resource_dir);
@@ -313,5 +344,15 @@ mod tests {
             .contains("Bundled desktop runtime manifest was not found"));
 
         let _ = fs::remove_dir_all(resource_dir);
+    }
+
+    fn write_paddle_model_layout(root: &PathBuf) {
+        for name in ["det", "rec"] {
+            let model_dir = root.join(name);
+            fs::create_dir_all(&model_dir).expect("model dir should create");
+            fs::write(model_dir.join("inference.pdmodel"), "model").expect("model should write");
+            fs::write(model_dir.join("inference.pdiparams"), "params")
+                .expect("params should write");
+        }
     }
 }

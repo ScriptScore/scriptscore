@@ -137,6 +137,37 @@ describe('shell store', () => {
     teardownRuntimeJobBridge();
   });
 
+  it('keeps background provider checks out of the global runtime error', async () => {
+    desktopMocks.isDesktopHost.mockReturnValue(true);
+    let runtimeHandler: ((event: Record<string, unknown>) => void) | null = null;
+    desktopMocks.listenRuntimeJobEvents.mockImplementation(async (handler) => {
+      runtimeHandler = handler as (event: Record<string, unknown>) => void;
+      return vi.fn();
+    });
+
+    await ensureRuntimeJobBridge();
+
+    if (runtimeHandler === null) {
+      throw new Error('runtime handler should be registered');
+    }
+    (runtimeHandler as (event: Record<string, unknown>) => void)({
+      eventType: 'job_failed',
+      commandName: 'runtime.list-llm-models',
+      workerStatus: 'ready',
+      requestId: 'req-1',
+      jobId: 'job-1',
+      payload: {
+        error: {
+          message: 'Ollama is unreachable.',
+          code: 'ollama_unreachable'
+        }
+      }
+    });
+
+    expect(get(shellState).lastRuntimeError).toBeNull();
+    teardownRuntimeJobBridge();
+  });
+
   it('applies worker activity snapshots from runtime events', async () => {
     desktopMocks.isDesktopHost.mockReturnValue(true);
     let runtimeHandler: ((event: Record<string, unknown>) => void) | null = null;

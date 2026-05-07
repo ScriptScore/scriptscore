@@ -23,6 +23,17 @@
     return JSON.stringify(value, null, 2);
   }
 
+  function responsePayload(traceState: JobTraceState): Record<string, unknown> {
+    const payload: Record<string, unknown> = {};
+    if (traceState.result) {
+      payload.result = traceState.result;
+    }
+    if (traceState.error) {
+      payload.error = traceState.error;
+    }
+    return payload;
+  }
+
   function summarizeEvent(event: JobTraceState['events'][number]): string {
     if (event.eventType === 'started' || event.eventType === 'completed') {
       const completed = event.progress?.completed;
@@ -60,7 +71,7 @@
       activeTab === 'request'
         ? formatJson(trace.request)
         : activeTab === 'response'
-          ? formatJson(trace.result)
+          ? formatJson(responsePayload(trace))
           : JSON.stringify(trace.events, null, 2);
 
     try {
@@ -128,7 +139,11 @@
         </div>
       {:else if activeTab === 'response'}
         <div>
-          <pre class="mt-2 overflow-x-auto whitespace-pre-wrap text-xs text-workspace-text-secondary">{formatJson(trace.result)}</pre>
+          {#if trace.result}
+            <pre class="mt-2 overflow-x-auto whitespace-pre-wrap text-xs text-workspace-text-secondary">{formatJson(trace.result)}</pre>
+          {:else}
+            <div class="mt-2 text-xs text-workspace-text-muted">No response data.</div>
+          {/if}
           {#if trace.error}
             <InlineMessage class="mt-3" tone="warning">
               <div class="text-[11px] font-semibold uppercase tracking-[0.18em]">Error</div>

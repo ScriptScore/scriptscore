@@ -97,7 +97,14 @@ function terminalFailureMessage(payload: Record<string, unknown>): string | null
   return null;
 }
 
+function isBackgroundProviderProbe(commandName: string | null | undefined): boolean {
+  return commandName === 'runtime.list-llm-models' || commandName === 'runtime.validate-llm-model';
+}
+
 function currentRuntimeError(current: ShellState, event: RuntimeJobEvent): string | null {
+  if (isBackgroundProviderProbe(event.commandName)) {
+    return current.lastRuntimeError;
+  }
   if (event.eventType === 'runtime_error' && typeof event.payload.message === 'string') {
     return event.payload.message;
   }
