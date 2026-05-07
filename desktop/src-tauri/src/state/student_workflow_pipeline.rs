@@ -728,6 +728,10 @@ fn run_detect_batch(
             return Ok(crop_targets_by_ref);
         }
     };
+    if let Some(err) = detect_batch_command_error(&completed) {
+        mark_refs_failed_and_emit(project_path, workflow_state, event_sink, &detect_refs, &err)?;
+        return Ok(crop_targets_by_ref);
+    }
     crop_targets_by_ref.extend(apply_detect_batch_results(
         workspace,
         project_path,
@@ -1648,6 +1652,25 @@ fn mark_refs_failed_and_emit(
 
 fn completed_was_cancelled(completed: &CompletedWorkerJob) -> bool {
     completed.result.terminal_type == "job_cancelled"
+}
+
+fn detect_batch_command_error(completed: &CompletedWorkerJob) -> Option<HostError> {
+    if completed
+        .result
+        .envelope
+        .get("data")
+        .and_then(Value::as_object)
+        .is_some()
+    {
+        return None;
+    }
+    Some(
+        success_data(&completed.result.envelope)
+            .err()
+            .unwrap_or_else(|| {
+                HostError::Protocol("Detect command completed without result data.".into())
+            }),
+    )
 }
 
 fn mark_refs_stopped_and_emit(
@@ -2865,16 +2888,17 @@ mod tests {
         apply_parse_batch_results, apply_pii_batch_results, build_batch_answer_score_requests,
         build_canonicalize_batch_targets, build_crop_targets, build_detect_review,
         classify_batch_resume_points, completed_was_cancelled, crop_rows_from_answers,
-        crop_targets_for_cli, emit_ready_for_empty_batch_continuation, ensure_submission_row,
-        failed_resume_point, feedback_request_rows, filtered_completed_by_student,
-        finish_batch_grading, intake_map, mark_refs_failed_with_message,
-        mark_refs_stopped_and_emit, persist_batch_feedback_rows, persist_batch_preliminary_rows,
-        pii_identity_unavailable_warning, preliminary_grading_request_payload,
-        preliminary_grading_runtime_config, prepare_pii_batch_inputs, record_submission_job_id,
-        reset_submission_for_restart, resolve_pii_model_dir_candidates, rows_for_student,
-        sanitized_pii_batch_request_payload, sanitized_pii_request_payload, save_workflow_state,
-        save_workflow_state_and_emit, settle_empty_grading_refs, sorted_keys,
-        split_detect_refs_by_reusable_crop_targets, FailedResumePoint,
+        crop_targets_for_cli, detect_batch_command_error, emit_ready_for_empty_batch_continuation,
+        ensure_submission_row, failed_resume_point, feedback_request_rows,
+        filtered_completed_by_student, finish_batch_grading, intake_map,
+        mark_refs_failed_with_message, mark_refs_stopped_and_emit, persist_batch_feedback_rows,
+        persist_batch_preliminary_rows, pii_identity_unavailable_warning,
+        preliminary_grading_request_payload, preliminary_grading_runtime_config,
+        prepare_pii_batch_inputs, record_submission_job_id, reset_submission_for_restart,
+        resolve_pii_model_dir_candidates, rows_for_student, sanitized_pii_batch_request_payload,
+        sanitized_pii_request_payload, save_workflow_state, save_workflow_state_and_emit,
+        settle_empty_grading_refs, sorted_keys, split_detect_refs_by_reusable_crop_targets,
+        FailedResumePoint,
     };
     use crate::models::{
         AppSettings, ExamWorkspaceState, InstructorProfile, ProjectConfig, ProjectSummary,
@@ -3917,6 +3941,39 @@ mod tests {
         assert_eq!(events[0].payload["workflowStatus"], "attention");
 
         let _ = std::fs::remove_dir_all(&test_root);
+    }
+
+    #[test]
+    fn detect_batch_command_error_reports_missing_paddleocr_models() {
+        let completed = CompletedWorkerJob {
+            job_id: "detect-batch".into(),
+            result: WorkerJobResult {
+                terminal_type: "command_error".into(),
+                terminal_payload: json!({}),
+                envelope: json!({
+                    "error": {
+                        "category": "external_dependency",
+                        "code": "ocr_dependency_unavailable",
+                        "details": {
+                            "error": "paddleocr backend unavailable: missing PaddleOCR det model directory: C:\\scriptscore\\scriptscore\\cli\\models\\paddle\\det",
+                            "error_type": "RuntimeError",
+                            "model_dir": "C:\\scriptscore\\scriptscore\\cli\\models\\paddle"
+                        },
+                        "message": "PaddleOCR dependencies or models are not available.",
+                        "retryable": false,
+                        "write_state": "no_write"
+                    }
+                }),
+                events: Vec::new(),
+            },
+        };
+
+        let err = detect_batch_command_error(&completed)
+            .expect("detect command error should be recognized");
+        assert_eq!(
+            err.to_string(),
+            "Command failed: PaddleOCR dependencies or models are not available."
+        );
     }
 
     #[test]
