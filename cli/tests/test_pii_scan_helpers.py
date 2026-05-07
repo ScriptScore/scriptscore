@@ -164,6 +164,10 @@ def test_test_override_tokens_validate_and_normalize(
 def test_paddle_reader_normalizes_dict_and_legacy_payloads(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("SCRIPTSCORE_TEST_PII_OCR_WORDS", raising=False)
 
+    class _EmptyPageEngine:
+        def ocr(self, _image: object) -> list[None]:
+            return [None]
+
     class _DictEngine:
         def ocr(self, _image: object) -> list[dict[str, object]]:
             return [
@@ -182,6 +186,10 @@ def test_paddle_reader_normalizes_dict_and_legacy_payloads(monkeypatch: pytest.M
     dict_result = dict_reader.read(np.full((8, 8), 255, dtype=np.uint8))
 
     assert [(token.text, token.confidence) for token in dict_result.tokens] == [("Alice", 1.0)]
+
+    empty_page_reader = object.__new__(PaddleTextReader)
+    empty_page_reader._engine = _EmptyPageEngine()
+    assert empty_page_reader.read(np.full((8, 8, 3), 255, dtype=np.uint8)).tokens == []
 
     class _LegacyEngine:
         def ocr(
