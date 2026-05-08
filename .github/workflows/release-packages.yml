@@ -153,7 +153,7 @@ jobs:
       - name: Install Windows package dependencies
         if: ${{ runner.os == 'Windows' }}
         shell: powershell
-        run: choco install nsis wixtoolset -y --no-progress
+        run: choco install lessmsi nsis wixtoolset -y --no-progress
 
       - name: Install frontend dependencies
         working-directory: desktop/frontend
@@ -277,9 +277,16 @@ jobs:
           mkdir -p "${payload_root}"
           (
             cd "${tmp_dir}"
-            "${GITHUB_WORKSPACE}/${appimage}" --appimage-extract >/tmp/scriptscore-appimage-extract.log
+            set +e
+            "${GITHUB_WORKSPACE}/${appimage}" --appimage-extract >/tmp/scriptscore-appimage-extract.log 2>&1
+            extract_status=$?
+            set -e
             test -d squashfs-root
             test -d squashfs-root/usr
+            if [[ ${extract_status} -ne 0 ]]; then
+              echo "warning: AppImage extraction returned ${extract_status} after creating squashfs-root" >&2
+              cat /tmp/scriptscore-appimage-extract.log >&2
+            fi
             cp -R squashfs-root "${payload_root}/appimage"
           )
           deb=$(find desktop/src-tauri/target -type f -name '*.deb' | head -n 1)
@@ -319,9 +326,8 @@ jobs:
           if ($null -eq $msi) { throw "MSI package was not found" }
           $msiPayload = Join-Path $payloadRoot "msi"
           New-Item -ItemType Directory -Force -Path $msiPayload | Out-Null
-          $msiArgs = "/a `"$($msi.FullName)`" /qn TARGETDIR=`"$msiPayload`""
-          $msiProcess = Start-Process msiexec.exe -ArgumentList $msiArgs -Wait -PassThru
-          if ($msiProcess.ExitCode -ne 0) { throw "MSI administrative extraction failed with exit code $($msiProcess.ExitCode)" }
+          lessmsi.exe x $msi.FullName $msiPayload
+          if ($LASTEXITCODE -ne 0) { throw "MSI extraction failed with exit code $LASTEXITCODE" }
 
           $nsis = Get-ChildItem desktop/src-tauri/target -Recurse -Filter *.exe | Select-Object -First 1
           if ($null -eq $nsis) { throw "NSIS package was not found" }
