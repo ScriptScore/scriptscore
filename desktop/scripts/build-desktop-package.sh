@@ -83,9 +83,13 @@ if [[ "$(uname -s)" == "Linux" ]] && bundle_selection_includes "${BUNDLES}" "app
   bundled_python_library_paths=()
   if [[ -d "${bundled_python_lib}" ]]; then
     bundled_python_library_paths+=("${bundled_python_lib}")
-    while IFS= read -r wheel_library_dir; do
-      bundled_python_library_paths+=("${wheel_library_dir}")
-    done < <(find "${bundled_python_lib}" -type d -name "*.libs" | sort)
+    while IFS= read -r shared_library_dir; do
+      bundled_python_library_paths+=("${shared_library_dir}")
+    done < <(
+      find "${bundled_python_lib}" -type f \( -name "*.so" -o -name "*.so.*" \) \
+        -exec dirname {} \; |
+        sort -u
+    )
 
     old_ifs=${IFS}
     IFS=:

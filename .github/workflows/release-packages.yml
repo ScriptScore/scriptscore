@@ -207,6 +207,9 @@ jobs:
           ./desktop/scripts/prepare-portable-python.sh
           echo "SCRIPTSCORE_DESKTOP_PORTABLE_PYTHON_ROOT=$(pwd)/desktop/dist/portable-python" >> "${GITHUB_ENV}"
 
+      - name: Install Paddle model resources
+        run: cli/scripts/install_paddle_models.sh cli/models/paddle
+
       - name: Prepare bundled runtime and legal artifacts
         run: |
           ./desktop/scripts/prepare-bundled-runtime.sh
