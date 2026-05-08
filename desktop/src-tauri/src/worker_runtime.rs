@@ -206,7 +206,7 @@ fn is_valid_paddle_model_dir(path: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use std::fs;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
     use serde_json::json;
@@ -346,7 +346,7 @@ mod tests {
         let _ = fs::remove_dir_all(resource_dir);
     }
 
-    fn write_paddle_model_layout(root: &PathBuf) {
+    fn write_paddle_model_layout(root: &Path) {
         for name in ["det", "rec"] {
             let model_dir = root.join(name);
             fs::create_dir_all(&model_dir).expect("model dir should create");

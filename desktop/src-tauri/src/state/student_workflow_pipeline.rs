@@ -980,8 +980,7 @@ fn run_pii_batch(
             "students": pii_students,
             "pii_runtime_config": {
                 "paddle_model_dir": resolve_pii_model_dir(exec.state, settings)?
-                    .to_string_lossy()
-                    .into_owned(),
+                    .to_worker_payload_path(),
                 "max_workers": 2,
             },
         }),
@@ -2377,8 +2376,7 @@ fn run_pii_stage(
             }],
             "pii_runtime_config": {
                 "paddle_model_dir": resolve_pii_model_dir(exec.state, settings)?
-                    .to_string_lossy()
-                    .into_owned(),
+                    .to_worker_payload_path(),
                 "max_workers": 2,
             },
         }),
@@ -2623,6 +2621,35 @@ fn resolve_pii_model_dir_candidates(
     Err(HostError::Validation(
         "Paddle model directory was not found. Set SCRIPTSCORE_PII_PADDLE_MODEL_DIR, configure the desktop PII model directory, or install bundled/dev paddle models.".into(),
     ))
+}
+
+trait WorkerPayloadPath {
+    fn to_worker_payload_path(&self) -> String;
+}
+
+impl WorkerPayloadPath for Path {
+    fn to_worker_payload_path(&self) -> String {
+        normalize_worker_payload_path(self)
+            .to_string_lossy()
+            .into_owned()
+    }
+}
+
+#[cfg(windows)]
+fn normalize_worker_payload_path(path: &Path) -> std::path::PathBuf {
+    let path_text = path.to_string_lossy();
+    if let Some(rest) = path_text.strip_prefix(r"\\?\UNC\") {
+        std::path::PathBuf::from(format!(r"\\{rest}"))
+    } else if let Some(rest) = path_text.strip_prefix(r"\\?\") {
+        std::path::PathBuf::from(rest)
+    } else {
+        path.to_path_buf()
+    }
+}
+
+#[cfg(not(windows))]
+fn normalize_worker_payload_path(path: &Path) -> std::path::PathBuf {
+    path.to_path_buf()
 }
 
 fn is_valid_paddle_model_dir(path: &Path) -> bool {
@@ -2909,7 +2936,7 @@ mod tests {
         resolve_pii_model_dir_candidates, rows_for_student, sanitized_pii_batch_request_payload,
         sanitized_pii_request_payload, save_workflow_state, save_workflow_state_and_emit,
         settle_empty_grading_refs, sorted_keys, split_detect_refs_by_reusable_crop_targets,
-        FailedResumePoint,
+        FailedResumePoint, WorkerPayloadPath,
     };
     use crate::models::{
         AppSettings, ExamWorkspaceState, InstructorProfile, ProjectConfig, ProjectSummary,
@@ -4867,6 +4894,25 @@ mod tests {
         assert!(error
             .to_string()
             .contains("Paddle model directory was not found"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn worker_payload_path_strips_windows_verbatim_prefix() {
+        let path = Path::new(
+            r"\\?\C:\scriptscore\scriptscore\desktop\src-tauri\target\debug\models\paddle",
+        );
+
+        assert_eq!(
+            path.to_worker_payload_path(),
+            r"C:\scriptscore\scriptscore\desktop\src-tauri\target\debug\models\paddle"
+        );
+
+        let unc_path = Path::new(r"\\?\UNC\server\share\models\paddle");
+        assert_eq!(
+            unc_path.to_worker_payload_path(),
+            r"\\server\share\models\paddle"
+        );
     }
 
     fn write_paddle_model_layout(root: &Path) {

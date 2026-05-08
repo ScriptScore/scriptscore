@@ -6,6 +6,71 @@ These commands are intended for a clean public checkout.
 
 Linux is the verified desktop packaging target for the current public preview. Windows and macOS build/runtime paths are in progress and unverified; installer generation for those platforms should stay disabled until dedicated platform testing is complete.
 
+## Windows Development
+
+Windows desktop development uses PowerShell helpers because the top-level `Makefile` and several quality scripts assume a Unix shell. Run the Windows tool bootstrap first if the repo-local tools are missing:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\windows-dev.ps1
+```
+
+The Windows helpers prefer these repo-local tools when present:
+
+- `C:\scriptscore\.tools\uv\uv.exe`
+- `C:\scriptscore\.tools\node-v20.20.2-win-x64\npm.cmd`
+- `C:\scriptscore\.tools\mingit\cmd\git.exe`
+- `cli\.venv\Scripts\python.exe`
+
+To run the review-quality equivalent on Windows:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\desktop\scripts\review-quality.ps1
+```
+
+This runs the formatting, lint, CLI, frontend, Rust coverage, Rust metrics, and license checks that are practical on Windows. `cargo-geiger` is opt-in because full `cargo-geiger` is currently impractical in the Windows development environment:
+
+- full mode performs a `cargo clean` before checking the workspace
+- the desktop/Tauri dependency graph is large enough that the clean rebuild can run for hours on Windows
+- JSON output is written only after the scan completes, so the report file may remain empty while the command appears hung
+
+For day-to-day Windows review, leave the unsafe report disabled and rely on CI/Linux for the full `unsafe-report` target. If you need a quick local signal that avoids the clean rebuild, run the helper with `-IncludeUnsafeReport` only when you are prepared for a long run, or run `cargo geiger --forbid-only --output-format Json` manually for source-entry-point coverage.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\desktop\scripts\review-quality.ps1 -IncludeUnsafeReport
+```
+
+Use `-CheckPrerequisitesOnly` for a quick toolchain sanity check, and `-SkipRustCoverage` when iterating on unrelated changes.
+
+PowerShell text redirection can write encodings that break JSON report parsing. The Windows review helper uses byte-preserving `cmd.exe` redirection for `rust-code-analysis-cli`; prefer the helper over manually redirecting those reports in PowerShell.
+
+To install PaddleOCR models on Windows:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\cli\scripts\install_paddle_models.ps1
+```
+
+The default destination is `cli\models\paddle`, which is one of the desktop development fallback locations. The installed layout matches the Linux installer:
+
+```text
+cli\models\paddle\
+  det\
+    inference.yml
+    inference.pdmodel or inference.json
+    inference.pdiparams
+  rec\
+    inference.yml
+    inference.pdmodel or inference.json
+    inference.pdiparams
+```
+
+Pass a destination path or set `PADDLE_MODEL_ROOT` to install elsewhere. For CLI tests that need the models, set:
+
+```powershell
+$env:SCRIPTSCORE_TEST_PII_PADDLE_MODEL_DIR = "C:\path\to\models\paddle"
+```
+
+When passing Paddle model paths to the desktop worker, use normal Windows paths such as `C:\...\models\paddle`. Avoid verbatim paths such as `\\?\C:\...\models\paddle`; Python can see those paths, but PaddleOCR native loaders may reject them.
+
 ## Python CLI
 
 ```bash
