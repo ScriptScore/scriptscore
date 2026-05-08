@@ -12,14 +12,16 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import urllib.request
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
-import urllib.request
-
 
 MARKER_FILENAME = ".scriptscore-portable-python.json"
 DEFAULT_TORCH_BACKEND = "cpu"
+MACOS_X86_64_TARGET_TRIPLE = "x86_64-apple-darwin"
+MACOS_X86_64_PADDLE_WHEEL_NAME = "paddlepaddle-3.3.1-cp312-cp312-macosx_11_0_x86_64.whl"
+MACOS_X86_64_EXCLUDED_REQUIREMENTS = frozenset({"easyocr", "torch", "torchvision"})
 PORTABLE_RUNTIME_EXCLUDED_REQUIREMENT_PREFIXES = (
     "cuda-",
     "nvidia-",
@@ -38,6 +40,14 @@ class PortablePythonMarker:
     requirements_sha256: str
     archive_source: str
     torch_backend: str = DEFAULT_TORCH_BACKEND
+    package_overrides_sha256: str = ""
+
+
+@dataclass(frozen=True)
+class PackageOverride:
+    package_name: str
+    wheel_path: Path
+    wheel_sha256: str
 
 
 def repo_root() -> Path:
@@ -208,6 +218,7 @@ def cached_root_matches(
     target_triple: str,
     requirements_sha256: str,
     torch_backend: str,
+    package_overrides_sha256: str,
 ) -> bool:
     marker = load_marker(output_root)
     if marker is None:
@@ -221,6 +232,7 @@ def cached_root_matches(
         and marker.target_triple == target_triple
         and marker.requirements_sha256 == requirements_sha256
         and marker.torch_backend == torch_backend
+        and marker.package_overrides_sha256 == package_overrides_sha256
     )
 
 
@@ -310,8 +322,9 @@ def install_uv_managed_python(install_dir: Path, python_version: str) -> Path:
     return find_portable_root_with_python(install_dir)
 
 
-def download_file(url: str, destination: Path) -> None:
-    with urllib.request.urlopen(url) as response, destination.open("wb") as handle:
+def download_file(url: str, destination: Path, headers: dict[str, str] | None = None) -> None:
+    request = urllib.request.Request(url, headers=headers or {})
+    with urllib.request.urlopen(request) as response, destination.open("wb") as handle:
         shutil.copyfileobj(response, handle)
 
 
@@ -360,6 +373,160 @@ def find_portable_root_with_python(search_root: Path) -> Path:
     )
 
 
+def macos_x86_64_paddle_wheel_override(tmp_path: Path) -> PackageOverride:
+    wheel_url = os.environ.get("SCRIPTSCORE_MACOS_X86_64_PADDLE_WHEEL_URL")
+    wheel_sha256 = os.environ.get("SCRIPTSCORE_MACOS_X86_64_PADDLE_WHEEL_SHA256")
+    wheel_path_env = os.environ.get("SCRIPTSCORE_MACOS_X86_64_PADDLE_WHEEL_PATH")
+    wheel_token = os.environ.get("SCRIPTSCORE_MACOS_X86_64_PADDLE_WHEEL_TOKEN")
+
+    if wheel_url and wheel_path_env:
+        raise PortablePythonError(
+            "Set only one of SCRIPTSCORE_MACOS_X86_64_PADDLE_WHEEL_URL or "
+            "SCRIPTSCORE_MACOS_X86_64_PADDLE_WHEEL_PATH."
+        )
+    if not wheel_sha256:
+        raise PortablePythonError(
+            "SCRIPTSCORE_MACOS_X86_64_PADDLE_WHEEL_SHA256 is required for macOS Intel "
+            "portable runtime builds."
+        )
+    if not wheel_url and not wheel_path_env:
+        raise PortablePythonError(
+            "SCRIPTSCORE_MACOS_X86_64_PADDLE_WHEEL_URL is required for macOS Intel "
+            "portable runtime builds."
+        )
+
+    if wheel_path_env:
+        wheel_path = Path(wheel_path_env).expanduser().resolve()
+        if not wheel_path.is_file():
+            raise PortablePythonError(f"macOS Intel Paddle wheel was not found: {wheel_path}")
+    else:
+        wheel_path = tmp_path / MACOS_X86_64_PADDLE_WHEEL_NAME
+        headers = {}
+        if wheel_token:
+            headers["Authorization"] = f"Bearer {wheel_token}"
+            headers["Accept"] = "application/octet-stream"
+        download_file(str(wheel_url), wheel_path, headers=headers)
+
+    if wheel_path.name != MACOS_X86_64_PADDLE_WHEEL_NAME:
+        raise PortablePythonError(
+            "Unexpected macOS Intel Paddle wheel filename: "
+            f"{wheel_path.name}. Expected {MACOS_X86_64_PADDLE_WHEEL_NAME}."
+        )
+
+    actual_sha256 = file_sha256(wheel_path)
+    if actual_sha256 != wheel_sha256:
+        raise PortablePythonError(
+            "macOS Intel Paddle wheel SHA256 mismatch: "
+            f"expected {wheel_sha256}, got {actual_sha256}."
+        )
+
+    return PackageOverride(
+        package_name="paddlepaddle",
+        wheel_path=wheel_path,
+        wheel_sha256=wheel_sha256,
+    )
+
+
+def package_overrides_for_target(target_triple: str, tmp_path: Path) -> list[PackageOverride]:
+    if target_triple == MACOS_X86_64_TARGET_TRIPLE:
+        return [macos_x86_64_paddle_wheel_override(tmp_path)]
+    return []
+
+
+def package_overrides_sha256(overrides: list[PackageOverride]) -> str:
+    if not overrides:
+        return ""
+
+    digest = hashlib.sha256()
+    for override in sorted(overrides, key=lambda item: item.package_name):
+        digest.update(override.package_name.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(override.wheel_path.name.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(override.wheel_sha256.encode("utf-8"))
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def rewrite_requirement_to_local_wheel(
+    requirements_path: Path,
+    package_name: str,
+    wheel_path: Path,
+    wheel_uri: str | None = None,
+) -> None:
+    package_key = package_name.lower().replace("_", "-")
+    replacement = f"{package_name} @ {wheel_uri or wheel_path.resolve().as_uri()}\n"
+    rewritten_lines: list[str] = []
+    found = False
+    skipping_replaced_continuation = False
+
+    for line in requirements_path.read_text(encoding="utf-8").splitlines(keepends=True):
+        stripped = line.strip()
+        is_requirement = bool(stripped) and not line.startswith((" ", "\t", "#"))
+        if is_requirement:
+            skipping_replaced_continuation = False
+
+        if is_requirement and requirement_name(line) == package_key:
+            rewritten_lines.append(replacement)
+            found = True
+            skipping_replaced_continuation = True
+            continue
+
+        if skipping_replaced_continuation and not is_requirement:
+            continue
+
+        rewritten_lines.append(line)
+
+    if not found:
+        raise PortablePythonError(
+            f"Could not find requirement '{package_name}' to replace with local wheel."
+        )
+
+    requirements_path.write_text("".join(rewritten_lines), encoding="utf-8")
+
+
+def apply_package_overrides(
+    requirements_path: Path,
+    overrides: list[PackageOverride],
+    *,
+    stable_paths: bool = False,
+) -> None:
+    for override in overrides:
+        wheel_uri = None
+        if stable_paths:
+            wheel_uri = f"file:///__scriptscore_package_overrides__/{override.wheel_path.name}"
+        rewrite_requirement_to_local_wheel(
+            requirements_path,
+            override.package_name,
+            override.wheel_path,
+            wheel_uri,
+        )
+
+
+def excluded_requirements_for_target(target_triple: str) -> set[str]:
+    if target_triple == MACOS_X86_64_TARGET_TRIPLE:
+        return set(MACOS_X86_64_EXCLUDED_REQUIREMENTS)
+    return set()
+
+
+def remove_requirements(requirements_path: Path, package_names: set[str]) -> None:
+    if not package_names:
+        return
+
+    normalized_names = {name.lower().replace("_", "-") for name in package_names}
+    filtered_lines: list[str] = []
+    skipping_requirement = False
+    for line in requirements_path.read_text(encoding="utf-8").splitlines(keepends=True):
+        stripped = line.strip()
+        is_requirement = bool(stripped) and not line.startswith((" ", "\t", "#"))
+        if is_requirement:
+            skipping_requirement = requirement_name(line) in normalized_names
+        if skipping_requirement:
+            continue
+        filtered_lines.append(line)
+    requirements_path.write_text("".join(filtered_lines), encoding="utf-8")
+
+
 def install_locked_requirements(
     python_executable: Path,
     requirements_path: Path,
@@ -402,7 +569,13 @@ def prepare_portable_python(
         tmp_path = Path(tmp_dir)
         requirements_path = tmp_path / "runtime-requirements.txt"
         export_locked_runtime_requirements(requirements_path)
-        requirements_sha256 = file_sha256(requirements_path)
+        remove_requirements(requirements_path, excluded_requirements_for_target(target_triple))
+        package_overrides = package_overrides_for_target(target_triple, tmp_path)
+        cache_requirements_path = tmp_path / "runtime-requirements-cache-key.txt"
+        shutil.copyfile(requirements_path, cache_requirements_path)
+        apply_package_overrides(cache_requirements_path, package_overrides, stable_paths=True)
+        requirements_sha256 = file_sha256(cache_requirements_path)
+        overrides_sha256 = package_overrides_sha256(package_overrides)
 
         if not force and cached_root_matches(
             output_root,
@@ -410,8 +583,11 @@ def prepare_portable_python(
             target_triple,
             requirements_sha256,
             torch_backend,
+            overrides_sha256,
         ):
             return output_root, False
+
+        apply_package_overrides(requirements_path, package_overrides)
 
         if archive_path is not None:
             resolved_archive = archive_path.resolve()
@@ -445,6 +621,7 @@ def prepare_portable_python(
                 requirements_sha256=requirements_sha256,
                 archive_source=archive_source,
                 torch_backend=torch_backend,
+                package_overrides_sha256=overrides_sha256,
             ),
         )
         return output_root, True
@@ -536,4 +713,4 @@ if __name__ == "__main__":
         raise SystemExit(main())
     except PortablePythonError as error:
         print(f"error: {error}", file=sys.stderr)
-        raise SystemExit(1)
+        raise SystemExit(1) from None

@@ -118,6 +118,47 @@ python desktop/scripts/generate_legal_artifacts.py
 The generated files are placed under `desktop/dist/legal/` for desktop bundling and release review.
 Do not commit `desktop/dist/`; it is generated output and may contain machine-local paths.
 
+## RC Package Validation
+
+The `RC Package Validation` GitHub Actions workflow builds first-release package
+candidates across the platform matrix without publishing them. It is intended
+for release-candidate validation, not a signed public release.
+
+The workflow builds:
+
+- unsigned preview DMGs on macOS Intel and macOS Apple Silicon,
+- NSIS and MSI packages on Windows x64,
+- AppImage, deb, and rpm packages on Linux x64.
+
+macOS Intel packaging requires the private PaddlePaddle wheel release asset at
+build time. Because that release asset is private, configure repository or
+organization secrets/variables in the public ScriptScore repository rather than
+hard-coding private release coordinates in source:
+
+```text
+SCRIPTSCORE_PYTHON_WHEELS_READ_TOKEN
+SCRIPTSCORE_MACOS_X86_64_PADDLE_WHEEL_REPOSITORY
+SCRIPTSCORE_MACOS_X86_64_PADDLE_WHEEL_RELEASE_TAG
+SCRIPTSCORE_MACOS_X86_64_PADDLE_WHEEL_SHA256
+```
+
+Use repository variables for the private release repository and tag if exposing
+those names to users with workflow access is acceptable; use secrets instead if
+they should remain hidden in logs and workflow UI. A direct asset URL is also
+supported through `SCRIPTSCORE_MACOS_X86_64_PADDLE_WHEEL_URL`, with
+`SCRIPTSCORE_MACOS_X86_64_PADDLE_WHEEL_TOKEN` as the optional bearer token. If
+that separate token is not set, the workflow reuses
+`SCRIPTSCORE_PYTHON_WHEELS_READ_TOKEN`.
+
+Only the CI job uses those values. The packaged desktop runtime must contain
+the installed wheel contents and must not contain the private URL, token, or
+any runtime wheel-download requirement. The macOS Intel runtime is PaddleOCR
+only for this RC package path; EasyOCR, Torch, and TorchVision are excluded
+there because the locked PyTorch stack does not publish macOS Intel CPython
+3.12 wheels. Formal Apple Developer ID signing, notarization, Windows code
+signing, and Linux repository signing are deliberately outside this first RC
+package workflow.
+
 ## Optional Quality Reports
 
 The scripts under `desktop/scripts/` include optional local quality-report helpers, including
