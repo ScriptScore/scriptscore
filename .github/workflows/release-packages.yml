@@ -17,8 +17,35 @@ permissions:
   contents: read
 
 jobs:
+  prepare-paddle-models:
+    name: Prepare Paddle models
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Paddle model resources
+        run: |
+          cli/scripts/install_paddle_models.sh cli/models/paddle
+          test -f cli/models/paddle/det/inference.yml
+          test -f cli/models/paddle/det/inference.pdiparams
+          test -f cli/models/paddle/rec/inference.yml
+          test -f cli/models/paddle/rec/inference.pdiparams
+
+      - name: Pack Paddle model resources
+        run: tar -czf paddle-models.tar.gz -C cli/models paddle
+
+      - name: Upload Paddle model resources
+        uses: actions/upload-artifact@v4
+        with:
+          name: scriptscore-paddle-models
+          if-no-files-found: error
+          path: paddle-models.tar.gz
+
   package:
     name: ${{ matrix.label }}
+    needs: prepare-paddle-models
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 120
     defaults:
@@ -207,8 +234,21 @@ jobs:
           ./desktop/scripts/prepare-portable-python.sh
           echo "SCRIPTSCORE_DESKTOP_PORTABLE_PYTHON_ROOT=$(pwd)/desktop/dist/portable-python" >> "${GITHUB_ENV}"
 
-      - name: Install Paddle model resources
-        run: cli/scripts/install_paddle_models.sh cli/models/paddle
+      - name: Download Paddle model resources
+        uses: actions/download-artifact@v4
+        with:
+          name: scriptscore-paddle-models
+          path: desktop/dist/paddle-model-artifact
+
+      - name: Extract Paddle model resources
+        run: |
+          rm -rf cli/models/paddle
+          mkdir -p cli/models
+          tar -xzf desktop/dist/paddle-model-artifact/paddle-models.tar.gz -C cli/models
+          test -f cli/models/paddle/det/inference.yml
+          test -f cli/models/paddle/det/inference.pdiparams
+          test -f cli/models/paddle/rec/inference.yml
+          test -f cli/models/paddle/rec/inference.pdiparams
 
       - name: Prepare bundled runtime and legal artifacts
         run: |
