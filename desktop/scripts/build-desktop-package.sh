@@ -80,8 +80,17 @@ fi
 
 if [[ "$(uname -s)" == "Linux" ]] && bundle_selection_includes "${BUNDLES}" "appimage"; then
   bundled_python_lib="${DESKTOP_ROOT}/dist/bundled-runtime/python/lib"
+  bundled_python_library_paths=()
   if [[ -d "${bundled_python_lib}" ]]; then
-    export LD_LIBRARY_PATH="${bundled_python_lib}${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+    bundled_python_library_paths+=("${bundled_python_lib}")
+    while IFS= read -r wheel_library_dir; do
+      bundled_python_library_paths+=("${wheel_library_dir}")
+    done < <(find "${bundled_python_lib}" -type d -name "*.libs" | sort)
+
+    old_ifs=${IFS}
+    IFS=:
+    export LD_LIBRARY_PATH="${bundled_python_library_paths[*]}${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+    IFS=${old_ifs}
   fi
 fi
 
