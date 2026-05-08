@@ -404,9 +404,11 @@ impl AppState {
         {
             let mut app = self.inner.lock();
             app.current_project = Some(summary);
-            if let Some(message) = recovery_message {
-                app.last_runtime_error = Some(message);
-            }
+            app.last_runtime_error = runtime_error_after_project_open(
+                app.last_runtime_error.take(),
+                recovery_message,
+                app.worker.is_some(),
+            );
         }
         let _ = lms_roster_cache::ensure_project_preload(&self.inner, settings)?;
         Ok(self.inner.lock().shell_state())
@@ -1296,9 +1298,23 @@ fn recover_abandoned_project_jobs(project_path: &Path) -> HostResult<Option<Stri
     )))
 }
 
+fn runtime_error_after_project_open(
+    current_error: Option<String>,
+    recovery_message: Option<String>,
+    worker_available: bool,
+) -> Option<String> {
+    if recovery_message.is_some() {
+        return recovery_message;
+    }
+    if worker_available {
+        return None;
+    }
+    current_error
+}
+
 #[cfg(test)]
 mod tests {
-    use super::AppState;
+    use super::{runtime_error_after_project_open, AppState};
 
     struct NoopEventSink;
 
@@ -1311,6 +1327,26 @@ mod tests {
         assert!(
             error.to_string().contains("No project is currently open"),
             "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn project_open_runtime_error_policy_preserves_recovery_and_clears_stale_probe_errors() {
+        assert_eq!(
+            runtime_error_after_project_open(Some("Ollama is unreachable.".into()), None, true,),
+            None
+        );
+        assert_eq!(
+            runtime_error_after_project_open(Some("worker launch failed".into()), None, false,),
+            Some("worker launch failed".into())
+        );
+        assert_eq!(
+            runtime_error_after_project_open(
+                Some("Ollama is unreachable.".into()),
+                Some("Recovered abandoned jobs.".into()),
+                true,
+            ),
+            Some("Recovered abandoned jobs.".into())
         );
     }
 

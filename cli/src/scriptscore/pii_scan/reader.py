@@ -6,6 +6,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import sys
 from collections.abc import Iterable, Sequence
 from pathlib import Path
 from typing import Any, cast
@@ -13,6 +14,34 @@ from typing import Any, cast
 import cv2
 
 from scriptscore.pii_scan.types import ReadResult, VisionToken
+
+
+def _is_paddle_3_or_newer(version: str) -> bool:
+    try:
+        return int(version.split(".", 1)[0]) >= 3
+    except ValueError:
+        return False
+
+
+def _disable_windows_paddle_ir_optim() -> None:
+    if sys.platform != "win32":
+        return
+    import paddle  # type: ignore[import-untyped]
+    from paddle import inference  # type: ignore[import-untyped]
+
+    if not _is_paddle_3_or_newer(str(getattr(paddle, "__version__", ""))):
+        return
+    if getattr(inference.Config.switch_ir_optim, "_scriptscore_windows_patch", False):
+        return
+
+    original_switch_ir_optim = cast(Any, inference.Config.switch_ir_optim)
+
+    def switch_ir_optim_off(self: Any, enabled: object) -> None:
+        del enabled
+        original_switch_ir_optim(self, False)
+
+    switch_ir_optim_off._scriptscore_windows_patch = True  # type: ignore[attr-defined]
+    inference.Config.switch_ir_optim = switch_ir_optim_off  # type: ignore[assignment, method-assign]
 
 
 def verify_model_root(model_root: Path) -> None:
@@ -29,9 +58,11 @@ def verify_model_root(model_root: Path) -> None:
                 "PaddleOCR "
                 f"{name} model directory is missing inference.json or inference.pdmodel: {model_dir}"
             )
-        if not (model_dir / "inference.yml").exists():
+        if (model_dir / "inference.pdmodel").exists() and not (
+            model_dir / "inference.pdiparams"
+        ).exists():
             raise RuntimeError(
-                f"PaddleOCR {name} model directory is missing inference.yml: {model_dir}"
+                f"PaddleOCR {name} model directory is missing inference.pdiparams: {model_dir}"
             )
 
 
@@ -82,17 +113,21 @@ class PaddleTextReader:
 
         os.environ["DISABLE_MODEL_SOURCE_CHECK"] = "True"
         os.environ["PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK"] = "True"
+        # On Windows, Paddle can load DLLs before Torch in a way that makes
+        # Torch's shm.dll import fail. Importing Torch first avoids that clash.
+        if importlib.util.find_spec("torch") is not None:
+            import torch  # noqa: F401  # type: ignore[import-untyped]
+
+        _disable_windows_paddle_ir_optim()
+
         from paddleocr import PaddleOCR  # type: ignore[import-untyped]
 
         self._engine = PaddleOCR(
             lang="en",
-            text_detection_model_name="PP-OCRv5_mobile_det",
-            text_detection_model_dir=str(model_root / "det"),
-            text_recognition_model_name="PP-OCRv5_mobile_rec",
-            text_recognition_model_dir=str(model_root / "rec"),
-            use_doc_orientation_classify=False,
-            use_doc_unwarping=False,
-            use_textline_orientation=False,
+            det_model_dir=str(model_root / "det"),
+            rec_model_dir=str(model_root / "rec"),
+            use_angle_cls=False,
+            show_log=False,
         )
 
     def read(self, image: object) -> ReadResult:
@@ -110,6 +145,8 @@ class PaddleTextReader:
 
         tokens: list[VisionToken] = []
         first_page = result[0]
+        if first_page is None:
+            return ReadResult(tokens=tokens, backend_name=self.name)
         if isinstance(first_page, dict):
             texts = first_page.get("rec_texts") or []
             scores = first_page.get("rec_scores") or []

@@ -27,6 +27,16 @@ cd desktop/src-tauri
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 ```
 
+On Windows, use the PowerShell review helper instead of the Unix-oriented `make` target:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\desktop\scripts\review-quality.ps1
+```
+
+The Windows helper includes the strict Rust clippy check used above. Native Windows clippy does not evaluate Linux-only `cfg` paths, so keep CI/Linux as the final signal for platform-specific warnings; if your local toolchain supports extra targets, pass them with `-RustClippyTargets`.
+
+The Windows helper skips `cargo-geiger` by default because full `cargo-geiger` performs a clean Rust rebuild before scanning. On the desktop/Tauri dependency graph this is currently impractical on Windows and may leave an empty JSON report until the command eventually completes. Use CI/Linux for the full `unsafe-report` target; pass `-IncludeUnsafeReport` only when you intentionally want to attempt the long Windows run.
+
 ## DCO
 
 Every commit must include a Developer Certificate of Origin sign-off:

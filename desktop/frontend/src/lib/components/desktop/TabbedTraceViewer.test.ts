@@ -38,7 +38,7 @@ describe('TabbedTraceViewer', () => {
 
     await waitFor(() => {
       expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
-        JSON.stringify({ ok: true, output: 'done' }, null, 2)
+        JSON.stringify({ result: { ok: true, output: 'done' } }, null, 2)
       );
     });
   });
@@ -63,7 +63,15 @@ describe('TabbedTraceViewer', () => {
     expect(screen.getByText(/"input": "value"/)).toBeTruthy();
 
     await fireEvent.click(screen.getByRole('tab', { name: 'Response' }));
+    expect(screen.getByText('No response data.')).toBeTruthy();
     expect(screen.getByText('Error')).toBeTruthy();
     expect(screen.getByText(/worker failed/)).toBeTruthy();
+    await fireEvent.click(screen.getByRole('button', { name: 'Copy' }));
+
+    await waitFor(() => {
+      expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
+        JSON.stringify({ error: { message: 'worker failed' } }, null, 2)
+      );
+    });
   });
 });

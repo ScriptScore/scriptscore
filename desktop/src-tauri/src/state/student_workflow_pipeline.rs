@@ -980,8 +980,7 @@ fn run_pii_batch(
             "students": pii_students,
             "pii_runtime_config": {
                 "paddle_model_dir": resolve_pii_model_dir(exec.state, settings)?
-                    .to_string_lossy()
-                    .into_owned(),
+                    .to_worker_payload_path(),
                 "max_workers": 2,
             },
         }),
@@ -2377,8 +2376,7 @@ fn run_pii_stage(
             }],
             "pii_runtime_config": {
                 "paddle_model_dir": resolve_pii_model_dir(exec.state, settings)?
-                    .to_string_lossy()
-                    .into_owned(),
+                    .to_worker_payload_path(),
                 "max_workers": 2,
             },
         }),
@@ -2616,13 +2614,53 @@ fn resolve_pii_model_dir_candidates(
     candidates: [Option<std::path::PathBuf>; 4],
 ) -> HostResult<std::path::PathBuf> {
     for path in candidates.into_iter().flatten() {
-        if path.is_dir() {
+        if is_valid_paddle_model_dir(&path) {
             return Ok(path);
         }
     }
     Err(HostError::Validation(
         "Paddle model directory was not found. Set SCRIPTSCORE_PII_PADDLE_MODEL_DIR, configure the desktop PII model directory, or install bundled/dev paddle models.".into(),
     ))
+}
+
+trait WorkerPayloadPath {
+    fn to_worker_payload_path(&self) -> String;
+}
+
+impl WorkerPayloadPath for Path {
+    fn to_worker_payload_path(&self) -> String {
+        normalize_worker_payload_path(self)
+            .to_string_lossy()
+            .into_owned()
+    }
+}
+
+#[cfg(windows)]
+fn normalize_worker_payload_path(path: &Path) -> std::path::PathBuf {
+    let path_text = path.to_string_lossy();
+    if let Some(rest) = path_text.strip_prefix(r"\\?\UNC\") {
+        std::path::PathBuf::from(format!(r"\\{rest}"))
+    } else if let Some(rest) = path_text.strip_prefix(r"\\?\") {
+        std::path::PathBuf::from(rest)
+    } else {
+        path.to_path_buf()
+    }
+}
+
+#[cfg(not(windows))]
+fn normalize_worker_payload_path(path: &Path) -> std::path::PathBuf {
+    path.to_path_buf()
+}
+
+fn is_valid_paddle_model_dir(path: &Path) -> bool {
+    ["det", "rec"].iter().all(|name| {
+        let model_dir = path.join(name);
+        model_dir.is_dir()
+            && (model_dir.join("inference.json").is_file()
+                || model_dir.join("inference.pdmodel").is_file())
+            && (!model_dir.join("inference.pdmodel").is_file()
+                || model_dir.join("inference.pdiparams").is_file())
+    })
 }
 
 fn configured_pii_model_dir(settings: &AppSettings) -> Option<std::path::PathBuf> {
@@ -4781,10 +4819,10 @@ mod tests {
         let settings_dir = root.join("settings");
         let bundled_dir = root.join("bundled");
         let dev_dir = root.join("dev");
-        fs::create_dir_all(&env_dir).expect("env dir should exist");
-        fs::create_dir_all(&settings_dir).expect("settings dir should exist");
-        fs::create_dir_all(&bundled_dir).expect("bundled dir should exist");
-        fs::create_dir_all(&dev_dir).expect("dev dir should exist");
+        write_paddle_model_layout(&env_dir);
+        write_paddle_model_layout(&settings_dir);
+        write_paddle_model_layout(&bundled_dir);
+        write_paddle_model_layout(&dev_dir);
 
         let resolved = resolve_pii_model_dir_candidates([
             Some(env_dir.clone()),
@@ -4824,6 +4862,25 @@ mod tests {
     }
 
     #[test]
+    fn resolve_pii_model_dir_candidates_skips_incomplete_existing_dirs() {
+        let root = temp_root("scriptscore-pii-model-incomplete");
+        let incomplete_dir = root.join("incomplete");
+        let complete_dir = root.join("complete");
+        fs::create_dir_all(&incomplete_dir).expect("incomplete model root should exist");
+        write_paddle_model_layout(&complete_dir);
+
+        let resolved = resolve_pii_model_dir_candidates([
+            Some(incomplete_dir),
+            Some(complete_dir.clone()),
+            None,
+            None,
+        ])
+        .expect("complete model dir should win");
+
+        assert_eq!(resolved, complete_dir);
+    }
+
+    #[test]
     fn resolve_pii_model_dir_candidates_errors_when_missing_everywhere() {
         let root = temp_root("scriptscore-pii-model-missing");
         let error = resolve_pii_model_dir_candidates([
@@ -4837,5 +4894,36 @@ mod tests {
         assert!(error
             .to_string()
             .contains("Paddle model directory was not found"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn worker_payload_path_strips_windows_verbatim_prefix() {
+        use super::WorkerPayloadPath;
+
+        let path = Path::new(
+            r"\\?\C:\scriptscore\scriptscore\desktop\src-tauri\target\debug\models\paddle",
+        );
+
+        assert_eq!(
+            path.to_worker_payload_path(),
+            r"C:\scriptscore\scriptscore\desktop\src-tauri\target\debug\models\paddle"
+        );
+
+        let unc_path = Path::new(r"\\?\UNC\server\share\models\paddle");
+        assert_eq!(
+            unc_path.to_worker_payload_path(),
+            r"\\server\share\models\paddle"
+        );
+    }
+
+    fn write_paddle_model_layout(root: &Path) {
+        for name in ["det", "rec"] {
+            let model_dir = root.join(name);
+            fs::create_dir_all(&model_dir).expect("model dir should create");
+            fs::write(model_dir.join("inference.pdmodel"), "model").expect("model should write");
+            fs::write(model_dir.join("inference.pdiparams"), "params")
+                .expect("params should write");
+        }
     }
 }

@@ -39,6 +39,14 @@ powershell -ExecutionPolicy Bypass -File .\desktop\scripts\dev-desktop.ps1
 
 The Windows launcher does not require `cargo-tauri`; it starts the Vite frontend, builds the Rust host with Cargo, opens the desktop app, and cleans up the frontend server it started when the app exits.
 
+For Windows review checks, run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\desktop\scripts\review-quality.ps1
+```
+
+This is the PowerShell equivalent for the review-quality checks that can run reliably on Windows, including strict Rust clippy. Native Windows clippy does not evaluate Linux-only `cfg` paths; use CI/Linux for that signal, or pass extra configured targets with `-RustClippyTargets`. The unsafe report is opt-in with `-IncludeUnsafeReport` because full `cargo-geiger` performs a clean Rust rebuild before scanning; on the desktop/Tauri dependency graph that is currently impractical in the Windows development toolchain and can look hung while the JSON report remains empty.
+
 Linux is the only verified desktop packaging target for the current public preview. Windows desktop runtime development is in progress, and Windows installer packaging remains unverified. macOS desktop runtime and installer paths are in progress and unverified.
 
 ## Provider Modes

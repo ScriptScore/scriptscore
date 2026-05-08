@@ -6,7 +6,7 @@ use serde_json::{json, Value};
 
 use super::super::job_history::{persist_job_completion, persist_job_submission};
 use super::super::scheduler::{question_id_from_worker_payload, QueuedRuntimeJob};
-use super::super::{current_run_timestamp, AppStateInner, RuntimeEventSink};
+use super::super::{current_run_timestamp, AppStateInner, DesktopApp, RuntimeEventSink};
 use super::dispatch::dispatch_next_queued_job;
 use super::messages::{
     emit_job_submitted, emit_job_submitted_with_payload, emit_queued_job_skipped,
@@ -60,7 +60,9 @@ pub(super) fn reserve_worker_for_job(
         let mut app = state.lock();
         match take_worker_for_runtime_job(&mut app) {
             Ok(worker) => {
-                app.last_runtime_error = None;
+                if updates_global_runtime_error(command_name) {
+                    app.last_runtime_error = None;
+                }
                 worker
             }
             Err(err) => {
@@ -313,31 +315,7 @@ pub(super) fn finish_runtime_job(
     let (has_pending, skipped_jobs) = {
         let mut app = state.lock();
         app.worker = Some(worker);
-        let skipped = match &outcome {
-            Ok(completed) => {
-                if completed.result.terminal_type == "job_finished" {
-                    app.scheduler.on_job_complete(job_id);
-                    app.last_runtime_error = None;
-                    Vec::new()
-                } else {
-                    let skipped = app.scheduler.on_job_failed(job_id);
-                    app.last_runtime_error = completed
-                        .result
-                        .envelope
-                        .get("error")
-                        .and_then(Value::as_object)
-                        .and_then(|error| error.get("message"))
-                        .and_then(Value::as_str)
-                        .map(str::to_string);
-                    skipped
-                }
-            }
-            Err(err) => {
-                let skipped = app.scheduler.on_job_failed(job_id);
-                app.last_runtime_error = Some(err.to_string());
-                skipped
-            }
-        };
+        let skipped = apply_runtime_job_outcome(&mut app, command_name, job_id, &outcome);
         (app.scheduler.should_dispatch_next(), skipped)
     };
 
@@ -359,6 +337,83 @@ pub(super) fn finish_runtime_job(
     }
 
     outcome
+}
+
+fn apply_runtime_job_outcome(
+    app: &mut DesktopApp,
+    command_name: &str,
+    job_id: &str,
+    outcome: &HostResult<CompletedWorkerJob>,
+) -> Vec<QueuedRuntimeJob> {
+    let updates_global_error = updates_global_runtime_error(command_name);
+    match outcome {
+        Ok(completed) => apply_completed_runtime_job(app, job_id, completed, updates_global_error),
+        Err(err) => apply_failed_runtime_job(app, job_id, err, updates_global_error),
+    }
+}
+
+fn apply_completed_runtime_job(
+    app: &mut DesktopApp,
+    job_id: &str,
+    completed: &CompletedWorkerJob,
+    updates_global_error: bool,
+) -> Vec<QueuedRuntimeJob> {
+    if completed.result.terminal_type == "job_finished" {
+        apply_finished_runtime_job(app, job_id, updates_global_error);
+        return Vec::new();
+    }
+    apply_failed_worker_result(app, job_id, completed, updates_global_error)
+}
+
+fn apply_finished_runtime_job(app: &mut DesktopApp, job_id: &str, updates_global_error: bool) {
+    app.scheduler.on_job_complete(job_id);
+    if updates_global_error {
+        app.last_runtime_error = None;
+    }
+}
+
+fn apply_failed_worker_result(
+    app: &mut DesktopApp,
+    job_id: &str,
+    completed: &CompletedWorkerJob,
+    updates_global_error: bool,
+) -> Vec<QueuedRuntimeJob> {
+    let skipped = app.scheduler.on_job_failed(job_id);
+    if updates_global_error {
+        app.last_runtime_error = worker_result_error_message(completed);
+    }
+    skipped
+}
+
+fn apply_failed_runtime_job(
+    app: &mut DesktopApp,
+    job_id: &str,
+    err: &HostError,
+    updates_global_error: bool,
+) -> Vec<QueuedRuntimeJob> {
+    let skipped = app.scheduler.on_job_failed(job_id);
+    if updates_global_error {
+        app.last_runtime_error = Some(err.to_string());
+    }
+    skipped
+}
+
+fn worker_result_error_message(completed: &CompletedWorkerJob) -> Option<String> {
+    completed
+        .result
+        .envelope
+        .get("error")
+        .and_then(Value::as_object)
+        .and_then(|error| error.get("message"))
+        .and_then(Value::as_str)
+        .map(str::to_string)
+}
+
+fn updates_global_runtime_error(command_name: &str) -> bool {
+    !matches!(
+        command_name,
+        "runtime.list-llm-models" | "runtime.validate-llm-model"
+    )
 }
 
 fn emit_skipped_dependents(
@@ -462,4 +517,16 @@ pub(super) fn run_smoke_ping_job(
         app.refresh_current_project(project_path)?;
     }
     Ok(completed)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::updates_global_runtime_error;
+
+    #[test]
+    fn background_provider_probes_do_not_update_global_runtime_error() {
+        assert!(!updates_global_runtime_error("runtime.list-llm-models"));
+        assert!(!updates_global_runtime_error("runtime.validate-llm-model"));
+        assert!(updates_global_runtime_error("exam.analyze"));
+    }
 }
