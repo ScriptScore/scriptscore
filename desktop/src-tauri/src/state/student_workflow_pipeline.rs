@@ -2936,7 +2936,7 @@ mod tests {
         resolve_pii_model_dir_candidates, rows_for_student, sanitized_pii_batch_request_payload,
         sanitized_pii_request_payload, save_workflow_state, save_workflow_state_and_emit,
         settle_empty_grading_refs, sorted_keys, split_detect_refs_by_reusable_crop_targets,
-        FailedResumePoint, WorkerPayloadPath,
+        FailedResumePoint,
     };
     use crate::models::{
         AppSettings, ExamWorkspaceState, InstructorProfile, ProjectConfig, ProjectSummary,
@@ -4899,6 +4899,8 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn worker_payload_path_strips_windows_verbatim_prefix() {
+        use super::WorkerPayloadPath;
+
         let path = Path::new(
             r"\\?\C:\scriptscore\scriptscore\desktop\src-tauri\target\debug\models\paddle",
         );

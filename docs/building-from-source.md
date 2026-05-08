@@ -41,6 +41,8 @@ powershell -ExecutionPolicy Bypass -File .\desktop\scripts\review-quality.ps1 -I
 
 Use `-CheckPrerequisitesOnly` for a quick toolchain sanity check, and `-SkipRustCoverage` when iterating on unrelated changes.
 
+The Windows helper runs strict Rust clippy locally with `--workspace --all-targets --all-features -- -D warnings`. Native Windows clippy does not evaluate Linux-only `cfg` paths; use CI/Linux for that signal, or pass additional configured targets with `-RustClippyTargets` when your local toolchain supports them.
+
 PowerShell text redirection can write encodings that break JSON report parsing. The Windows review helper uses byte-preserving `cmd.exe` redirection for `rust-code-analysis-cli`; prefer the helper over manually redirecting those reports in PowerShell.
 
 To install PaddleOCR models on Windows:

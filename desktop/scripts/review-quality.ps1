@@ -3,6 +3,7 @@
 param(
     [switch] $CheckPrerequisitesOnly,
     [switch] $SkipRustCoverage,
+    [string[]] $RustClippyTargets = @(),
     [switch] $IncludeUnsafeReport,
     [int] $UnsafeReportTimeoutSeconds = 3600
 )
@@ -211,6 +212,31 @@ function Invoke-RustCoverage {
     }
 }
 
+function Invoke-RustClippy {
+    param([string] $Target = "")
+
+    $clippyArgs = @(
+        "clippy",
+        "--manifest-path",
+        "desktop/src-tauri/Cargo.toml",
+        "--workspace",
+        "--all-targets",
+        "--all-features"
+    )
+    if ($Target) {
+        $clippyArgs += @("--target", $Target)
+    }
+    $clippyArgs += @("--", "-D", "warnings")
+
+    & cargo @clippyArgs
+    if ($LASTEXITCODE -ne 0) {
+        if ($Target) {
+            throw "cargo clippy failed for target $Target"
+        }
+        throw "cargo clippy failed"
+    }
+}
+
 function Invoke-UnsafeReport {
     Install-CargoTool -ToolName "cargo-geiger" -Version "0.13.0" -InstallArgs @("--features", "vendored-openssl") | Out-Null
 
@@ -273,8 +299,10 @@ try {
         if ($LASTEXITCODE -ne 0) { throw "cargo fmt failed" }
     }
     Invoke-Step "rust clippy" {
-        & cargo clippy --manifest-path "desktop/src-tauri/Cargo.toml" --workspace --all-targets --all-features -- -D warnings
-        if ($LASTEXITCODE -ne 0) { throw "cargo clippy failed" }
+        Invoke-RustClippy
+        foreach ($target in $RustClippyTargets) {
+            Invoke-RustClippy -Target $target
+        }
     }
     Invoke-Step "frontend lint" {
         & $NpmExe --prefix "desktop/frontend" run lint
