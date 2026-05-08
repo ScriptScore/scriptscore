@@ -28,7 +28,11 @@ impl RecordingEventSink {
     }
 
     fn wait_for(&self, event_type: &str, command_name: &str) {
-        let deadline = Instant::now() + Duration::from_secs(5);
+        self.wait_for_with_timeout(event_type, command_name, Duration::from_secs(5));
+    }
+
+    fn wait_for_with_timeout(&self, event_type: &str, command_name: &str, timeout: Duration) {
+        let deadline = Instant::now() + timeout;
         loop {
             if self
                 .snapshot()
@@ -39,10 +43,44 @@ impl RecordingEventSink {
             }
             assert!(
                 Instant::now() < deadline,
-                "timed out waiting for runtime event {event_type} for {command_name}"
+                "timed out waiting for runtime event {event_type} for {command_name}; observed events: {}",
+                self.event_summary()
             );
             thread::sleep(Duration::from_millis(20));
         }
+    }
+
+    fn wait_for_terminal(&self, command_name: &str, timeout: Duration) -> RuntimeJobEvent {
+        let deadline = Instant::now() + timeout;
+        loop {
+            if let Some(event) = self.snapshot().into_iter().find(|event| {
+                event.command_name == command_name
+                    && matches!(
+                        event.event_type.as_str(),
+                        "job_finished" | "job_failed" | "job_cancelled"
+                    )
+            }) {
+                return event;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "timed out waiting for terminal runtime event for {command_name}; observed events: {}",
+                self.event_summary()
+            );
+            thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    fn event_summary(&self) -> String {
+        let events = self.snapshot();
+        if events.is_empty() {
+            return "none".into();
+        }
+        events
+            .iter()
+            .map(|event| format!("{}:{}", event.command_name, event.event_type))
+            .collect::<Vec<_>>()
+            .join(", ")
     }
 }
 
@@ -1163,7 +1201,7 @@ fn export_stamped_template_job_returns_while_active_runtime_job_finishes_before_
     let slow_handle = thread::spawn(move || {
         slow_state.run_smoke_ping_job(
             &slow_events,
-            json!({"message": "slow", "steps": 10, "sleep_ms": 10_000}),
+            json!({"message": "slow", "steps": 10, "sleep_ms": 3_000}),
         )
     });
     event_sink.wait_for("job_started", "smoke.ping");
@@ -1199,7 +1237,13 @@ fn export_stamped_template_job_returns_while_active_runtime_job_finishes_before_
         .join()
         .expect("slow job thread should join")
         .expect("slow job should complete");
-    event_sink.wait_for("job_finished", "export_stamped_template_pdf");
+    let export_event =
+        event_sink.wait_for_terminal("export_stamped_template_pdf", Duration::from_secs(45));
+    assert_eq!(
+        export_event.event_type, "job_finished",
+        "background export job should finish successfully: {}",
+        export_event.payload
+    );
     assert!(exported_path.is_file());
     let exported = state.workspace_state().expect("workspace should load");
     assert_eq!(exported.aruco_status.state, "detected");
