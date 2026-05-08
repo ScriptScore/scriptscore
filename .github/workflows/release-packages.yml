@@ -282,10 +282,13 @@ jobs:
             extract_status=$?
             set -e
             test -d squashfs-root
-            test -d squashfs-root/usr
             if [[ ${extract_status} -ne 0 ]]; then
               echo "warning: AppImage extraction returned ${extract_status} after creating squashfs-root" >&2
               cat /tmp/scriptscore-appimage-extract.log >&2
+            fi
+            if [[ ! -d squashfs-root/usr ]]; then
+              echo "warning: AppImage extraction did not create squashfs-root/usr; verifier will inspect extracted payload" >&2
+              find squashfs-root -maxdepth 2 -mindepth 1 -print | sort | sed -n '1,80p' >&2
             fi
             cp -R squashfs-root "${payload_root}/appimage"
           )
@@ -320,11 +323,13 @@ jobs:
         shell: powershell
         run: |
           $payloadRoot = Join-Path (Get-Location) "desktop/dist/package-payload/${{ matrix.label }}"
+          $inspectionRoot = Join-Path (Get-Location) "desktop/dist/package-inspection/${{ matrix.label }}"
           New-Item -ItemType Directory -Force -Path $payloadRoot | Out-Null
+          New-Item -ItemType Directory -Force -Path $inspectionRoot | Out-Null
 
           $msi = Get-ChildItem desktop/src-tauri/target -Recurse -Filter *.msi | Select-Object -First 1
           if ($null -eq $msi) { throw "MSI package was not found" }
-          $msiPayload = Join-Path $payloadRoot "msi"
+          $msiPayload = Join-Path $inspectionRoot "msi"
           New-Item -ItemType Directory -Force -Path $msiPayload | Out-Null
           lessmsi.exe x $msi.FullName $msiPayload
           if ($LASTEXITCODE -ne 0) { throw "MSI extraction failed with exit code $LASTEXITCODE" }
