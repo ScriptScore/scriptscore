@@ -48,6 +48,6 @@ cargo install \
   --root "${tools_root}" \
   "${tool_name}" \
   --version "${version}" \
-  "${install_args[@]}"
+  ${install_args+"${install_args[@]}"}
 
 touch "${stamp_path}"

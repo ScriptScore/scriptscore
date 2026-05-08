@@ -139,6 +139,7 @@ cli/models/paddle/*
 # Logs / misc
 # =========================
 *.log
+.DS_Store
 
 # =========================
 # IDE / editors
