@@ -151,6 +151,11 @@ jobs:
           npm run check
           npm test
 
+      - name: Prepare Tauri resource directories
+        run: |
+          mkdir -p desktop/dist/bundled-runtime
+          mkdir -p desktop/dist/legal
+
       - name: Desktop host quality gate
         run: |
           cargo fmt --check --manifest-path desktop/src-tauri/Cargo.toml
