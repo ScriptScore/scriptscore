@@ -94,6 +94,10 @@ if [[ -n "${TARGET}" ]]; then
   build_cmd+=(--target "${TARGET}")
 fi
 
+if [[ "${SCRIPTSCORE_DESKTOP_VERBOSE_TAURI:-0}" == "1" ]]; then
+  build_cmd+=(--verbose)
+fi
+
 "${build_cmd[@]}"
 
 echo "Desktop package build finished"
