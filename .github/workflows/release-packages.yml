@@ -2,6 +2,12 @@ name: RC Package Validation
 
 on:
   workflow_dispatch:
+    inputs:
+      fast_track:
+        description: "Skip expensive quality gates while iterating on package assembly."
+        required: false
+        default: false
+        type: boolean
   push:
     tags:
       - "v*"
@@ -127,6 +133,7 @@ jobs:
         run: npm ci
 
       - name: Install CLI fast-quality dependencies
+        if: ${{ !inputs.fast_track }}
         working-directory: cli
         run: uv sync --only-group ci-runtime --only-group quality --no-install-project --frozen
 
@@ -142,6 +149,7 @@ jobs:
         run: cargo install tauri-cli --version '^2'
 
       - name: CLI fast-quality gate
+        if: ${{ !inputs.fast_track }}
         working-directory: cli
         run: |
           uv run --no-sync ruff check .
@@ -149,6 +157,7 @@ jobs:
           uv run --no-sync mypy
 
       - name: Frontend quality gate
+        if: ${{ !inputs.fast_track }}
         working-directory: desktop/frontend
         run: |
           npm run lint
@@ -161,6 +170,7 @@ jobs:
           mkdir -p desktop/dist/legal
 
       - name: Desktop host quality gate
+        if: ${{ !inputs.fast_track }}
         run: |
           cargo fmt --check --manifest-path desktop/src-tauri/Cargo.toml
           cargo clippy --manifest-path desktop/src-tauri/Cargo.toml --workspace --all-targets --all-features --target "${SCRIPTSCORE_DESKTOP_TARGET}" -- -D warnings
