@@ -94,9 +94,12 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
+            appstream \
+            binutils \
             build-essential \
             curl \
             cpio \
+            desktop-file-utils \
             dpkg-dev \
             fakeroot \
             file \
@@ -111,7 +114,8 @@ jobs:
             pkg-config \
             rpm \
             squashfs-tools \
-            wget
+            wget \
+            zsync
 
       - name: Install Windows package dependencies
         if: ${{ runner.os == 'Windows' }}
@@ -201,7 +205,12 @@ jobs:
           python desktop/scripts/check_scriptscoreplus_boundary.py
 
       - name: Build Tauri packages
-        run: ./desktop/scripts/build-desktop-package.sh "${SCRIPTSCORE_DESKTOP_BUNDLES}"
+        run: |
+          if [[ "${RUNNER_OS}" == "Linux" ]]; then
+            export DEBUG=1
+            export NO_STRIP=true
+          fi
+          ./desktop/scripts/build-desktop-package.sh "${SCRIPTSCORE_DESKTOP_BUNDLES}"
 
       - name: Smoke AppImage extraction
         if: ${{ runner.os == 'Linux' }}
