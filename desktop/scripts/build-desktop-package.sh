@@ -78,6 +78,13 @@ if [[ -z "${SCRIPTSCORE_DESKTOP_PORTABLE_PYTHON_ROOT:-}" ]] && [[ "${AUTO_PORTAB
   fi
 fi
 
+if [[ "$(uname -s)" == "Linux" ]] && bundle_selection_includes "${BUNDLES}" "appimage"; then
+  bundled_python_lib="${DESKTOP_ROOT}/dist/bundled-runtime/python/lib"
+  if [[ -d "${bundled_python_lib}" ]]; then
+    export LD_LIBRARY_PATH="${bundled_python_lib}${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+  fi
+fi
+
 build_cmd=(
   cargo
   tauri
