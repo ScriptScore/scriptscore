@@ -10,7 +10,6 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-
 MODULE_PATH = Path(__file__).resolve().parents[1] / "prepare_portable_python.py"
 SPEC = importlib.util.spec_from_file_location("prepare_portable_python", MODULE_PATH)
 assert SPEC is not None and SPEC.loader is not None
@@ -85,6 +84,7 @@ class PreparePortablePythonTests(unittest.TestCase):
                     target_triple="x86_64-unknown-linux-gnu",
                     requirements_sha256="abc123",
                     torch_backend="cpu",
+                    package_overrides_sha256="",
                 )
             )
             self.assertFalse(
@@ -94,6 +94,7 @@ class PreparePortablePythonTests(unittest.TestCase):
                     target_triple="x86_64-unknown-linux-gnu",
                     requirements_sha256="different",
                     torch_backend="cpu",
+                    package_overrides_sha256="",
                 )
             )
 
@@ -177,6 +178,118 @@ class PreparePortablePythonTests(unittest.TestCase):
             self.assertNotIn("cuda-toolkit", filtered)
             self.assertNotIn("triton", filtered)
             self.assertNotIn("# via torch\ntriton", filtered)
+
+    def test_rewrite_requirement_to_local_wheel_replaces_only_target_requirement(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            wheel_path = tmp_path / MODULE.MACOS_X86_64_PADDLE_WHEEL_NAME
+            wheel_path.write_bytes(b"wheel")
+            requirements_path = tmp_path / "requirements.txt"
+            requirements_path.write_text(
+                "\n".join(
+                    [
+                        "numpy==2.2.0",
+                        "paddlepaddle==3.3.1",
+                        "    # via scriptscore",
+                        "paddleocr==2.10.0",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            MODULE.rewrite_requirement_to_local_wheel(
+                requirements_path,
+                "paddlepaddle",
+                wheel_path,
+                "file:///__scriptscore_package_overrides__/paddlepaddle.whl",
+            )
+
+            rewritten = requirements_path.read_text(encoding="utf-8")
+            self.assertIn(
+                "paddlepaddle @ file:///__scriptscore_package_overrides__/paddlepaddle.whl",
+                rewritten,
+            )
+            self.assertIn("numpy==2.2.0", rewritten)
+            self.assertIn("paddleocr==2.10.0", rewritten)
+            self.assertNotIn("paddlepaddle==3.3.1", rewritten)
+            self.assertNotIn("# via scriptscore", rewritten)
+
+    def test_remove_requirements_drops_target_stack_with_continuations(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            requirements_path = Path(tmp_dir) / "requirements.txt"
+            requirements_path.write_text(
+                "\n".join(
+                    [
+                        "easyocr==1.7.2",
+                        "    # via scriptscore",
+                        "numpy==2.2.0",
+                        "torch==2.11.0",
+                        "    # via easyocr",
+                        "torchvision==0.26.0",
+                        "    # via easyocr",
+                        "paddleocr==2.10.0",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            MODULE.remove_requirements(
+                requirements_path,
+                MODULE.excluded_requirements_for_target(MODULE.MACOS_X86_64_TARGET_TRIPLE),
+            )
+
+            filtered = requirements_path.read_text(encoding="utf-8")
+            self.assertIn("numpy==2.2.0", filtered)
+            self.assertIn("paddleocr==2.10.0", filtered)
+            self.assertNotIn("easyocr", filtered)
+            self.assertNotIn("torch==", filtered)
+            self.assertNotIn("torchvision", filtered)
+
+    def test_macos_x86_paddle_override_verifies_local_wheel_without_persisting_url(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            wheel_path = tmp_path / MODULE.MACOS_X86_64_PADDLE_WHEEL_NAME
+            wheel_path.write_bytes(b"release asset bytes")
+            wheel_sha256 = MODULE.file_sha256(wheel_path)
+
+            with mock.patch.dict(
+                os.environ,
+                {
+                    "SCRIPTSCORE_MACOS_X86_64_PADDLE_WHEEL_PATH": str(wheel_path),
+                    "SCRIPTSCORE_MACOS_X86_64_PADDLE_WHEEL_SHA256": wheel_sha256,
+                },
+                clear=False,
+            ):
+                overrides = MODULE.package_overrides_for_target(
+                    MODULE.MACOS_X86_64_TARGET_TRIPLE,
+                    tmp_path,
+                )
+
+            self.assertEqual(len(overrides), 1)
+            self.assertEqual(overrides[0].package_name, "paddlepaddle")
+            self.assertEqual(overrides[0].wheel_sha256, wheel_sha256)
+            self.assertNotIn(str(wheel_path), MODULE.package_overrides_sha256(overrides))
+
+    def test_macos_x86_paddle_override_rejects_sha_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            wheel_path = tmp_path / MODULE.MACOS_X86_64_PADDLE_WHEEL_NAME
+            wheel_path.write_bytes(b"release asset bytes")
+
+            with mock.patch.dict(
+                os.environ,
+                {
+                    "SCRIPTSCORE_MACOS_X86_64_PADDLE_WHEEL_PATH": str(wheel_path),
+                    "SCRIPTSCORE_MACOS_X86_64_PADDLE_WHEEL_SHA256": "0" * 64,
+                },
+                clear=False,
+            ), self.assertRaisesRegex(MODULE.PortablePythonError, "SHA256 mismatch"):
+                MODULE.package_overrides_for_target(
+                    MODULE.MACOS_X86_64_TARGET_TRIPLE,
+                    tmp_path,
+                )
 
     @unittest.skipIf(not hasattr(os, "symlink"), "symlink support required")
     def test_publish_staged_root_materializes_uv_symlink(self) -> None:
