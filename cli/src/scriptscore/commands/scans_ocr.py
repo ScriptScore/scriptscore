@@ -398,6 +398,7 @@ def handle_scans_ocr(ctx: CommandContext, request: ScansOcrRequest) -> CommandOu
     ctx.check_cancelled()
     test_hint = os.environ.get("SCRIPTSCORE_TEST_OCR_HINT")
     raw = _read_stdin_png_bytes()
+    _png_bytes_to_pil_image(raw)
     if test_hint is not None:
         return CommandOutcome(
             data={"hint_text": test_hint.strip(), "segment_count": 0},

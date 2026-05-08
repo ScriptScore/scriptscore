@@ -79,6 +79,19 @@ validate_model_dir() {
   fi
 }
 
+find_model_dir() {
+  local model_name="$1"
+  local inference_file
+
+  inference_file="$(
+    find "${TMP_DIR}" -maxdepth 2 -type f -name inference.yml -path "*/${model_name}/*" |
+      head -n 1
+  )"
+  if [[ -n "${inference_file}" ]]; then
+    dirname "${inference_file}"
+  fi
+}
+
 need_cmd tar
 need_cmd mktemp
 
@@ -101,8 +114,8 @@ echo "Extracting archives..."
 tar -xf "${DET_TAR}" -C "${TMP_DIR}"
 tar -xf "${REC_TAR}" -C "${TMP_DIR}"
 
-DET_SRC="$(find "${TMP_DIR}" -maxdepth 2 -type f -name inference.yml -path '*/PP-OCRv5_mobile_det_infer/*' -printf '%h\n' | head -n 1)"
-REC_SRC="$(find "${TMP_DIR}" -maxdepth 2 -type f -name inference.yml -path '*/PP-OCRv5_mobile_rec_infer/*' -printf '%h\n' | head -n 1)"
+DET_SRC="$(find_model_dir "PP-OCRv5_mobile_det_infer")"
+REC_SRC="$(find_model_dir "PP-OCRv5_mobile_rec_infer")"
 
 if [[ -z "${DET_SRC}" || -z "${REC_SRC}" ]]; then
   echo "failed to find extracted Paddle model directories in downloaded archives" >&2

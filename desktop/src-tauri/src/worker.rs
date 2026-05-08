@@ -614,7 +614,10 @@ fn accept_worker_connection(listener: &UnixListener, child: &mut Child) -> HostR
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         match listener.accept() {
-            Ok((stream, _addr)) => return Ok(stream),
+            Ok((stream, _addr)) => {
+                stream.set_nonblocking(false)?;
+                return Ok(stream);
+            }
             Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
                 if child.try_wait()?.is_some() {
                     return Err(HostError::Worker(

@@ -49,6 +49,29 @@ This is the PowerShell equivalent for the review-quality checks that can run rel
 
 Linux is the only verified desktop packaging target for the current public preview. Windows desktop runtime development is in progress, and Windows installer packaging remains unverified. macOS desktop runtime and installer paths are in progress and unverified.
 
+### macOS Desktop Development
+
+Use the macOS-specific launcher when testing the Tauri desktop app on macOS:
+
+```bash
+./desktop/scripts/dev-desktop-macos.sh
+```
+
+The launcher starts the Svelte/Vite frontend explicitly, waits for it to become
+available, then starts the Tauri host against that dev server. This avoids
+platform-specific differences in Tauri's nested `beforeDevCommand` handling
+during local macOS development.
+
+If `npm` is not on `PATH`, the launcher first checks `SCRIPTSCORE_NODE_BIN` and
+then a workspace-local `.tools/node-*-darwin-*/bin` directory. For example:
+
+```bash
+SCRIPTSCORE_NODE_BIN="/path/to/node/bin" ./desktop/scripts/dev-desktop-macos.sh
+```
+
+This launcher is for local development only. It does not make macOS desktop
+packaging release-ready.
+
 ## Provider Modes
 
 The desktop UI supports no-AI and Ollama-oriented workflows. ScriptScorePlus appears only as planned hosted API support and is not required for local use.
