@@ -274,6 +274,7 @@ jobs:
           chmod +x "${appimage}"
           tmp_dir=$(mktemp -d)
           payload_root="$(pwd)/desktop/dist/package-payload/${{ matrix.label }}"
+          rm -rf "${payload_root}"
           mkdir -p "${payload_root}"
           (
             cd "${tmp_dir}"
