@@ -106,6 +106,31 @@ class VerifyReleasePackageArtifactsTests(unittest.TestCase):
             ):
                 MODULE.validate_packaged_ocr_reader(runtime_root, model_root)
 
+    def test_secret_marker_scan_allows_huggingface_auth_source(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            auth_source = (
+                Path(tmp_dir)
+                / "runtime"
+                / "python"
+                / "site-packages"
+                / "huggingface_hub"
+                / "cli"
+                / "auth.py"
+            )
+            auth_source.parent.mkdir(parents=True)
+            auth_source.write_text('"Authorization: Bearer {token}"\n', encoding="utf-8")
+
+            MODULE.scan_for_secret_markers([Path(tmp_dir)])
+
+    def test_secret_marker_scan_rejects_bearer_marker_elsewhere(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            marker_file = Path(tmp_dir) / "runtime" / "config.py"
+            marker_file.parent.mkdir(parents=True)
+            marker_file.write_text('"Authorization: Bearer {token}"\n', encoding="utf-8")
+
+            with self.assertRaisesRegex(MODULE.VerificationError, "Authorization: Bearer"):
+                MODULE.scan_for_secret_markers([Path(tmp_dir)])
+
 
 if __name__ == "__main__":
     unittest.main()

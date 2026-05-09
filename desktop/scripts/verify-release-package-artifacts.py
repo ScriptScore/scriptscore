@@ -23,6 +23,11 @@ SECRET_MARKERS = (
     "PADDLE_WHEEL_TOKEN",
     "Authorization: Bearer",
 )
+ALLOWED_SECRET_MARKER_PATHS = {
+    "Authorization: Bearer": (
+        Path("huggingface_hub") / "cli" / "auth.py",
+    ),
+}
 TEXT_SUFFIXES = {
     ".css",
     ".html",
@@ -283,6 +288,12 @@ def should_scan_text(path: Path) -> bool:
         return False
 
 
+def is_allowed_secret_marker(path: Path, marker: str) -> bool:
+    allowed_suffixes = ALLOWED_SECRET_MARKER_PATHS.get(marker, ())
+    path_parts = path.parts
+    return any(path_parts[-len(suffix.parts) :] == suffix.parts for suffix in allowed_suffixes)
+
+
 def scan_for_secret_markers(paths: list[Path]) -> None:
     findings: list[str] = []
     for root in paths:
@@ -297,7 +308,7 @@ def scan_for_secret_markers(paths: list[Path]) -> None:
             except OSError:
                 continue
             for marker in SECRET_MARKERS:
-                if marker in text:
+                if marker in text and not is_allowed_secret_marker(path, marker):
                     findings.append(f"{path}: {marker}")
 
     if findings:
