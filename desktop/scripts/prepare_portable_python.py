@@ -305,9 +305,7 @@ def filter_portable_runtime_requirements(requirements_path: Path) -> None:
 
 def install_uv_managed_python(install_dir: Path, python_version: str) -> Path:
     if shutil.which("uv") is None:
-        raise PortablePythonError(
-            "uv is required to install a managed portable Python runtime."
-        )
+        raise PortablePythonError("uv is required to install a managed portable Python runtime.")
 
     command = [
         "uv",
@@ -453,6 +451,8 @@ def rewrite_requirement_to_local_wheel(
     package_name: str,
     wheel_path: Path,
     wheel_uri: str | None = None,
+    *,
+    append_if_missing: bool = False,
 ) -> None:
     package_key = package_name.lower().replace("_", "-")
     replacement = f"{package_name} @ {wheel_uri or wheel_path.resolve().as_uri()}\n"
@@ -477,6 +477,12 @@ def rewrite_requirement_to_local_wheel(
 
         rewritten_lines.append(line)
 
+    if not found and append_if_missing:
+        if rewritten_lines and rewritten_lines[-1].strip():
+            rewritten_lines.append("\n")
+        rewritten_lines.append(replacement)
+        found = True
+
     if not found:
         raise PortablePythonError(
             f"Could not find requirement '{package_name}' to replace with local wheel."
@@ -500,6 +506,7 @@ def apply_package_overrides(
             override.package_name,
             override.wheel_path,
             wheel_uri,
+            append_if_missing=True,
         )
 
 

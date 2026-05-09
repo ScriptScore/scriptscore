@@ -6,6 +6,7 @@ import argparse
 import hashlib
 import json
 import os
+import subprocess
 from pathlib import Path
 
 BUNDLE_EXTENSIONS = {
@@ -89,20 +90,17 @@ def files_for_bundle(bundle_root: Path, bundle: str) -> list[Path]:
     )
 
 
-def validate_runtime(runtime_root: Path) -> dict[str, object]:
+def runtime_manifest(runtime_root: Path) -> dict[str, object]:
     manifest_path = runtime_root / "runtime-manifest.json"
-    cli_src = runtime_root / "cli-src" / "scriptscore"
-    python_root = runtime_root / "python"
-
     if not manifest_path.is_file():
         raise VerificationError(f"Missing bundled runtime manifest: {manifest_path}")
-    if not cli_src.is_dir():
-        raise VerificationError(f"Missing bundled CLI source: {cli_src}")
-
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    if not manifest.get("portableRelease"):
-        raise VerificationError("Bundled runtime manifest is not marked as a portable release.")
+    if not isinstance(manifest, dict):
+        raise VerificationError(f"Bundled runtime manifest was not a JSON object: {manifest_path}")
+    return manifest
 
+
+def resolved_runtime_python(runtime_root: Path, manifest: dict[str, object]) -> Path:
     python_executable = manifest.get("pythonExecutable")
     if not isinstance(python_executable, str) or not python_executable:
         raise VerificationError("Bundled runtime manifest does not name a Python executable.")
@@ -111,12 +109,44 @@ def validate_runtime(runtime_root: Path) -> dict[str, object]:
         resolved_python = runtime_root / resolved_python
     if not resolved_python.is_file():
         raise VerificationError(f"Bundled Python executable was not found: {resolved_python}")
+    return resolved_python
+
+
+def runtime_python_path_entries(runtime_root: Path, manifest: dict[str, object]) -> list[Path]:
+    entries = manifest.get("pythonPathEntries", [])
+    if not isinstance(entries, list):
+        raise VerificationError("Bundled runtime manifest pythonPathEntries must be a list.")
+    paths: list[Path] = []
+    for entry in entries:
+        if not isinstance(entry, str) or not entry:
+            raise VerificationError(
+                "Bundled runtime manifest contained an invalid PYTHONPATH entry."
+            )
+        path = Path(entry)
+        paths.append(path if path.is_absolute() else runtime_root / path)
+    return paths
+
+
+def validate_runtime(runtime_root: Path) -> dict[str, object]:
+    cli_src = runtime_root / "cli-src" / "scriptscore"
+    python_root = runtime_root / "python"
+
+    if not cli_src.is_dir():
+        raise VerificationError(f"Missing bundled CLI source: {cli_src}")
+
+    manifest = runtime_manifest(runtime_root)
+    if not manifest.get("portableRelease"):
+        raise VerificationError("Bundled runtime manifest is not marked as a portable release.")
+
+    resolved_python = resolved_runtime_python(runtime_root, manifest)
     if not python_root.exists():
         raise VerificationError(f"Bundled Python root was not found: {python_root}")
+    python_path_entries = runtime_python_path_entries(runtime_root, manifest)
 
     return {
-        "manifest": str(manifest_path),
+        "manifest": str(runtime_root / "runtime-manifest.json"),
         "pythonExecutable": str(resolved_python),
+        "pythonPathEntries": [str(entry) for entry in python_path_entries],
         "runtimeMode": manifest.get("runtimeMode"),
     }
 
@@ -132,6 +162,49 @@ def validate_models(models_root: Path) -> dict[str, object]:
     if missing:
         raise VerificationError("Missing Paddle model resource(s): " + ", ".join(missing))
     return {"modelRoot": str(models_root)}
+
+
+def runtime_env(runtime_root: Path, manifest: dict[str, object]) -> dict[str, str]:
+    env = os.environ.copy()
+    env.pop("PYTHONHOME", None)
+    python_path_entries = runtime_python_path_entries(runtime_root, manifest)
+    if python_path_entries:
+        existing = env.get("PYTHONPATH", "")
+        env["PYTHONPATH"] = os.pathsep.join(
+            [str(entry) for entry in python_path_entries] + ([existing] if existing else [])
+        )
+    return env
+
+
+def validate_packaged_ocr_reader(runtime_root: Path, models_root: Path) -> dict[str, object]:
+    manifest = runtime_manifest(runtime_root)
+    python_executable = resolved_runtime_python(runtime_root, manifest)
+    command = [
+        str(python_executable),
+        "-c",
+        (
+            "from pathlib import Path; "
+            "from scriptscore.pii_scan.reader import create_reader; "
+            "create_reader(Path(__import__('sys').argv[1]))"
+        ),
+        str(models_root),
+    ]
+    result = subprocess.run(
+        command,
+        check=False,
+        capture_output=True,
+        text=True,
+        env=runtime_env(runtime_root, manifest),
+    )
+    if result.returncode != 0:
+        details = (result.stderr or result.stdout or "").strip()
+        raise VerificationError(
+            "Packaged PaddleOCR reader smoke failed" + (f": {details[-1000:]}" if details else ".")
+        )
+    return {
+        "pythonExecutable": str(python_executable),
+        "modelRoot": str(models_root),
+    }
 
 
 def validate_legal(legal_root: Path) -> dict[str, object]:
@@ -166,7 +239,9 @@ def find_payload_model_root(payload_root: Path) -> Path:
         except VerificationError:
             continue
         return candidate
-    raise VerificationError(f"Packaged payload is missing valid Paddle model resources: {payload_root}")
+    raise VerificationError(
+        f"Packaged payload is missing valid Paddle model resources: {payload_root}"
+    )
 
 
 def find_payload_legal_root(payload_root: Path) -> Path:
@@ -179,7 +254,9 @@ def find_payload_legal_root(payload_root: Path) -> Path:
         except VerificationError:
             continue
         return candidate
-    raise VerificationError(f"Packaged payload is missing generated legal resources: {payload_root}")
+    raise VerificationError(
+        f"Packaged payload is missing generated legal resources: {payload_root}"
+    )
 
 
 def validate_payload_root(payload_root: Path) -> dict[str, object]:
@@ -192,6 +269,7 @@ def validate_payload_root(payload_root: Path) -> dict[str, object]:
         "payloadRoot": str(payload_root),
         "runtime": validate_runtime(runtime_root),
         "models": validate_models(model_root),
+        "ocrReaderSmoke": validate_packaged_ocr_reader(runtime_root, model_root),
         "legal": validate_legal(legal_root),
     }
 
@@ -237,7 +315,9 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def write_validation_outputs(label: str, package_files: list[Path], summary: dict[str, object]) -> Path:
+def write_validation_outputs(
+    label: str, package_files: list[Path], summary: dict[str, object]
+) -> Path:
     output_dir = desktop_root() / "dist" / "release-package-validation" / label
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -317,6 +397,10 @@ def main() -> int:
                 "payloadRoot": "staging-directories",
                 "runtime": runtime_summary,
                 "models": models_summary,
+                "ocrReaderSmoke": validate_packaged_ocr_reader(
+                    Path(args.runtime_root),
+                    Path(args.models_root),
+                ),
                 "legal": legal_summary,
             }
         )

@@ -13,6 +13,7 @@ from PIL import Image
 from scriptscore.commands import build_command_registry, scans_ocr
 from scriptscore.contracts import ScriptscoreError
 from scriptscore.contracts.envelopes import CommandErrorEnvelope, CommandSuccessEnvelope
+from scriptscore.pii_scan.types import ReadResult, VisionToken
 from scriptscore.providers import ProviderRegistry
 from scriptscore.runtime import CommandRunner
 
@@ -149,22 +150,35 @@ def test_scans_ocr_paddle_candidates_choose_best_cleaned_hint(
     monkeypatch.delenv("SCRIPTSCORE_TEST_OCR_HINT", raising=False)
     monkeypatch.setattr("sys.stdin", _BinaryStdin(_png_bytes()))
 
-    class _PaddleEngine:
+    class _PaddleReader:
         def __init__(self) -> None:
             self.calls = 0
 
-        def ocr(
-            self, _image: object, *, det: bool, rec: bool, cls: bool
-        ) -> list[tuple[str, float]]:
+        def read(self, _image: object) -> ReadResult:
             self.calls += 1
             if self.calls == 1:
-                return [("Name:", 0.99)]
+                token = VisionToken(
+                    text="Name:",
+                    confidence=0.99,
+                    corners=((0, 0), (50, 0), (50, 10), (0, 10)),
+                )
+                return ReadResult(tokens=[token], backend_name="test")
             if self.calls == 2:
-                return [("Name: Jane Doe", 0.75)]
-            return [("J Doe", 0.25)]
+                token = VisionToken(
+                    text="Name: Jane Doe",
+                    confidence=0.75,
+                    corners=((0, 0), (100, 0), (100, 10), (0, 10)),
+                )
+                return ReadResult(tokens=[token], backend_name="test")
+            token = VisionToken(
+                text="J Doe",
+                confidence=0.25,
+                corners=((0, 0), (40, 0), (40, 10), (0, 10)),
+            )
+            return ReadResult(tokens=[token], backend_name="test")
 
     monkeypatch.setattr(
-        "scriptscore.commands.scans_ocr._load_paddle_ocr_engine", lambda: _PaddleEngine()
+        "scriptscore.commands.scans_ocr._load_paddle_reader", lambda: _PaddleReader()
     )
     monkeypatch.setattr(
         "scriptscore.commands.scans_ocr._read_easyocr_hint",
@@ -184,14 +198,17 @@ def test_scans_ocr_falls_back_when_paddle_returns_label_only(
     monkeypatch.delenv("SCRIPTSCORE_TEST_OCR_HINT", raising=False)
     monkeypatch.setattr("sys.stdin", _BinaryStdin(_png_bytes()))
 
-    class _PaddleEngine:
-        def ocr(
-            self, _image: object, *, det: bool, rec: bool, cls: bool
-        ) -> list[tuple[str, float]]:
-            return [("Name: ____", 0.95)]
+    class _PaddleReader:
+        def read(self, _image: object) -> ReadResult:
+            token = VisionToken(
+                text="Name: ____",
+                confidence=0.95,
+                corners=((0, 0), (80, 0), (80, 10), (0, 10)),
+            )
+            return ReadResult(tokens=[token], backend_name="test")
 
     monkeypatch.setattr(
-        "scriptscore.commands.scans_ocr._load_paddle_ocr_engine", lambda: _PaddleEngine()
+        "scriptscore.commands.scans_ocr._load_paddle_reader", lambda: _PaddleReader()
     )
     monkeypatch.setattr(
         "scriptscore.commands.scans_ocr._read_easyocr_hint",
@@ -359,7 +376,7 @@ def test_scans_ocr_paddle_reader_creation_failure_is_unavailable(
 
     monkeypatch.setattr("scriptscore.commands.scans_ocr.create_reader", create_reader)
 
-    assert scans_ocr._load_paddle_ocr_engine() is None
+    assert scans_ocr._load_paddle_reader() is None
 
 
 def test_scans_ocr_paddle_candidate_images_include_normal_cropped_and_thresholded() -> None:

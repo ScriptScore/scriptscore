@@ -421,6 +421,175 @@ def test_scans_detect_excludes_single_term_answer_text_from_next_header_band(
     assert q1["region"]["height"] == 52
 
 
+def test_scans_detect_uses_content_anchor_when_printed_current_header_is_obscured(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    page = make_rgb_page(tmp_path / "scan_001" / "page_003.png", size=(900, 1165))
+    output_dir = (tmp_path / "detect_out").resolve()
+    request = _detect_request(page=page, output_dir=output_dir)
+    request["detect_targets"][0]["page"]["page_number"] = 3
+    request["detect_targets"][0]["question_hints"] = [
+        {
+            "question_id": "q5",
+            "question_number": 5,
+            "template_region": {
+                "x": 0,
+                "y": 382,
+                "width": 900,
+                "height": 341,
+                "units": "rendered_page_pixels",
+            },
+            "question_text_hint": "Describe the causes and goals of the abolitionist movement.",
+        },
+        {
+            "question_id": "q6",
+            "question_number": 6,
+            "template_region": {
+                "x": 0,
+                "y": 723,
+                "width": 900,
+                "height": 442,
+                "units": "rendered_page_pixels",
+            },
+            "question_text_hint": (
+                "Explain the significance of the Seneca Falls Convention and the women's "
+                "rights movement."
+            ),
+        },
+    ]
+
+    monkeypatch.setattr(
+        "scriptscore.commands.scans_detect.read_page_ocr",
+        lambda _path: [
+            OcrTextBox(
+                text="5. Describe the causes and goals of the abolitionist movement.",
+                left=80,
+                top=444,
+                right=450,
+                bottom=466,
+                confidence=0.97,
+            ),
+            OcrTextBox(
+                text="e quality also influenced them. Their main",
+                left=118,
+                top=616,
+                right=780,
+                bottom=677,
+                confidence=0.84,
+            ),
+            OcrTextBox(
+                text="goal was to end slavery in the United States",
+                left=121,
+                top=657,
+                right=843,
+                bottom=723,
+                confidence=0.81,
+            ),
+            OcrTextBox(
+                text="Some wanted immediate freedom for enslaved",
+                left=117,
+                top=709,
+                right=823,
+                bottom=763,
+                confidence=0.84,
+            ),
+            OcrTextBox(
+                text="The Sendln Falls Convenfion focasedon",
+                left=142,
+                top=817,
+                right=728,
+                bottom=876,
+                confidence=0.91,
+            ),
+            OcrTextBox(
+                text="Women's rights, Ft called tor eguality",
+                left=144,
+                top=855,
+                right=779,
+                bottom=934,
+                confidence=0.76,
+            ),
+            OcrTextBox(
+                text="includiny voting rights. tt helpeg",
+                left=141,
+                top=906,
+                right=765,
+                bottom=975,
+                confidence=0.82,
+            ),
+        ],
+    )
+
+    result = _runner().run("scans.detect", request)
+
+    assert result.exit_code == 0
+    assert isinstance(result.envelope, CommandSuccessEnvelope)
+    q5, q6 = result.envelope.data["detect_results"]
+    assert q5["status"] == "ok"
+    assert q5["region_source"] == "ocr_refined"
+    assert q5["region"]["y"] == 444
+    assert q5["region"]["height"] == 319
+    assert q6["status"] == "ok"
+    assert q6["region_source"] == "ocr_refined"
+    assert q6["region"]["y"] == 817
+
+
+def test_scans_detect_content_anchor_prefers_earliest_acceptable_answer_line(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    page = make_rgb_page(tmp_path / "scan_001" / "page_001.png", size=(900, 1165))
+    output_dir = (tmp_path / "detect_out").resolve()
+    request = _detect_request(page=page, output_dir=output_dir)
+    request["detect_targets"][0]["question_hints"] = [
+        {
+            "question_id": "q1",
+            "question_number": 1,
+            "template_region": {
+                "x": 0,
+                "y": 300,
+                "width": 900,
+                "height": 420,
+                "units": "rendered_page_pixels",
+            },
+            "question_text_hint": (
+                "Explain the significance of the Seneca Falls Convention and the women's "
+                "rights movement."
+            ),
+        }
+    ]
+
+    monkeypatch.setattr(
+        "scriptscore.commands.scans_detect.read_page_ocr",
+        lambda _path: [
+            OcrTextBox(
+                text="Seneca Falls focused on equality",
+                left=120,
+                top=352,
+                right=650,
+                bottom=398,
+                confidence=0.82,
+            ),
+            OcrTextBox(
+                text="The Seneca Falls Convention and women's rights movement were significant",
+                left=120,
+                top=410,
+                right=820,
+                bottom=456,
+                confidence=0.9,
+            ),
+        ],
+    )
+
+    result = _runner().run("scans.detect", request)
+
+    assert result.exit_code == 0
+    assert isinstance(result.envelope, CommandSuccessEnvelope)
+    q1 = result.envelope.data["detect_results"][0]
+    assert q1["status"] == "ok"
+    assert q1["region_source"] == "ocr_refined"
+    assert q1["region"]["y"] == 352
+
+
 def test_scans_detect_rejects_single_token_match_for_two_token_hint(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

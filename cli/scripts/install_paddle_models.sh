@@ -125,9 +125,11 @@ fi
 mkdir -p "${DET_DEST}" "${REC_DEST}"
 
 echo "Installing detector into ${DET_DEST}"
+rm -f "${DET_DEST}"/inference.json "${DET_DEST}"/inference.pdmodel "${DET_DEST}"/inference.pdiparams "${DET_DEST}"/inference.pdiparams.info "${DET_DEST}"/inference.yml
 cp -f "${DET_SRC}/"* "${DET_DEST}/"
 
 echo "Installing recognizer into ${REC_DEST}"
+rm -f "${REC_DEST}"/inference.json "${REC_DEST}"/inference.pdmodel "${REC_DEST}"/inference.pdiparams "${REC_DEST}"/inference.pdiparams.info "${REC_DEST}"/inference.yml
 cp -f "${REC_SRC}/"* "${REC_DEST}/"
 
 validate_model_dir "${DET_DEST}"

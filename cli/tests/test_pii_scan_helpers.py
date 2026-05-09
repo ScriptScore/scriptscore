@@ -3,7 +3,11 @@
 
 from __future__ import annotations
 
+import importlib.machinery
+import importlib.util
 import json
+import sys
+import types
 from pathlib import Path
 
 import numpy as np
@@ -17,12 +21,23 @@ from scriptscore.pii_scan.reader import PaddleTextReader, create_reader, verify_
 from scriptscore.pii_scan.types import RasterBundle, ReadResult, ScanRuntimeOptions, VisionToken
 
 
-def _fake_model_root(root: Path) -> Path:
+def _fake_model_root(
+    root: Path,
+    *,
+    det_model_name: str | None = None,
+    rec_model_name: str | None = None,
+) -> Path:
     model_root = (root / "models" / "paddle").resolve()
+    model_names = {"det": det_model_name, "rec": rec_model_name}
     for leaf in ("det", "rec"):
         target = model_root / leaf
         target.mkdir(parents=True, exist_ok=True)
-        (target / "inference.yml").write_text("test", encoding="utf-8")
+        metadata = (
+            f"Global:\n  model_name: {model_names[leaf]}\n"
+            if model_names[leaf] is not None
+            else "test"
+        )
+        (target / "inference.yml").write_text(metadata, encoding="utf-8")
         (target / "inference.json").write_text("{}", encoding="utf-8")
     return model_root
 
@@ -123,6 +138,19 @@ def test_verify_model_root_reports_missing_layout(tmp_path: Path) -> None:
         verify_model_root(model_root)
 
 
+def test_verify_model_root_rejects_ppocrv5_with_paddleocr_2(tmp_path: Path) -> None:
+    model_root = _fake_model_root(
+        tmp_path,
+        det_model_name="PP-OCRv5_mobile_det",
+        rec_model_name="PP-OCRv5_mobile_rec",
+    )
+
+    with pytest.raises(RuntimeError, match="PP-OCRv5 model resources require PaddleOCR 3.x"):
+        verify_model_root(model_root, paddleocr_version="2.10.0")
+
+    verify_model_root(model_root, paddleocr_version="3.5.0")
+
+
 def test_test_override_tokens_validate_and_normalize(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -161,23 +189,82 @@ def test_test_override_tokens_validate_and_normalize(
         create_reader(model_root).read(object())
 
 
-def test_paddle_reader_normalizes_dict_and_legacy_payloads(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_paddle_reader_uses_paddleocr_3_constructor(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    model_root = _fake_model_root(
+        tmp_path,
+        det_model_name="PP-OCRv5_mobile_det",
+        rec_model_name="PP-OCRv5_mobile_rec",
+    )
+    constructor_kwargs: dict[str, object] = {}
+
+    class _PaddleOCR:
+        def __init__(self, **kwargs: object) -> None:
+            constructor_kwargs.update(kwargs)
+
+        def predict(self, *, input: object) -> list[object]:
+            del input
+            return []
+
+    fake_module = types.ModuleType("paddleocr")
+    fake_module.PaddleOCR = _PaddleOCR  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "paddleocr", fake_module)
+
+    original_find_spec = importlib.util.find_spec
+
+    def find_spec(name: str, path: object = None, target: object = None) -> object:
+        del path, target
+        if name == "paddle":
+            return importlib.machinery.ModuleSpec("paddle", loader=None)
+        if name == "torch":
+            return None
+        return original_find_spec(name)
+
+    monkeypatch.setattr("scriptscore.pii_scan.reader.importlib.util.find_spec", find_spec)
+    monkeypatch.setattr(
+        "scriptscore.pii_scan.reader._installed_distribution_version",
+        lambda package_name: "3.5.0" if package_name == "paddleocr" else None,
+    )
+
+    PaddleTextReader(model_root)
+
+    assert constructor_kwargs == {
+        "text_detection_model_name": "PP-OCRv5_mobile_det",
+        "text_detection_model_dir": str(model_root / "det"),
+        "text_recognition_model_name": "PP-OCRv5_mobile_rec",
+        "text_recognition_model_dir": str(model_root / "rec"),
+        "use_doc_orientation_classify": False,
+        "use_doc_unwarping": False,
+        "use_textline_orientation": False,
+        "device": "cpu",
+    }
+
+
+def test_paddle_reader_normalizes_predict_payloads(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("SCRIPTSCORE_TEST_PII_OCR_WORDS", raising=False)
 
     class _EmptyPageEngine:
-        def ocr(self, _image: object) -> list[None]:
+        def predict(self, *, input: object) -> list[None]:
+            del input
             return [None]
 
     class _DictEngine:
-        def ocr(self, _image: object) -> list[dict[str, object]]:
+        def predict(self, *, input: object) -> list[dict[str, object]]:
+            del input
             return [
                 {
-                    "rec_texts": [" Alice ", ""],
-                    "rec_scores": [1.2, 0.5],
-                    "rec_polys": [
-                        [(1, 2), (11, 2), (11, 12), (1, 12)],
-                        [(0, 0), (1, 0), (1, 1), (0, 1)],
-                    ],
+                    "res": {
+                        "rec_texts": [" Alice ", ""],
+                        "rec_scores": np.asarray([1.2, 0.5]),
+                        "rec_polys": np.asarray(
+                            [
+                                [(1, 2), (11, 2), (11, 12), (1, 12)],
+                                [(0, 0), (1, 0), (1, 1), (0, 1)],
+                            ]
+                        ),
+                    },
                 }
             ]
 
@@ -191,22 +278,29 @@ def test_paddle_reader_normalizes_dict_and_legacy_payloads(monkeypatch: pytest.M
     empty_page_reader._engine = _EmptyPageEngine()
     assert empty_page_reader.read(np.full((8, 8, 3), 255, dtype=np.uint8)).tokens == []
 
-    class _LegacyEngine:
-        def ocr(
-            self, _image: object
-        ) -> list[list[tuple[list[tuple[int, int]], tuple[str, float]]]]:
-            return [
-                [
-                    ([(3, 4), (13, 4), (13, 14), (3, 14)], ("Bob", -0.5)),
-                    ([(0, 0), (1, 0)], ("bad", 0.9)),
-                ]
-            ]
+    class _JsonResult:
+        def json(self) -> dict[str, object]:
+            return {
+                "res": {
+                    "rec_texts": ["Bob", "bad"],
+                    "rec_scores": [-0.5, 0.9],
+                    "rec_polys": [
+                        [(3, 4), (13, 4), (13, 14), (3, 14)],
+                        [(0, 0), (1, 0)],
+                    ],
+                }
+            }
 
-    legacy_reader = object.__new__(PaddleTextReader)
-    legacy_reader._engine = _LegacyEngine()
-    legacy_result = legacy_reader.read(np.full((8, 8, 3), 255, dtype=np.uint8))
+    class _JsonEngine:
+        def predict(self, *, input: object) -> list[_JsonResult]:
+            del input
+            return [_JsonResult()]
 
-    assert [(token.text, token.confidence) for token in legacy_result.tokens] == [("Bob", 0.0)]
+    json_reader = object.__new__(PaddleTextReader)
+    json_reader._engine = _JsonEngine()
+    json_result = json_reader.read(np.full((8, 8, 3), 255, dtype=np.uint8))
+
+    assert [(token.text, token.confidence) for token in json_result.tokens] == [("Bob", 0.0)]
 
 
 def test_detect_student_pii_matches_patterns_labels_names_and_dedupes() -> None:

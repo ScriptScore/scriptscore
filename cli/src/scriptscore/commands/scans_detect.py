@@ -280,6 +280,54 @@ def _resolve_header_boundary(
     )
 
 
+def _content_anchor_search_bottom(hint: QuestionDetectHint) -> int:
+    return hint.template_region.y + max(140, hint.template_region.height // 3)
+
+
+def _is_content_anchor_match(match: _HeaderTextMatch, hint: QuestionDetectHint) -> bool:
+    if match.hint_token_count <= 2:
+        return _is_strong_header_text_match(match, hint)
+    return match.overlap_count >= 2 and match.candidate_coverage >= 0.35
+
+
+def _nearby_content_boxes(
+    boxes: list[OcrTextBox], hint: QuestionDetectHint, seed: OcrTextBox
+) -> list[OcrTextBox]:
+    search_bottom = _content_anchor_search_bottom(hint)
+    band_bottom = seed.bottom + max(64, hint.template_region.height // 8)
+    nearby = [
+        box
+        for box in boxes
+        if box.top >= hint.template_region.y and box.top <= search_bottom and box.top <= band_bottom
+    ]
+    return sorted(nearby, key=lambda box: (box.top, box.left))
+
+
+def _resolve_content_boundary(
+    boxes: list[OcrTextBox], hint: QuestionDetectHint
+) -> _HeaderBoundary | None:
+    """Infer a current-question start from answer text when the printed header is obscured."""
+
+    search_bottom = _content_anchor_search_bottom(hint)
+    for seed in sorted(boxes, key=lambda box: (box.top, box.left)):
+        if seed.top < hint.template_region.y or seed.top > search_bottom:
+            continue
+        if _matches_question_number(seed.text, hint.question_number):
+            continue
+        candidate_boxes = tuple(_nearby_content_boxes(boxes, hint, seed))
+        if not candidate_boxes:
+            continue
+        match = _header_text_match(seed.text, hint)
+        if not _is_content_anchor_match(match, hint):
+            continue
+        return _HeaderBoundary(
+            top=min(box.top for box in candidate_boxes),
+            bottom=max(box.bottom for box in candidate_boxes),
+            boxes=candidate_boxes,
+        )
+    return None
+
+
 def _intersects_vertically(box: OcrTextBox, *, top: int, bottom: int) -> bool:
     return box.bottom > top and box.top < bottom
 
@@ -292,6 +340,8 @@ def _vertical_bounds(
     page_height: int,
 ) -> tuple[int, int] | None:
     current_boundary = _resolve_header_boundary(boxes, hint)
+    if current_boundary is None:
+        current_boundary = _resolve_content_boundary(boxes, hint)
     if current_boundary is None:
         return None
     if next_hint is None:
