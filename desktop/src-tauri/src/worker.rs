@@ -13,7 +13,7 @@ use serde_json::{json, Value};
 use crate::errors::{HostError, HostResult};
 use crate::models::WorkerJobResult;
 use crate::protocol::{hello_request, read_frame, write_frame, ProtocolMessage, ProtocolRequest};
-use crate::worker_runtime::{resolve_worker_launch_spec, WorkerRuntimeSource};
+use crate::worker_runtime::{resolve_worker_launch_spec, WorkerLaunchSpec, WorkerRuntimeSource};
 
 #[cfg(not(windows))]
 use std::os::unix::net::{UnixListener, UnixStream};
@@ -208,12 +208,7 @@ impl WorkerClient {
                 .arg(&pipe_name)
                 .stdout(Stdio::null())
                 .stderr(Stdio::null());
-            if let Some(python_path) = &launch_spec.python_path {
-                command.env("PYTHONPATH", python_path);
-            }
-            for (key, value) in &launch_spec.extra_env {
-                command.env(key, value);
-            }
+            apply_worker_launch_environment(&mut command, &launch_spec);
             let mut child = match command.spawn() {
                 Ok(child) => child,
                 Err(err) => {
@@ -257,12 +252,7 @@ impl WorkerClient {
                 .arg(&socket_path)
                 .stdout(Stdio::null())
                 .stderr(Stdio::null());
-            if let Some(python_path) = &launch_spec.python_path {
-                command.env("PYTHONPATH", python_path);
-            }
-            for (key, value) in &launch_spec.extra_env {
-                command.env(key, value);
-            }
+            apply_worker_launch_environment(&mut command, &launch_spec);
             let mut child = command.spawn()?;
 
             let stream = WorkerStream::Unix(accept_worker_connection(&listener, &mut child)?);
@@ -434,6 +424,18 @@ impl WorkerClient {
 
     fn next_request_id(&self) -> String {
         next_request_id(&self.next_request_id)
+    }
+}
+
+fn apply_worker_launch_environment(command: &mut Command, launch_spec: &WorkerLaunchSpec) {
+    if let Some(python_path) = &launch_spec.python_path {
+        command.env("PYTHONPATH", python_path);
+    }
+    for key in &launch_spec.remove_env {
+        command.env_remove(key);
+    }
+    for (key, value) in &launch_spec.extra_env {
+        command.env(key, value);
     }
 }
 
@@ -819,4 +821,49 @@ fn worker_error(message: &ProtocolMessage) -> HostError {
         .and_then(Value::as_str)
         .unwrap_or("Desktop worker returned an error.");
     HostError::Worker(format!("{code}: {detail}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::ffi::{OsStr, OsString};
+
+    use super::*;
+
+    fn command_env(command: &Command, key: &str) -> Option<Option<OsString>> {
+        command.get_envs().find_map(|(name, value)| {
+            if name == OsStr::new(key) {
+                Some(value.map(OsStr::to_os_string))
+            } else {
+                None
+            }
+        })
+    }
+
+    #[test]
+    fn worker_launch_environment_removes_pythonhome_for_bundled_runtime() {
+        let launch_spec = WorkerLaunchSpec {
+            current_dir: PathBuf::from("/runtime"),
+            python_executable: PathBuf::from("/runtime/python/bin/python3"),
+            python_path: Some(OsString::from("/runtime/cli-src")),
+            remove_env: vec![OsString::from("PYTHONHOME")],
+            extra_env: vec![(
+                OsString::from("SCRIPTSCORE_OCR_PADDLE_MODEL_DIR"),
+                OsString::from("/resources/models/paddle"),
+            )],
+        };
+        let mut command = Command::new(&launch_spec.python_executable);
+        command.env("PYTHONHOME", "/appdir/usr");
+
+        apply_worker_launch_environment(&mut command, &launch_spec);
+
+        assert_eq!(
+            command_env(&command, "PYTHONPATH"),
+            Some(Some(OsString::from("/runtime/cli-src")))
+        );
+        assert_eq!(command_env(&command, "PYTHONHOME"), Some(None));
+        assert_eq!(
+            command_env(&command, "SCRIPTSCORE_OCR_PADDLE_MODEL_DIR"),
+            Some(Some(OsString::from("/resources/models/paddle")))
+        );
+    }
 }

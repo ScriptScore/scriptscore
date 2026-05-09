@@ -15,6 +15,7 @@ pub(crate) struct WorkerLaunchSpec {
     pub(crate) current_dir: PathBuf,
     pub(crate) python_executable: PathBuf,
     pub(crate) python_path: Option<OsString>,
+    pub(crate) remove_env: Vec<OsString>,
     pub(crate) extra_env: Vec<(OsString, OsString)>,
 }
 
@@ -71,6 +72,7 @@ fn bundled_runtime_launch_spec_from_manifest(
         current_dir: runtime_root.to_path_buf(),
         python_executable,
         python_path,
+        remove_env: bundled_runtime_removed_env(),
         extra_env: paddle_model_env(resource_dir.join("models/paddle")),
     })
 }
@@ -108,8 +110,13 @@ fn resolve_repo_launch_spec() -> HostResult<WorkerLaunchSpec> {
         current_dir: repo_root,
         python_executable,
         python_path,
+        remove_env: Vec::new(),
         extra_env: paddle_model_env(dev_checkout_paddle_model_dir()?),
     })
+}
+
+fn bundled_runtime_removed_env() -> Vec<OsString> {
+    vec![OsString::from("PYTHONHOME")]
 }
 
 fn resolve_repo_python(repo_root: &Path) -> HostResult<PathBuf> {
@@ -205,6 +212,7 @@ fn is_valid_paddle_model_dir(path: &Path) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::ffi::OsString;
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -251,6 +259,7 @@ mod tests {
         );
         let python_path = spec.python_path.expect("python path should exist");
         assert_eq!(python_path, runtime_root.join("cli-src").into_os_string());
+        assert_eq!(spec.remove_env, vec![OsString::from("PYTHONHOME")]);
         assert_eq!(
             spec.extra_env,
             vec![
@@ -295,6 +304,7 @@ mod tests {
 
         assert_eq!(spec.python_executable, absolute_python);
         assert!(spec.python_path.is_none());
+        assert_eq!(spec.remove_env, vec![OsString::from("PYTHONHOME")]);
         assert!(spec.extra_env.is_empty());
 
         let _ = fs::remove_dir_all(resource_dir);
@@ -326,6 +336,7 @@ mod tests {
             spec.python_path.expect("repo python path should exist"),
             spec.current_dir.join("cli/src").into_os_string(),
         );
+        assert!(spec.remove_env.is_empty());
 
         let _ = fs::remove_dir_all(resource_dir);
     }
