@@ -205,7 +205,7 @@ def test_dev_desktop_launcher_override_keeps_frontend_dev_command(tmp_path: Path
 
     config = json.loads(capture_path.read_text(encoding="utf-8"))
     assert config["build"]["devUrl"] == "http://127.0.0.1:4175"
-    assert config["build"]["beforeDevCommand"] == "bash ../scripts/dev-vite.sh"
+    assert config["build"]["beforeDevCommand"] == "bash scripts/dev-vite.sh"
 
 
 @pytest.mark.skipif(shutil.which("xvfb-run") is None, reason="xvfb-run is required")

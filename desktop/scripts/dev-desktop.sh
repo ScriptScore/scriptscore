@@ -33,7 +33,7 @@ fi
 cd "${HOST_DIR}"
 
 if [[ -n "${DESKTOP_FRONTEND_URL:-}" ]]; then
-  TAURI_DEV_CONFIG="{\"build\":{\"beforeDevCommand\":\"bash ../scripts/dev-vite.sh\",\"devUrl\":\"${DESKTOP_FRONTEND_URL}\"},\"app\":{\"security\":{\"devCsp\":{\"img-src\":[\"'self'\",\"data:\",\"asset:\",\"${DESKTOP_FRONTEND_URL}\",\"http://asset.localhost\",\"https://asset.localhost\"]}}}}"
+  TAURI_DEV_CONFIG="{\"build\":{\"beforeDevCommand\":\"bash scripts/dev-vite.sh\",\"devUrl\":\"${DESKTOP_FRONTEND_URL}\"},\"app\":{\"security\":{\"devCsp\":{\"img-src\":[\"'self'\",\"data:\",\"asset:\",\"${DESKTOP_FRONTEND_URL}\",\"http://asset.localhost\",\"https://asset.localhost\"]}}}}"
   exec cargo tauri dev --config "${TAURI_DEV_CONFIG}"
 fi
 
