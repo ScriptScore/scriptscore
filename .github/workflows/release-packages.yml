@@ -407,14 +407,90 @@ jobs:
             --bundles "${SCRIPTSCORE_DESKTOP_BUNDLES}"
             --target-triple "${SCRIPTSCORE_DESKTOP_TARGET}"
           )
-          payload_root="desktop/dist/package-payload/${{ matrix.label }}"
-          if [[ -d "${payload_root}" ]]; then
-            while IFS= read -r payload_dir; do
-              verify_args+=(--payload-root "${payload_dir}")
-            done < <(find "${payload_root}" -mindepth 1 -maxdepth 1 -type d | sort)
-          fi
+          for payload_parent in \
+            "desktop/dist/package-payload/${{ matrix.label }}" \
+            "desktop/dist/package-inspection/${{ matrix.label }}"
+          do
+            if [[ -d "${payload_parent}" ]]; then
+              while IFS= read -r payload_dir; do
+                verify_args+=(--payload-root "${payload_dir}")
+              done < <(find "${payload_parent}" -mindepth 1 -maxdepth 1 -type d | sort)
+            fi
+          done
           python desktop/scripts/verify-release-package-artifacts.py \
             "${verify_args[@]}"
+
+      - name: Stage release assets
+        run: |
+          if command -v python3 >/dev/null 2>&1; then
+            release_python=python3
+          else
+            release_python=python
+          fi
+          "${release_python}" <<'PY'
+          import json
+          import shutil
+          from pathlib import Path
+
+          label = "${{ matrix.label }}"
+          version = json.loads(Path("desktop/src-tauri/tauri.conf.json").read_text(encoding="utf-8"))[
+              "version"
+          ]
+          bundle_root = Path("desktop/src-tauri/target")
+          output_dir = Path("desktop/dist/release-assets") / label
+          package_dirs = {"appimage", "deb", "dmg", "msi", "nsis", "rpm"}
+          target_names = {
+              ("macos-intel", ".dmg"): f"ScriptScore-Desktop-{version}-macos-intel.dmg",
+              ("macos-arm64", ".dmg"): f"ScriptScore-Desktop-{version}-macos-arm64.dmg",
+              ("windows-x64", ".exe"): f"ScriptScore-Desktop-{version}-windows-x64-setup.exe",
+              ("windows-x64", ".msi"): f"ScriptScore-Desktop-{version}-windows-x64.msi",
+              ("linux-x64", ".AppImage"): f"ScriptScore-Desktop-{version}-linux-x64.AppImage",
+              ("linux-x64", ".deb"): f"ScriptScore-Desktop-{version}-linux-x64.deb",
+              ("linux-x64", ".rpm"): f"ScriptScore-Desktop-{version}-linux-x64.rpm",
+          }
+
+          if output_dir.exists():
+              shutil.rmtree(output_dir)
+          output_dir.mkdir(parents=True)
+
+          staged: dict[str, Path] = {}
+          for package_file in sorted(bundle_root.rglob("*")):
+              if not package_file.is_file() or package_file.parent.name.lower() not in package_dirs:
+                  continue
+              suffix = package_file.suffix
+              if suffix.lower() != ".appimage":
+                  suffix = suffix.lower()
+              destination_name = target_names.get((label, suffix))
+              if destination_name is None:
+                  continue
+              if destination_name in staged:
+                  raise SystemExit(
+                      f"Multiple package files map to {destination_name}: "
+                      f"{staged[destination_name]} and {package_file}"
+                  )
+              staged[destination_name] = package_file
+              shutil.copy2(package_file, output_dir / destination_name)
+
+          expected_names = {
+              target_names[(label, ".AppImage")]
+              for bundle in "${{ matrix.bundles }}".split(",")
+              if bundle == "appimage"
+          }
+          expected_names.update(
+              target_names[(label, f".{bundle}")]
+              for bundle in "${{ matrix.bundles }}".split(",")
+              if bundle in {"deb", "dmg", "msi", "rpm"}
+          )
+          if "nsis" in "${{ matrix.bundles }}".split(","):
+              expected_names.add(target_names[(label, ".exe")])
+
+          missing = sorted(expected_names.difference(staged))
+          if missing:
+              raise SystemExit(f"Missing staged release asset(s): {', '.join(missing)}")
+
+          for destination_name, source in sorted(staged.items()):
+              print(f"staged {source} -> {output_dir / destination_name}")
+          PY
 
       - name: Upload package artifacts
         uses: actions/upload-artifact@v4
@@ -422,13 +498,82 @@ jobs:
           name: ${{ matrix.artifact_name }}
           if-no-files-found: error
           path: |
-            desktop/src-tauri/target/**/release/bundle/**/*.AppImage
-            desktop/src-tauri/target/**/release/bundle/**/*.deb
-            desktop/src-tauri/target/**/release/bundle/**/*.dmg
-            desktop/src-tauri/target/**/release/bundle/**/*.exe
-            desktop/src-tauri/target/**/release/bundle/**/*.msi
-            desktop/src-tauri/target/**/release/bundle/**/*.rpm
+            desktop/dist/release-assets/${{ matrix.label }}/*
             desktop/dist/release-package-validation/${{ matrix.label }}/SHA256SUMS
             desktop/dist/release-package-validation/${{ matrix.label }}/summary.json
-            desktop/dist/bundled-runtime/runtime-manifest.json
-            desktop/dist/legal/**
+
+  publish-release-assets:
+    name: Publish draft prerelease assets
+    if: ${{ startsWith(github.ref, 'refs/tags/rc-') }}
+    needs: package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download package artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: scriptscore-rc-*
+          path: release-artifacts
+          merge-multiple: true
+
+      - name: Prepare release assets
+        run: |
+          python3 <<'PY'
+          import hashlib
+          import shutil
+          from pathlib import Path
+
+          source_root = Path("release-artifacts")
+          output_dir = Path("release-assets")
+          package_suffixes = {".AppImage", ".deb", ".dmg", ".exe", ".msi", ".rpm"}
+
+          if output_dir.exists():
+              shutil.rmtree(output_dir)
+          output_dir.mkdir()
+
+          staged: list[Path] = []
+          for source in sorted(source_root.rglob("*")):
+              if not source.is_file() or source.name == "SHA256SUMS":
+                  continue
+              if source.suffix not in package_suffixes:
+                  continue
+              destination = output_dir / source.name
+              if destination.exists():
+                  raise SystemExit(f"Duplicate release asset name: {source.name}")
+              shutil.copy2(source, destination)
+              staged.append(destination)
+
+          if not staged:
+              raise SystemExit("No release assets were found in downloaded package artifacts.")
+
+          with (output_dir / "SHA256SUMS").open("w", encoding="utf-8") as handle:
+              for asset in sorted(staged, key=lambda path: path.name):
+                  digest = hashlib.sha256(asset.read_bytes()).hexdigest()
+                  handle.write(f"{digest}  {asset.name}\n")
+
+          for asset in sorted(output_dir.iterdir()):
+              print(asset)
+          PY
+
+      - name: Create or update draft prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          release_title="ScriptScore ${TAG_NAME}"
+          release_notes="Draft RC package assets from ${GITHUB_WORKFLOW} run ${GITHUB_RUN_NUMBER}."
+          if gh release view "${TAG_NAME}" >/dev/null 2>&1; then
+            gh release edit "${TAG_NAME}" \
+              --draft \
+              --prerelease \
+              --title "${release_title}" \
+              --notes "${release_notes}"
+          else
+            gh release create "${TAG_NAME}" \
+              --draft \
+              --prerelease \
+              --title "${release_title}" \
+              --notes "${release_notes}"
+          fi
+          gh release upload "${TAG_NAME}" release-assets/* --clobber
