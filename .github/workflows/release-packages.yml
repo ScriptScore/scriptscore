@@ -8,6 +8,17 @@ on:
         required: false
         default: false
         type: boolean
+      package_platform:
+        description: "Package platform to build. Use all to build every platform."
+        required: false
+        default: all
+        type: choice
+        options:
+          - all
+          - macos-intel
+          - macos-arm64
+          - windows-x64
+          - linux-x64
   push:
     tags:
       - "v*"
@@ -17,6 +28,67 @@ permissions:
   contents: read
 
 jobs:
+  define-package-matrix:
+    name: Define package matrix
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - name: Select package matrix
+        id: matrix
+        shell: bash
+        run: |
+          python3 <<'PY'
+          import json
+          import os
+
+          packages = [
+              {
+                  "label": "macos-intel",
+                  "runner": "macos-15-intel",
+                  "rust_target": "x86_64-apple-darwin",
+                  "python_target": "x86_64-apple-darwin",
+                  "bundles": "dmg",
+                  "artifact_name": "scriptscore-rc-macos-intel-unsigned-preview",
+              },
+              {
+                  "label": "macos-arm64",
+                  "runner": "macos-15",
+                  "rust_target": "aarch64-apple-darwin",
+                  "python_target": "aarch64-apple-darwin",
+                  "bundles": "dmg",
+                  "artifact_name": "scriptscore-rc-macos-arm64-unsigned-preview",
+              },
+              {
+                  "label": "windows-x64",
+                  "runner": "windows-latest",
+                  "rust_target": "x86_64-pc-windows-msvc",
+                  "python_target": "x86_64-pc-windows-msvc-shared",
+                  "bundles": "nsis,msi",
+                  "artifact_name": "scriptscore-rc-windows-x64",
+              },
+              {
+                  "label": "linux-x64",
+                  "runner": "ubuntu-22.04",
+                  "rust_target": "x86_64-unknown-linux-gnu",
+                  "python_target": "x86_64-unknown-linux-gnu",
+                  "bundles": "appimage,deb,rpm",
+                  "artifact_name": "scriptscore-rc-linux-x64",
+              },
+          ]
+
+          selected = os.environ.get("PACKAGE_PLATFORM", "all")
+          if selected != "all":
+              packages = [package for package in packages if package["label"] == selected]
+          if not packages:
+              raise SystemExit(f"Unknown package platform: {selected}")
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              print(f"matrix={json.dumps({'include': packages}, separators=(',', ':'))}", file=output)
+          PY
+        env:
+          PACKAGE_PLATFORM: ${{ inputs.package_platform || 'all' }}
+
   prepare-paddle-models:
     name: Prepare Paddle models
     runs-on: ubuntu-latest
@@ -45,7 +117,9 @@ jobs:
 
   package:
     name: ${{ matrix.label }}
-    needs: prepare-paddle-models
+    needs:
+      - define-package-matrix
+      - prepare-paddle-models
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 120
     defaults:
@@ -53,32 +127,7 @@ jobs:
         shell: bash
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - label: macos-intel
-            runner: macos-15-intel
-            rust_target: x86_64-apple-darwin
-            python_target: x86_64-apple-darwin
-            bundles: dmg
-            artifact_name: scriptscore-rc-macos-intel-unsigned-preview
-          - label: macos-arm64
-            runner: macos-15
-            rust_target: aarch64-apple-darwin
-            python_target: aarch64-apple-darwin
-            bundles: dmg
-            artifact_name: scriptscore-rc-macos-arm64-unsigned-preview
-          - label: windows-x64
-            runner: windows-latest
-            rust_target: x86_64-pc-windows-msvc
-            python_target: x86_64-pc-windows-msvc-shared
-            bundles: nsis,msi
-            artifact_name: scriptscore-rc-windows-x64
-          - label: linux-x64
-            runner: ubuntu-22.04
-            rust_target: x86_64-unknown-linux-gnu
-            python_target: x86_64-unknown-linux-gnu
-            bundles: appimage,deb,rpm
-            artifact_name: scriptscore-rc-linux-x64
+      matrix: ${{ fromJSON(needs.define-package-matrix.outputs.matrix) }}
     env:
       SCRIPTSCORE_DESKTOP_BUNDLES: ${{ matrix.bundles }}
       SCRIPTSCORE_DESKTOP_TARGET: ${{ matrix.rust_target }}
