@@ -301,7 +301,14 @@ jobs:
           mkdir -p "${payload_root}/rpm"
           (
             cd "${payload_root}/rpm"
+            set +e
             rpm2cpio "${GITHUB_WORKSPACE}/${rpm}" | cpio -idmu
+            rpm_extract_status=$?
+            set -e
+            test -n "$(find . -mindepth 1 -print -quit)"
+            if [[ ${rpm_extract_status} -ne 0 ]]; then
+              echo "warning: RPM extraction returned ${rpm_extract_status} after producing files" >&2
+            fi
           )
 
       - name: Mount unsigned preview DMG
@@ -331,10 +338,12 @@ jobs:
           if ($null -eq $msi) { throw "MSI package was not found" }
           $msiPayload = Join-Path $inspectionRoot "msi"
           New-Item -ItemType Directory -Force -Path $msiPayload | Out-Null
-          lessmsi.exe x $msi.FullName $msiPayload
+          lessmsi.exe x $msi.FullName "$msiPayload\"
           if ($LASTEXITCODE -ne 0) { throw "MSI extraction failed with exit code $LASTEXITCODE" }
 
-          $nsis = Get-ChildItem desktop/src-tauri/target -Recurse -Filter *.exe | Select-Object -First 1
+          $nsis = Get-ChildItem desktop/src-tauri/target -Recurse -Filter *setup.exe |
+            Where-Object { $_.FullName -like "*\bundle\nsis\*" } |
+            Select-Object -First 1
           if ($null -eq $nsis) { throw "NSIS package was not found" }
           $nsisPayload = Join-Path $payloadRoot "nsis"
           New-Item -ItemType Directory -Force -Path $nsisPayload | Out-Null
