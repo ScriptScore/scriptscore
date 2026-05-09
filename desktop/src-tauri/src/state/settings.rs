@@ -8,6 +8,8 @@ use super::{AppStateInner, RuntimeEventSink};
 use crate::errors::{HostError, HostResult};
 use crate::models::{LlmModelValidation, VisionCapableModel};
 
+const LOCAL_OLLAMA_DISCOVERY_TIMEOUT_SECONDS: u8 = 5;
+
 pub(crate) fn list_llm_models(
     state: &Arc<AppStateInner>,
     event_sink: &dyn RuntimeEventSink,
@@ -16,13 +18,15 @@ pub(crate) fn list_llm_models(
     api_key: Option<String>,
 ) -> HostResult<Vec<VisionCapableModel>> {
     let project_path = state.lock().current_project_path_optional();
+    let timeout_seconds = discovery_timeout_seconds(&provider_name);
     let request_payload = serde_json::json!({
         "providers": {
             "llm_provider": provider_name
         },
         "llm_discovery_config": {
             "base_url": base_url,
-            "api_key": api_key
+            "api_key": api_key,
+            "timeout_seconds": timeout_seconds
         },
         "required_capabilities": ["vision"]
     });
@@ -76,13 +80,15 @@ pub(crate) fn validate_llm_model(
     api_key: Option<String>,
 ) -> HostResult<LlmModelValidation> {
     let project_path = state.lock().current_project_path_optional();
+    let timeout_seconds = discovery_timeout_seconds(&provider_name);
     let request_payload = serde_json::json!({
         "providers": {
             "llm_provider": provider_name
         },
         "llm_discovery_config": {
             "base_url": base_url,
-            "api_key": api_key
+            "api_key": api_key,
+            "timeout_seconds": timeout_seconds
         },
         "model": model,
         "required_capabilities": ["vision"]
@@ -122,6 +128,14 @@ pub(crate) fn validate_llm_model(
     })
 }
 
+fn discovery_timeout_seconds(provider_name: &str) -> Option<u8> {
+    if provider_name == "ollama_native" {
+        Some(LOCAL_OLLAMA_DISCOVERY_TIMEOUT_SECONDS)
+    } else {
+        None
+    }
+}
+
 fn missing_runtime_data_error(envelope: &Value, command_name: &str, field_name: &str) -> HostError {
     if let Some(message) = envelope
         .get("error")
@@ -134,4 +148,15 @@ fn missing_runtime_data_error(envelope: &Value, command_name: &str, field_name: 
         return HostError::Protocol(format!("{command_name} failed: {message}"));
     }
     HostError::Protocol(format!("{command_name} response was missing {field_name}."))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::discovery_timeout_seconds;
+
+    #[test]
+    fn local_ollama_discovery_uses_short_timeout() {
+        assert_eq!(discovery_timeout_seconds("ollama_native"), Some(5));
+        assert_eq!(discovery_timeout_seconds("ollama_cloud"), None);
+    }
 }

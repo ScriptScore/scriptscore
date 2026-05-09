@@ -1821,18 +1821,18 @@ name = "scriptscore"
 version = "0.1.0.dev0"
 source = { editable = "." }
 dependencies = [
-    { name = "easyocr" },
+    { name = "easyocr", marker = "platform_machine != 'x86_64' or sys_platform != 'darwin'" },
     { name = "json-repair" },
     { name = "numpy" },
     { name = "ollama" },
     { name = "opencv-contrib-python-headless" },
-    { name = "paddleocr" },
-    { name = "paddlepaddle" },
+    { name = "paddleocr", marker = "platform_machine != 'x86_64' or sys_platform != 'darwin'" },
+    { name = "paddlepaddle", marker = "platform_machine != 'x86_64' or sys_platform != 'darwin'" },
     { name = "pillow" },
     { name = "pydantic" },
     { name = "pymupdf" },
     { name = "pyyaml" },
-    { name = "torch" },
+    { name = "torch", marker = "platform_machine != 'x86_64' or sys_platform != 'darwin'" },
 ]
 
 [package.dev-dependencies]
@@ -1872,18 +1872,18 @@ worker-test = [
 
 [package.metadata]
 requires-dist = [
-    { name = "easyocr", specifier = ">=1.7,<2" },
+    { name = "easyocr", marker = "platform_machine != 'x86_64' or sys_platform != 'darwin'", specifier = ">=1.7,<2" },
     { name = "json-repair", specifier = ">=0.39,<1" },
     { name = "numpy", specifier = ">=2,<3" },
     { name = "ollama", specifier = ">=0.4,<1" },
     { name = "opencv-contrib-python-headless", specifier = ">=4.10,<5" },
-    { name = "paddleocr", specifier = ">=2.9,<3" },
-    { name = "paddlepaddle", specifier = ">=3.0,<4" },
+    { name = "paddleocr", marker = "platform_machine != 'x86_64' or sys_platform != 'darwin'", specifier = ">=2.9,<3" },
+    { name = "paddlepaddle", marker = "platform_machine != 'x86_64' or sys_platform != 'darwin'", specifier = ">=3.0,<4" },
     { name = "pillow", specifier = ">=10.4,<12" },
     { name = "pydantic", specifier = ">=2.10,<3.0" },
     { name = "pymupdf", specifier = ">=1.24,<2" },
     { name = "pyyaml", specifier = ">=6.0,<7" },
-    { name = "torch", specifier = ">=2.5,<3" },
+    { name = "torch", marker = "platform_machine != 'x86_64' or sys_platform != 'darwin'", specifier = ">=2.5,<3" },
 ]
 
 [package.metadata.requires-dev]

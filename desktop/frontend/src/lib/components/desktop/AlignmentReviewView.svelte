@@ -13,7 +13,13 @@
   } from '$lib/types';
   import AlignmentOverlayCanvas from '$lib/components/desktop/AlignmentOverlayCanvas.svelte';
   import AlignmentTransformUndoIcon from '$lib/components/desktop/AlignmentTransformUndoIcon.svelte';
-  import { ConfirmDialog, DesktopButton, IconButton, StatusBadge } from './ui';
+  import {
+    ConfirmDialog,
+    DesktopButton,
+    IconButton,
+    StatusBadge,
+    compactWorkspaceTabActionButtonClass
+  } from './ui';
 
   export let intakeItem: StudentIntakeSummary | null;
   export let submission: StudentWorkflowSubmission;
@@ -364,8 +370,7 @@
   const rangeClass = 'w-full accent-primary';
   const pageTabBaseClass =
     'group relative flex shrink-0 items-center gap-3 border-t px-3 pb-2.5 pt-2 text-sm transition-colors';
-  const tabActionButtonClass =
-    'relative z-10 rounded-md bg-workspace-sidebar-active px-2 py-0.5 text-[10px] font-semibold text-workspace-text-primary transition-colors hover:bg-workspace-sidebar-hover disabled:cursor-not-allowed disabled:opacity-50';
+  const tabActionButtonClass = compactWorkspaceTabActionButtonClass;
   const readyConfirmButtonClass =
     'inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-primary bg-primary px-4 text-sm font-semibold text-primary-foreground shadow-[var(--surface-shadow-button)] transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50';
   const transformUndoButtonClass =

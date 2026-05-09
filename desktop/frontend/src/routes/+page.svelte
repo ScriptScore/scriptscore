@@ -152,6 +152,8 @@
   let visionModelsError: string | null = null;
   let defaultProjectsRoot: string | null = null;
   let lastVisionModelQueryKey: string | null = null;
+  let visionModelRefreshInFlight = false;
+  let visionModelRefreshQueued = false;
   let visionModelRefreshVersion = 0;
   let studentDisplayNamesByRef: Record<string, string> = {};
   let studentNameLookupVersion = 0;
@@ -498,6 +500,7 @@
       visionModels = [];
       visionModelsBusy = false;
       visionModelsError = null;
+      visionModelRefreshQueued = false;
       return;
     }
 
@@ -506,6 +509,7 @@
       visionModels = [];
       visionModelsBusy = false;
       visionModelsError = null;
+      visionModelRefreshQueued = false;
       return;
     }
 
@@ -513,14 +517,18 @@
       visionModels = [];
       visionModelsBusy = false;
       visionModelsError = 'Enter an Ollama endpoint URL to load local models.';
+      visionModelRefreshQueued = false;
       return;
     }
 
-    if (visionModelsBusy) {
+    if (visionModelRefreshInFlight) {
+      visionModelRefreshQueued = true;
       return;
     }
 
     const requestVersion = ++visionModelRefreshVersion;
+    const requestKey = `${settingsDraft.llmProvider}|${baseUrl}`;
+    visionModelRefreshInFlight = true;
     visionModelsBusy = true;
     visionModelsError = null;
     try {
@@ -529,21 +537,40 @@
         baseUrl,
         settingsDraft.llmApiKey?.trim() || null
       );
-      if (requestVersion !== visionModelRefreshVersion) {
+      if (
+        requestVersion !== visionModelRefreshVersion ||
+        requestKey !== `${settingsDraft.llmProvider}|${settingsDraft.llmBaseUrl.trim()}`
+      ) {
         return;
       }
       visionModels = models;
     } catch (error) {
-      if (requestVersion !== visionModelRefreshVersion) {
+      if (
+        requestVersion !== visionModelRefreshVersion ||
+        requestKey !== `${settingsDraft.llmProvider}|${settingsDraft.llmBaseUrl.trim()}`
+      ) {
         return;
       }
       visionModels = [];
-      visionModelsError = String(error);
+      visionModelsError = localOllamaDiscoveryErrorMessage(error);
     } finally {
       if (requestVersion === visionModelRefreshVersion) {
         visionModelsBusy = false;
       }
+      visionModelRefreshInFlight = false;
+      if (visionModelRefreshQueued) {
+        visionModelRefreshQueued = false;
+        void refreshVisionModels();
+      }
     }
+  }
+
+  function localOllamaDiscoveryErrorMessage(error: unknown) {
+    const message = String(error);
+    if (message.includes('A desktop job is already active in this session.')) {
+      return 'The desktop runtime is busy with another job. Wait for it to finish, then accept the Ollama URL again.';
+    }
+    return message;
   }
 
   async function loadWorkspaceState(resetQuestions = true, preserveProjectConfig = false) {

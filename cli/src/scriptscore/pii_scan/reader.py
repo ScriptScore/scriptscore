@@ -26,8 +26,8 @@ def _is_paddle_3_or_newer(version: str) -> bool:
 def _disable_windows_paddle_ir_optim() -> None:
     if sys.platform != "win32":
         return
-    import paddle  # type: ignore[import-untyped]
-    from paddle import inference  # type: ignore[import-untyped]
+    import paddle  # type: ignore[import-not-found, import-untyped]
+    from paddle import inference  # type: ignore[import-not-found, import-untyped]
 
     if not _is_paddle_3_or_newer(str(getattr(paddle, "__version__", ""))):
         return
