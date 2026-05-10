@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: AGPL-3.0-only
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+case "$(uname -s)" in
+  Darwin)
+    exec "${SCRIPT_DIR}/desktop/scripts/dev-desktop-macos.sh"
+    ;;
+  Linux)
+    exec "${SCRIPT_DIR}/desktop/scripts/dev-desktop.sh"
+    ;;
+  MINGW* | MSYS* | CYGWIN*)
+    SCRIPT_PATH="${SCRIPT_DIR}/desktop/scripts/dev-desktop.ps1"
+    if command -v cygpath >/dev/null 2>&1; then
+      SCRIPT_PATH="$(cygpath -w "${SCRIPT_PATH}")"
+    fi
+    exec powershell.exe -NoProfile -ExecutionPolicy Bypass -File "${SCRIPT_PATH}"
+    ;;
+  *)
+    echo "error: unsupported platform: $(uname -s)" >&2
+    exit 1
+    ;;
+esac
