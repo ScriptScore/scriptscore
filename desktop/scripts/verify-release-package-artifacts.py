@@ -214,8 +214,10 @@ def validate_packaged_ocr_reader(runtime_root: Path, models_root: Path) -> dict[
         "-c",
         (
             "from pathlib import Path; "
+            "import numpy as np; "
             "from scriptscore.pii_scan.reader import create_reader; "
-            "create_reader(Path(__import__('sys').argv[1]))"
+            "reader = create_reader(Path(__import__('sys').argv[1])); "
+            "reader.read(np.full((96, 320, 3), 255, dtype=np.uint8))"
         ),
         str(models_root),
     ]
@@ -229,7 +231,8 @@ def validate_packaged_ocr_reader(runtime_root: Path, models_root: Path) -> dict[
     if result.returncode != 0:
         details = (result.stderr or result.stdout or "").strip()
         raise VerificationError(
-            "Packaged PaddleOCR reader smoke failed" + (f": {details[-1000:]}" if details else ".")
+            "Packaged PaddleOCR runtime smoke failed"
+            + (f": {details[-1000:]}" if details else ".")
         )
     return {
         "pythonExecutable": str(python_executable),

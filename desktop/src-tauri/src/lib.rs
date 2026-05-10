@@ -21,6 +21,8 @@ use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    configure_linux_webkit_environment();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
@@ -101,6 +103,17 @@ pub fn run() {
         .run(tauri::generate_context!())
         .expect("error while running ScriptScore desktop host");
 }
+
+#[cfg(target_os = "linux")]
+fn configure_linux_webkit_environment() {
+    if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
+        // Must be set before WebKitGTK initializes; matches the Linux dev launcher.
+        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn configure_linux_webkit_environment() {}
 
 #[cfg(target_os = "linux")]
 fn apply_main_window_icon(app: &mut tauri::App) {
