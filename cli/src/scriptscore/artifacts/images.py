@@ -190,4 +190,4 @@ def save_png(image: Image.Image, path: Path) -> None:
     """Persist a PNG artifact, creating parent directories as needed."""
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    image.save(path, format="PNG", optimize=True, compress_level=6)
+    image.save(path, format="PNG", optimize=False, compress_level=6)
