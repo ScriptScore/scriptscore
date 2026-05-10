@@ -5,6 +5,7 @@
   import {
     FilterIcon,
     FilterMailIcon,
+    FileQuestionMarkIcon,
     SortByDown02Icon,
     SortByUp02Icon
   } from '@hugeicons/core-free-icons';
@@ -14,6 +15,7 @@
   import type { SidebarStudentEntry } from './student-workflow-helpers';
   import {
     DesktopButton,
+    DesktopPopover,
     IconSelectField,
     InlineMessage,
     StatusBadge,
@@ -43,6 +45,7 @@
   let sortMode: SortMode = 'name';
   let sortDirection: SortDirection = 'asc';
   let searchTerm = '';
+  let intakeGuideOpen = false;
 
   const filterOptions: Array<{
     value: StatusFilter;
@@ -172,15 +175,41 @@
     <div class="shell-eyebrow text-workspace-text-muted">
       Course Roster
     </div>
-    {#if !rosterBusy && !rosterActionDisabled}
-      <button
-        type="button"
-        class="text-xs font-medium text-workspace-text-muted transition-colors hover:text-workspace-text-primary"
-        onclick={() => void onrefreshroster?.()}
+    <div class="flex items-center justify-end gap-3">
+      <DesktopPopover
+        bind:open={intakeGuideOpen}
+        rootClass="relative inline-block"
+        triggerClass="inline-flex items-center gap-1.5 text-xs font-medium text-workspace-text-muted underline-offset-4 transition-colors hover:text-workspace-text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+        triggerLabel="Student scan guide"
+        triggerAriaHaspopup="dialog"
+        aria-label="Student scan guide"
+        panelRole="dialog"
+        panelAriaLabel="Student submission intake guide"
+        panelClass="left-0 w-[min(42rem,calc(100vw-4rem))] max-w-[calc(100vw-4rem)] space-y-3 p-3"
       >
-        {rosterActionLabel}
-      </button>
-    {/if}
+        <svelte:fragment slot="trigger">
+          <HugeiconsIcon icon={FileQuestionMarkIcon} size={14} strokeWidth={1.8} aria-hidden="true" />
+          <span>Scan guide</span>
+        </svelte:fragment>
+        <img
+          class="block h-auto w-full rounded-lg border border-border-subtle object-contain"
+          src="/student-intake-guide.png"
+          alt="Three-step student submission intake guide showing PDF upload, privacy region review, and roster matching"
+        />
+        <p class="text-sm leading-5 text-workspace-text-secondary">
+          Upload readable student PDFs, confirm the name and privacy regions, then match each scan to the right student before ScriptScore prepares it for grading.
+        </p>
+      </DesktopPopover>
+      {#if !rosterBusy && !rosterActionDisabled}
+        <button
+          type="button"
+          class="text-xs font-medium text-workspace-text-muted transition-colors hover:text-workspace-text-primary"
+          onclick={() => void onrefreshroster?.()}
+        >
+          {rosterActionLabel}
+        </button>
+      {/if}
+    </div>
   </div>
 
   <div class="mb-2 px-4">

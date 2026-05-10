@@ -42,6 +42,23 @@ const entries = [
 ];
 
 describe('StudentWorkflowSidebar management controls', () => {
+  it('opens the student scan guide from the upload area', async () => {
+    render(StudentWorkflowSidebar, {
+      entries,
+      selectedStudentRef: null,
+      busyAction: null,
+      rosterBusy: false
+    });
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Student scan guide' }));
+
+    const guideImage = screen.getByRole('img', {
+      name: 'Three-step student submission intake guide showing PDF upload, privacy region review, and roster matching'
+    });
+    expect(guideImage.getAttribute('src')).toBe('/student-intake-guide.png');
+    expect(screen.getByRole('dialog', { name: 'Student submission intake guide' })).toBeTruthy();
+  });
+
   it('renders compact status pills while preserving detailed status titles', () => {
     render(StudentWorkflowSidebar, {
       entries,

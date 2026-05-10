@@ -169,9 +169,9 @@ describe('StudentWorkflowWorkspace roster and stage state', () => {
       onFinalizeSubmission: vi.fn()
     });
 
-    expect(await screen.findByText(/1 canonical exams ready/)).toBeTruthy();
+    expect(await screen.findByText(/1 submission ready/)).toBeTruthy();
     expect((screen.getByRole('button', { name: 'Begin Workflow' }) as HTMLButtonElement).disabled).toBe(false);
-    expect(screen.queryByText('No canonical exams available yet. Upload a submission to run intake.')).toBeNull();
+    expect(screen.queryByText('No submissions are ready yet. Upload a student PDF to prepare it for grading.')).toBeNull();
     expect(screen.getAllByText('Ada Local').length).toBeGreaterThan(0);
     expect(
       screen.queryByText('Link an LMS course in Template setup before loading the roster.')
