@@ -114,11 +114,11 @@
   const stepConnectorDoneClass = 'bg-[var(--message-success-border)]';
   const stepConnectorPendingClass = 'bg-workspace-border';
   const replaceCanonicalWarningMessage =
-    'This student already has a canonical PDF for this project. Finalizing will replace that submission.';
+    'This student already has a prepared submission for this project. Continuing will replace it.';
   const workerBusyFinalizeMessage =
-    'The previous intake attempt did not start because the desktop worker was already running another job. No intake record was created. Wait for that job to finish, then confirm the student again.';
+    'This submission could not start because ScriptScore is already working on another task. Wait for that task to finish, then confirm the student again.';
   const finalizeFailedFallbackMessage =
-    'Student intake did not complete. Confirm the student again to retry.';
+    'This submission was not prepared. Confirm the student again to retry.';
   const taskRowBaseClass = 'flex items-center gap-3 text-sm';
   const spinnerClass =
     'inline-block size-3 shrink-0 animate-spin rounded-full border-2 border-[var(--message-info-border)] border-r-transparent';
@@ -300,7 +300,7 @@
         setAssociationReplaceWarning(item.id, replaceCanonicalWarningMessage);
         return;
       }
-      rosterError = `Unable to check for an existing canonical submission: ${String(err)}`;
+      rosterError = `Unable to check whether this student already has a prepared submission: ${String(err)}`;
       if (item.associationReplaceWarning != null) {
         setAssociationReplaceWarning(item.id, null);
       }
@@ -897,7 +897,7 @@
           ? await promiseWithTimeout(
               transientScansOcrHint(cropPngsBase64[0]),
               step2OperationTimeoutMs,
-              'Timed out extracting OCR hint.'
+              'Timed out reading the name region.'
             )
           : null;
       const ocrHint = ocrResult?.hintText ?? '';
@@ -920,7 +920,7 @@
         await promiseWithTimeout(
           waitForSharedRoster(id),
           step2OperationTimeoutMs,
-          'Timed out waiting for the shared LMS roster cache.'
+          'Timed out waiting for the course roster.'
         );
       } else {
         finalizeStep2Local(id);
@@ -1026,7 +1026,7 @@
     }
     if (lmsLinked && (sharedRosterStatus !== 'ready' || !courseIdTrimmed)) {
       return sharedRosterMessage ??
-        'Shared LMS roster is not ready yet. Wait for preload to finish before finalizing intake.';
+        'The course roster is not ready yet. Wait for it to finish loading before preparing this submission.';
     }
     return null;
   }
@@ -1061,12 +1061,12 @@
 <div class="mx-auto max-w-6xl space-y-6">
     {#if !prerequisitesMet}
       <div class="rounded-3xl border border-workspace-border bg-card/20 px-6 py-6 text-workspace-text-secondary">
-        Students intake becomes available after redaction is satisfied, questions are analyzed, and rubrics are approved.
+        Student submissions become available after privacy regions are set, questions are reviewed, and rubrics are approved.
       </div>
     {:else}
       {#if queue.length === 0}
         <div class="rounded-3xl border border-workspace-border bg-card/10 px-6 py-6 text-workspace-text-secondary">
-          Use the left sidebar to upload or drop a PDF to begin intake.
+          Use the left sidebar to upload or drop a student PDF.
         </div>
       {/if}
 
@@ -1096,7 +1096,7 @@
                       : stepMutedTextClass
                 }`}
               >
-                {lmsLinked ? '2 OCR + roster cache' : '2 Manual identity'}
+                {lmsLinked ? '2 Read name' : '2 Enter name'}
               </div>
               <div
                 class={`h-px w-6 shrink-0 ${displayStep > 2 ? stepConnectorDoneClass : stepConnectorPendingClass}`}
@@ -1110,7 +1110,7 @@
                       : stepMutedTextClass
                 }`}
               >
-                3 Student association
+                3 Match student
               </div>
               <div
                 class={`h-px w-6 shrink-0 ${displayStep > 3 ? stepConnectorDoneClass : stepConnectorPendingClass}`}
@@ -1124,7 +1124,7 @@
                       : stepMutedTextClass
                 }`}
               >
-                4 Generate PDF
+                4 Prepare submission
               </div>
               <div
                 class={`h-px w-6 shrink-0 ${displayStep > 4 ? stepConnectorDoneClass : stepConnectorPendingClass}`}
@@ -1142,9 +1142,7 @@
 
           {#if displayStep === 1}
             <p class="mt-4 shell-body text-workspace-text-secondary">
-              The first region is designated for name identification; additional regions are pre-emptive privacy masks. Use the page pills to place or adjust redaction regions on every sheet of the scan. Drag the same pills
-              to set the downstream page order that `scans.ingest` should emit; each pill keeps its original page label
-              so order changes stay visible.
+              The first region is used to identify the student name; any additional regions are privacy masks. Use the page pills to place or adjust regions on every sheet of the scan. Drag those same page pills to set the final page order; each pill keeps its original page label so changes stay visible.
             </p>
             <div class="mt-6 grid gap-6 lg:grid-cols-2">
               {#if activePreview}
@@ -1281,7 +1279,7 @@
             </div>
           {:else if displayStep === 2}
             <div class="mt-8 rounded-3xl border border-workspace-border bg-workspace-empty px-6 py-6">
-              <div class="shell-body text-workspace-text-secondary">Background processing — no action needed</div>
+              <div class="shell-body text-workspace-text-secondary">Preparing student match — no action needed</div>
               {#if activeItem?.step2Error}
                 <InlineMessage tone="error" class="mt-3 rounded-xl">
                   {activeItem.step2Error}
@@ -1301,7 +1299,7 @@
                   {:else}
                     <span class="inline-block size-3 shrink-0 rounded-full border border-workspace-border"></span>
                   {/if}
-                  <span>Regions clipped from PDF</span>
+                  <span>Reading selected regions</span>
                 </div>
                 <div class={taskRowClass(step2Progress.ocr, currentStep2Task === 'ocr')}>
                   {#if showTaskIndicator(step2Progress.ocr, currentStep2Task === 'ocr') === 'done'}
@@ -1311,7 +1309,7 @@
                   {:else}
                     <span class="inline-block size-3 shrink-0 rounded-full border border-workspace-border"></span>
                   {/if}
-                  <span>{lmsLinked ? 'OCR hint extraction' : 'OCR hint skipped'}</span>
+                  <span>{lmsLinked ? 'Reading the name region' : 'Name reading skipped'}</span>
                 </div>
                 <div class={taskRowClass(step2Progress.roster, currentStep2Task === 'roster')}>
                   {#if showTaskIndicator(step2Progress.roster, currentStep2Task === 'roster') === 'done'}
@@ -1321,7 +1319,7 @@
                   {:else}
                     <span class="inline-block size-3 shrink-0 rounded-full border border-workspace-border"></span>
                   {/if}
-                  <span>{lmsLinked ? 'Shared LMS roster ready' : 'Local name ready'}</span>
+                  <span>{lmsLinked ? 'Course roster loaded' : 'Name entry ready'}</span>
                 </div>
                 <div class={taskRowClass(step2Progress.fuzzy, currentStep2Task === 'fuzzy')}>
                   {#if showTaskIndicator(step2Progress.fuzzy, currentStep2Task === 'fuzzy') === 'done'}
@@ -1331,17 +1329,17 @@
                   {:else}
                     <span class="inline-block size-3 shrink-0 rounded-full border border-workspace-border"></span>
                   {/if}
-                  <span>{lmsLinked ? 'Fuzzy match computed' : 'Manual name entry ready'}</span>
+                  <span>{lmsLinked ? 'Suggested match ready' : 'Typed name ready'}</span>
                 </div>
               </div>
               {#if !step2Progress.roster && (step2WaitingForSharedRoster || sharedRosterMessage)}
                 <InlineMessage tone="muted" class="mt-4 rounded-xl">
                   {#if step2WaitingForSharedRoster && sharedRosterStatus === 'loading'}
-                    Waiting for shared LMS roster preload…
+                    Waiting for the course roster…
                   {:else if sharedRosterMessage}
                     {sharedRosterMessage}
                   {:else}
-                    Waiting for shared LMS roster preload…
+                    Waiting for the course roster…
                   {/if}
                 </InlineMessage>
               {/if}
@@ -1350,8 +1348,8 @@
             <div class="mt-6 space-y-4">
               <div class="shell-body text-workspace-text-secondary">
                 {lmsLinked
-                  ? 'OCR extracted a candidate identity from the name region. Verify or override before generating the canonical PDF.'
-                  : 'Manual name entry is ready. Type the student name before generating the canonical PDF.'}
+                  ? 'ScriptScore read a possible student name from the scan. Confirm the right roster entry before preparing the submission.'
+                  : 'Type the student name before preparing the submission.'}
               </div>
               {#if rosterError}
                 <InlineMessage tone="error" class="rounded-xl">
@@ -1375,7 +1373,7 @@
                 </div>
                 <div class="rounded-3xl border border-workspace-border bg-workspace-empty p-4">
                   {#if lmsLinked}
-                    <div class="shell-meta text-workspace-text-muted">OCR extraction</div>
+                    <div class="shell-meta text-workspace-text-muted">Name read from scan</div>
                     <div class="mt-2 font-mono text-sm text-workspace-text-primary">
                       {activeItem.ocrHint ?? ''}
                       {#if activeItem.ocrSegmentCount != null}
@@ -1386,7 +1384,7 @@
                     </div>
                     {#if activeItem.bestGuessScore !== null && activeItem.bestGuessScore !== undefined}
                       <div class="mt-3 shell-meta text-workspace-text-muted">
-                        fuzzy match result
+                        suggested match
                         <StatusBadge tone="success" class="ml-2 min-h-0 px-2 py-1 text-[11px]">
                           {activeItem.bestGuessScore}%
                         </StatusBadge>
@@ -1394,7 +1392,7 @@
                     {/if}
                   {/if}
                   {#if lmsLinked}
-                    <div class="shell-meta text-workspace-text-muted">Course roster — select student</div>
+                    <div class="shell-meta text-workspace-text-muted">Course roster — choose student</div>
                     {@const rosterOptions = (activeItem.roster ?? []).map((row) => ({
                       value: row.userId,
                       label: row.displayName
@@ -1481,18 +1479,18 @@
           {:else if displayStep === 4}
             <div class="mt-8 rounded-3xl border border-workspace-border bg-workspace-empty px-6 py-6">
               <div class="shell-body text-workspace-text-secondary">
-                Redacting PDF (worker) and ingesting exam pages — no action needed
+                Creating the student PDF and page previews — no action needed
               </div>
               <div class="mt-6 space-y-3">
                 <HorizontalProgressBar
-                  label="Redact PDF"
+                  label="Mask private information"
                   progress={step4Percent.redactPdf}
                   active={!step4Progress.redactPdf}
                   complete={step4Progress.redactPdf}
                   tone={step4Progress.redactPdf ? 'success' : 'info'}
                 />
                 <HorizontalProgressBar
-                  label="Ingest Exam"
+                  label="Prepare exam pages"
                   progress={step4Percent.ingestExam}
                   active={step4Progress.redactPdf && !step4Progress.ingestExam}
                   complete={step4Progress.ingestExam}
@@ -1511,25 +1509,25 @@
                       step = 3;
                     }}
                   >
-                    Back to association
+                    Back to student match
                   </DesktopButton>
                   <DesktopButton
                     type="button"
                     onclick={() => void confirmAssociation()}
                   >
-                    Retry finalization
+                    Try again
                   </DesktopButton>
                 </div>
               {/if}
             </div>
           {:else if displayStep === 5}
             <p class="mt-4 shell-body text-workspace-text-secondary">
-              Ingest is complete. The page order confirmed in Step 1 has been applied to the emitted exam pages.
+              This submission is ready. The page order you confirmed in Step 1 has been applied.
             </p>
             <div class="mt-6 space-y-4">
                 <div class="shell-title-lg text-workspace-text-primary">Submission ready</div>
                 <div class="shell-body text-workspace-text-secondary">
-                  Canonical artifacts are ready and the confirmed page order is now the downstream exam order.
+                  The prepared PDF and exam page previews are ready for the workflow.
                 </div>
                 {#if activeItem.bindingTokenHex}
                   <div class="rounded-2xl border border-workspace-border bg-workspace-empty px-4 py-3 font-mono text-sm text-workspace-text-secondary">
@@ -1572,7 +1570,7 @@
                 {#if showExamView && examPageCount > 0}
                   <div class="rounded-3xl border border-workspace-border bg-workspace-empty p-4">
                     <div class="flex flex-wrap items-center justify-between gap-3">
-                      <div class="shell-meta text-workspace-text-muted">Exam pages (scans.ingest)</div>
+                      <div class="shell-meta text-workspace-text-muted">Exam pages</div>
                       <div class="flex items-center gap-2">
                         <DesktopButton
                           type="button"

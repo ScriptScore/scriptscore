@@ -1255,7 +1255,7 @@ describe('StudentWorkflowWorkspace review and detail panes', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Grace Hopper Review' }));
 
     expect(screen.getByRole('button', { name: /Q1 manual/ }).textContent).toContain('manual');
-    expect(screen.getByText('PII screening result')).toBeTruthy();
+    expect(screen.getByText('Privacy check result')).toBeTruthy();
   });
 
   it('submits parse review corrections through the workflow callback', async () => {
@@ -1337,7 +1337,7 @@ describe('StudentWorkflowWorkspace review and detail panes', () => {
     expect(await screen.findByText('Course Roster')).toBeTruthy();
     await fireEvent.click(screen.getByRole('button', { name: 'Review Unknown student' }));
     expect(
-      await screen.findByText('low confidence OCR output needs review before grading can continue.')
+      await screen.findByText('low confidence recognized text needs review before grading can continue.')
     ).toBeTruthy();
 
     const textarea = screen.getByRole('textbox');
@@ -1449,7 +1449,7 @@ describe('StudentWorkflowWorkspace review and detail panes', () => {
     expect(await screen.findByText('Course Roster')).toBeTruthy();
     await fireEvent.click(screen.getByRole('button', { name: 'Review Unknown student' }));
     expect(
-      await screen.findByText('low confidence OCR output needs review before grading can continue.')
+      await screen.findByText('low confidence recognized text needs review before grading can continue.')
     ).toBeTruthy();
 
     const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
@@ -2241,13 +2241,13 @@ describe('StudentWorkflowWorkspace review and detail panes', () => {
     await fireEvent.click(screen.getByRole('button', { name: /q1/i }));
     expect(
       screen.getAllByText(
-        'Student PII was detected in this answer. Parse, grading, feedback, and markup were skipped.'
+        'Private student information was detected in this answer, so automatic grading and feedback were skipped.'
       ).length
     ).toBeGreaterThan(0);
     expect(screen.getByText('Rubric scoring')).toBeTruthy();
     expect(screen.getByText('Main point')).toBeTruthy();
     expect(screen.getByText('handwriting detected')).toBeTruthy();
-    expect(screen.getByText('Detected PII: name')).toBeTruthy();
+    expect(screen.getByText('Detected private information: name')).toBeTruthy();
     expect(screen.getByText('Student name detected in the cropped response.')).toBeTruthy();
 
     await fireEvent.click(screen.getByRole('button', { name: /q2/i }));
@@ -2339,11 +2339,11 @@ describe('StudentWorkflowWorkspace review and detail panes', () => {
 
     expect(
       screen.getAllByText(
-        'Question cropping failed for this answer. PII screening, parse, grading, feedback, and markup were skipped.'
+        'ScriptScore could not isolate this answer clearly, so it needs manual grading.'
       ).length
     ).toBeGreaterThan(0);
     expect(
-      screen.getByText('No PII prescreen data was recorded because the crop did not complete cleanly.')
+      screen.getByText('No privacy check was recorded because the answer image could not be prepared cleanly.')
     ).toBeTruthy();
     expect(screen.getByText('Question crop generation failed.')).toBeTruthy();
   });

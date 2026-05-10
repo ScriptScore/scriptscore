@@ -87,7 +87,7 @@
       <div class="flex flex-col items-center gap-3 text-center">
         <div class="text-sm text-workspace-text-secondary">
           {intakeItem
-            ? 'Scan ingest outputs (page PNGs) will appear here after processing.'
+            ? 'Prepared exam pages will appear here after processing.'
             : 'No submission on file for this student.'}
         </div>
       </div>

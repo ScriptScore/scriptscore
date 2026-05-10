@@ -132,8 +132,7 @@
   <div class="min-w-0">
     <div class="text-base font-semibold text-workspace-text-primary">Exam Workflow</div>
     <div class="text-sm text-workspace-text-muted">
-      {courseCode} · {displayName} · {canonicalReadyCount} canonical
-      exams ready
+      {courseCode} · {displayName} · {canonicalReadyCount} submission{canonicalReadyCount === 1 ? '' : 's'} ready
     </div>
   </div>
   <div class="flex shrink-0 items-center gap-2">
@@ -159,7 +158,7 @@
 <div class="mt-5 overflow-hidden rounded-3xl border border-workspace-border bg-surface-card-subtle">
   <div class="flex items-stretch">
     <div class="flex min-w-0 flex-1 items-center justify-center gap-3 bg-surface-card-control px-6 py-5">
-      <div class="text-xs font-semibold uppercase tracking-wide text-workspace-text-muted">Ingested</div>
+      <div class="text-xs font-semibold uppercase tracking-wide text-workspace-text-muted">Prepared</div>
       <div class="text-2xl font-semibold text-workspace-text-primary">{intakeComplete}</div>
     </div>
     <div class="w-px bg-workspace-border"></div>
@@ -196,7 +195,7 @@
         Ready to process {readyCount} exams
       </div>
       <div class="mt-2 max-w-[34rem] text-sm text-workspace-text-secondary">
-        Runs alignment, crop, PII screening, parse, and grading automatically. Review and manual-grading blocks remain visible here.
+        Aligns pages, finds answer areas, checks for private information, reads responses, and grades what it can. Anything needing your review stays visible here.
       </div>
     </div>
 
@@ -212,7 +211,7 @@
     <div class="mt-3">
       {#if canonicalReadyRows.length === 0}
         <div class="py-2 text-sm text-workspace-text-secondary">
-          No canonical exams available yet. Upload a submission to run intake.
+          No submissions are ready yet. Upload a student PDF to prepare it for grading.
         </div>
       {:else}
         <div class="max-h-[30rem] overflow-y-auto">

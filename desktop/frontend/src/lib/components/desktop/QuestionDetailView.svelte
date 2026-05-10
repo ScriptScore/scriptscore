@@ -81,32 +81,32 @@
   function piiBlockMessage(answer: StudentWorkflowAnswer): string {
     switch (answer.manualGradingReason) {
       case 'pii_detected':
-        return 'Student PII was detected in this answer. Parse, grading, feedback, and markup were skipped.';
+        return 'Private student information was detected in this answer, so automatic grading and feedback were skipped.';
       case 'crop_failed':
-        return 'Question cropping failed for this answer. PII screening, parse, grading, feedback, and markup were skipped.';
+        return 'ScriptScore could not isolate this answer clearly, so it needs manual grading.';
       default:
-        return 'PII screening was not clean for this answer. Parse, grading, feedback, and markup were skipped.';
+        return 'This answer needs manual review because the privacy check was not clean.';
     }
   }
 
   function manualBlockHeading(answer: StudentWorkflowAnswer): string {
-    return answer.manualGradingReason === 'crop_failed' ? 'Crop result' : 'PII screening result';
+    return answer.manualGradingReason === 'crop_failed' ? 'Answer image result' : 'Privacy check result';
   }
 
   function manualBlockMeta(answer: StudentWorkflowAnswer): string {
     if (answer.manualGradingReason === 'crop_failed') {
-      return 'No PII prescreen data was recorded because the crop did not complete cleanly.';
+      return 'No privacy check was recorded because the answer image could not be prepared cleanly.';
     }
     return handwritingLabel(answer.piiPrescreen?.containsHandwriting);
   }
 
   function manualBlockDetail(answer: StudentWorkflowAnswer): string {
     if (answer.manualGradingReason === 'crop_failed') {
-      return 'Cropping failed before PII screening could run, so this row must be handled manually.';
+      return 'The answer image could not be prepared, so this row must be handled manually.';
     }
     return (answer.piiPrescreen?.piiTypesDetected?.length ?? 0) > 0
-      ? `Detected PII: ${answer.piiPrescreen?.piiTypesDetected?.join(', ')}`
-      : 'No deterministic PII category was recorded; this row remains manual because the prescreen was not clean.';
+      ? `Detected private information: ${answer.piiPrescreen?.piiTypesDetected?.join(', ')}`
+      : 'No specific category was recorded, but the privacy check still needs your review.';
   }
 
   function criterionDotClass(pointsAwarded: number, points: number): string {
@@ -292,7 +292,7 @@
         </InlineMessage>
       {:else if needsReview}
         <InlineMessage tone="warning" class="mb-4 rounded-2xl px-5 py-4">
-          {confidenceLabel(selectedAnswer.parseConfidence)} OCR output needs review before
+          {confidenceLabel(selectedAnswer.parseConfidence)} recognized text needs review before
           grading can continue.
         </InlineMessage>
       {/if}
@@ -327,8 +327,8 @@
                   bind:value={parseDraftText}
                 ></textarea>
                 <div class="mt-2 text-xs text-workspace-text-muted">
-                  The corrected answer becomes the grading input. The original crop image and raw
-                  OCR output remain preserved.
+                  The corrected answer becomes the grading input. The original answer image and raw
+                  recognized text remain preserved.
                 </div>
                 <div class="mt-4 flex justify-end">
                   <DesktopButton
@@ -346,7 +346,7 @@
                   <div
                     class="text-xs font-semibold uppercase tracking-wide text-workspace-text-muted"
                   >
-                    Raw OCR output
+                    Raw recognized text
                   </div>
                   <div
                     class="mt-2 whitespace-pre-wrap rounded-2xl border border-workspace-border bg-surface-card-control px-4 py-3 text-xs font-mono text-workspace-text-secondary"
@@ -531,7 +531,7 @@
                   <div
                     class="text-xs font-semibold uppercase tracking-wide text-workspace-text-muted"
                   >
-                    Raw OCR
+                    Raw recognized text
                   </div>
                   <div
                     class="mt-2 whitespace-pre-wrap rounded-2xl border border-workspace-border bg-surface-card-control px-4 py-4 text-sm text-workspace-text-secondary"

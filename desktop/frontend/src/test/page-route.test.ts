@@ -2283,7 +2283,7 @@ describe('desktop route shell', () => {
     // Students step uses StudentWorkflowWorkspace: default pane is workflow home (not the old intake drop heading).
     expect(await screen.findByText('Exam Workflow')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Upload Submission' })).toBeTruthy();
-    expect(screen.getByText(/0 canonical exams ready/)).toBeTruthy();
+    expect(screen.getByText(/0 submissions ready/)).toBeTruthy();
     // Intake processor + prerequisite copy only appear after entering intake mode (e.g. upload); prerequisites are still false here.
     expect(screen.queryByRole('heading', { name: 'Intake processor' })).toBeNull();
     expect(screen.queryByRole('menuitem', { name: 'Setup' })).toBeNull();

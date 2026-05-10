@@ -132,7 +132,7 @@ function requireRuntimeHandler(
 }
 
 function workerBusyMessage(): string {
-  return 'The previous intake attempt did not start because the desktop worker was already running another job. No intake record was created. Wait for that job to finish, then confirm the student again.';
+  return 'This submission could not start because ScriptScore is already working on another task. Wait for that task to finish, then confirm the student again.';
 }
 
 describe('student intake overwrite warning', () => {
@@ -215,7 +215,7 @@ describe('student intake overwrite warning', () => {
     });
     expect(
       await screen.findByText(
-        'This student already has a canonical PDF for this project. Finalizing will replace that submission.'
+        'This student already has a prepared submission for this project. Continuing will replace it.'
       )
     ).toBeTruthy();
   });
@@ -268,10 +268,10 @@ describe('student intake overwrite warning', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Confirm student →' }));
 
     expect(onFinalizeSubmission).toHaveBeenCalled();
-    expect(await screen.findByText('Redacting PDF (worker) and ingesting exam pages — no action needed')).toBeTruthy();
+    expect(await screen.findByText('Creating the student PDF and page previews — no action needed')).toBeTruthy();
 
-    expect(screen.getByRole('progressbar', { name: 'Redact PDF' }).getAttribute('aria-valuenow')).toBe('0');
-    expect(screen.getByRole('progressbar', { name: 'Ingest Exam' }).getAttribute('aria-valuenow')).toBe('0');
+    expect(screen.getByRole('progressbar', { name: 'Mask private information' }).getAttribute('aria-valuenow')).toBe('0');
+    expect(screen.getByRole('progressbar', { name: 'Prepare exam pages' }).getAttribute('aria-valuenow')).toBe('0');
     expect(screen.queryByText('Student ref assigned')).toBeNull();
     expect(screen.queryByText('LMS binding (HMAC)')).toBeNull();
     expect(screen.queryByText(/Worker busy/i)).toBeNull();
@@ -279,13 +279,13 @@ describe('student intake overwrite warning', () => {
     const emitRuntimeEvent = requireRuntimeHandler(runtimeHandler);
     emitRuntimeEvent(runtimeEvent('job_progress', 'scans.pdf-create-redacted', 35));
     await waitFor(() => {
-      expect(screen.getByRole('progressbar', { name: 'Redact PDF' }).getAttribute('aria-valuenow')).toBe('35');
+      expect(screen.getByRole('progressbar', { name: 'Mask private information' }).getAttribute('aria-valuenow')).toBe('35');
     });
     emitRuntimeEvent(runtimeEvent('job_finished', 'scans.pdf-create-redacted', 100));
     emitRuntimeEvent(runtimeEvent('job_progress', 'scans.ingest', 68));
     await waitFor(() => {
-      expect(screen.getByRole('progressbar', { name: 'Redact PDF' }).getAttribute('aria-valuenow')).toBe('100');
-      expect(screen.getByRole('progressbar', { name: 'Ingest Exam' }).getAttribute('aria-valuenow')).toBe('68');
+      expect(screen.getByRole('progressbar', { name: 'Mask private information' }).getAttribute('aria-valuenow')).toBe('100');
+      expect(screen.getByRole('progressbar', { name: 'Prepare exam pages' }).getAttribute('aria-valuenow')).toBe('68');
     });
   });
 
@@ -311,14 +311,14 @@ describe('student intake overwrite warning', () => {
     await waitFor(() => {
       expect(onFinalizeSubmission).toHaveBeenCalled();
       expect(
-        screen.getByText('Student intake did not complete. Confirm the student again to retry.')
+        screen.getByText('This submission was not prepared. Confirm the student again to retry.')
       ).toBeTruthy();
     });
     expect(
-      screen.getByText('Redacting PDF (worker) and ingesting exam pages — no action needed')
+      screen.getByText('Creating the student PDF and page previews — no action needed')
     ).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Back to association' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Retry finalization' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Back to student match' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Confirm student →' })).toBeNull();
     expect(screen.queryByText('Submission ready')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Process next exam →' })).toBeNull();
@@ -350,10 +350,10 @@ describe('student intake overwrite warning', () => {
       expect(screen.getByText('Desktop worker is not available.')).toBeTruthy();
     });
     expect(
-      screen.getByText('Redacting PDF (worker) and ingesting exam pages — no action needed')
+      screen.getByText('Creating the student PDF and page previews — no action needed')
     ).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Back to association' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Retry finalization' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Back to student match' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Confirm student →' })).toBeNull();
   });
 
@@ -681,7 +681,7 @@ describe('student intake overwrite warning', () => {
       view.component as { __testConfirmRegions: () => Promise<void> }
     ).__testConfirmRegions();
 
-    expect(await screen.findByText('Background processing — no action needed')).toBeTruthy();
+    expect(await screen.findByText('Preparing student match — no action needed')).toBeTruthy();
     expect(await screen.findByText('Canvas roster cache is warming up.')).toBeTruthy();
 
     await view.rerender({
@@ -752,10 +752,10 @@ describe('student intake overwrite warning', () => {
     await screen.findByAltText(/Cropped region preview/);
     await (view.component as { __testConfirmRegions: () => Promise<void> }).__testConfirmRegions();
 
-    expect(await screen.findByText('2 Manual identity')).toBeTruthy();
+    expect(await screen.findByText('2 Enter name')).toBeTruthy();
     expect(
       await screen.findByText(
-        'Manual name entry is ready. Type the student name before generating the canonical PDF.'
+        'Type the student name before preparing the submission.'
       )
     ).toBeTruthy();
     expect(desktopMocks.transientClipPdfRectsPngBase64).toHaveBeenCalled();
@@ -1066,7 +1066,7 @@ describe('student intake overwrite warning', () => {
   });
 
   it('surfaces a step-2 error inline and does not advance to student association', async () => {
-    desktopMocks.transientScansOcrHint.mockRejectedValue(new Error('Timed out extracting OCR hint.'));
+    desktopMocks.transientScansOcrHint.mockRejectedValue(new Error('Timed out reading the name region.'));
 
     const view = render(StudentIntakeWorkspace, {
       ...readySharedRosterProps,
@@ -1083,8 +1083,8 @@ describe('student intake overwrite warning', () => {
     await screen.findByAltText(/Cropped region preview/);
     await (view.component as { __testConfirmRegions: () => Promise<void> }).__testConfirmRegions();
 
-    expect(await screen.findByText('Background processing — no action needed')).toBeTruthy();
-    expect(await screen.findByText('Error: Timed out extracting OCR hint.')).toBeTruthy();
+    expect(await screen.findByText('Preparing student match — no action needed')).toBeTruthy();
+    expect(await screen.findByText('Error: Timed out reading the name region.')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Retry background step' })).toBeTruthy();
     expect(screen.queryByRole('combobox')).toBeNull();
     expect(screen.queryByText('Submission ready')).toBeNull();
@@ -1092,7 +1092,7 @@ describe('student intake overwrite warning', () => {
 
   it('reruns Step 2 when retrying after an OCR failure', async () => {
     desktopMocks.transientScansOcrHint
-      .mockRejectedValueOnce(new Error('Timed out extracting OCR hint.'))
+      .mockRejectedValueOnce(new Error('Timed out reading the name region.'))
       .mockResolvedValueOnce({
         hintText: 'Jordan Rivera',
         segmentCount: 1
@@ -1113,7 +1113,7 @@ describe('student intake overwrite warning', () => {
     await screen.findByAltText(/Cropped region preview/);
     await (view.component as { __testConfirmRegions: () => Promise<void> }).__testConfirmRegions();
 
-    expect(await screen.findByText('Error: Timed out extracting OCR hint.')).toBeTruthy();
+    expect(await screen.findByText('Error: Timed out reading the name region.')).toBeTruthy();
 
     await fireEvent.click(screen.getByRole('button', { name: 'Retry background step' }));
 
