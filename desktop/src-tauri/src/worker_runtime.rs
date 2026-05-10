@@ -77,7 +77,7 @@ fn bundled_runtime_launch_spec_from_manifest(
         python_executable,
         python_path,
         remove_env: bundled_runtime_removed_env(),
-        extra_env: bundled_paddle_model_env(resource_dir)?,
+        extra_env: bundled_runtime_extra_env(resource_dir, runtime_root)?,
     })
 }
 
@@ -121,6 +121,119 @@ fn resolve_repo_launch_spec() -> HostResult<WorkerLaunchSpec> {
 
 fn bundled_runtime_removed_env() -> Vec<OsString> {
     vec![OsString::from("PYTHONHOME")]
+}
+
+fn bundled_runtime_extra_env(
+    resource_dir: &Path,
+    runtime_root: &Path,
+) -> HostResult<Vec<(OsString, OsString)>> {
+    let mut extra_env = bundled_runtime_native_library_env(runtime_root)?;
+    extra_env.extend(bundled_paddle_model_env(resource_dir)?);
+    Ok(extra_env)
+}
+
+#[cfg(target_os = "linux")]
+fn bundled_runtime_native_library_env(
+    runtime_root: &Path,
+) -> HostResult<Vec<(OsString, OsString)>> {
+    let mut library_paths = bundled_runtime_native_library_paths(runtime_root)?;
+    if library_paths.is_empty() {
+        return Ok(Vec::new());
+    }
+    if let Some(existing) = std::env::var_os("LD_LIBRARY_PATH").filter(|value| !value.is_empty()) {
+        library_paths.extend(std::env::split_paths(&existing));
+    }
+    let joined = std::env::join_paths(library_paths).map_err(|err| {
+        HostError::Worker(format!(
+            "Could not prepare LD_LIBRARY_PATH for bundled desktop worker launch: {err}"
+        ))
+    })?;
+    Ok(vec![(OsString::from("LD_LIBRARY_PATH"), joined)])
+}
+
+#[cfg(not(target_os = "linux"))]
+fn bundled_runtime_native_library_env(
+    _runtime_root: &Path,
+) -> HostResult<Vec<(OsString, OsString)>> {
+    Ok(Vec::new())
+}
+
+#[cfg(target_os = "linux")]
+fn bundled_runtime_native_library_paths(runtime_root: &Path) -> HostResult<Vec<PathBuf>> {
+    let python_lib = runtime_root.join("python/lib");
+    let mut library_paths = Vec::new();
+    if python_lib.is_dir() {
+        library_paths.push(python_lib.clone());
+        collect_shared_library_dirs(&python_lib, &mut library_paths)?;
+    }
+    Ok(dedupe_paths(library_paths))
+}
+
+#[cfg(target_os = "linux")]
+fn collect_shared_library_dirs(dir: &Path, library_paths: &mut Vec<PathBuf>) -> HostResult<()> {
+    for entry in fs::read_dir(dir).map_err(|err| {
+        HostError::Worker(format!(
+            "Could not list bundled native library directory '{}': {err}",
+            dir.display()
+        ))
+    })? {
+        let entry = entry.map_err(|err| {
+            HostError::Worker(format!(
+                "Could not inspect bundled native library directory '{}': {err}",
+                dir.display()
+            ))
+        })?;
+        collect_shared_library_entry(entry, library_paths)?;
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn collect_shared_library_entry(
+    entry: fs::DirEntry,
+    library_paths: &mut Vec<PathBuf>,
+) -> HostResult<()> {
+    let path = entry.path();
+    let file_type = entry.file_type().map_err(|err| {
+        HostError::Worker(format!(
+            "Could not inspect bundled native library path '{}': {err}",
+            path.display()
+        ))
+    })?;
+    if file_type.is_dir() {
+        collect_shared_library_dirs(&path, library_paths)?;
+    } else if file_type.is_file() {
+        append_shared_library_parent(&path, library_paths);
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn append_shared_library_parent(path: &Path, library_paths: &mut Vec<PathBuf>) {
+    if is_shared_library_file(path) {
+        if let Some(parent) = path.parent() {
+            library_paths.push(parent.to_path_buf());
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn is_shared_library_file(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .map(|name| name.ends_with(".so") || name.contains(".so."))
+        .unwrap_or(false)
+}
+
+#[cfg(target_os = "linux")]
+fn dedupe_paths(paths: Vec<PathBuf>) -> Vec<PathBuf> {
+    let mut deduped = Vec::new();
+    for path in paths {
+        if !deduped.iter().any(|existing| existing == &path) {
+            deduped.push(path);
+        }
+    }
+    deduped
 }
 
 fn resolve_repo_python(repo_root: &Path) -> HostResult<PathBuf> {
@@ -432,7 +545,10 @@ mod tests {
     fn bundled_runtime_manifest_supports_relative_python_and_pythonpath_entries() {
         let resource_dir = temp_dir("scriptscore-worker-runtime");
         let runtime_root = resource_dir.join("runtime");
+        let paddle_libs = runtime_root.join("python/lib/python3.12/site-packages/paddle/libs");
         fs::create_dir_all(runtime_root.join("python/bin")).expect("runtime dir should create");
+        fs::create_dir_all(&paddle_libs).expect("paddle libs dir should create");
+        fs::write(paddle_libs.join("libmklml_intel.so"), "").expect("paddle lib should write");
         fs::create_dir_all(runtime_root.join("cli-src")).expect("cli source dir should create");
         write_paddle_model_layout(&resource_dir.join("models/paddle"));
         fs::write(
@@ -466,22 +582,15 @@ mod tests {
             .expect("cached models should be writable");
         let _ = fs::remove_file(cached_model_dir.join(".write-test"));
         assert_eq!(
-            spec.extra_env,
-            vec![
-                (
-                    "SCRIPTSCORE_DETECT_PADDLE_MODEL_DIR".into(),
-                    cached_model_dir.clone().into_os_string(),
-                ),
-                (
-                    "SCRIPTSCORE_OCR_PADDLE_MODEL_DIR".into(),
-                    cached_model_dir.clone().into_os_string(),
-                ),
-                (
-                    "SCRIPTSCORE_PII_PADDLE_MODEL_DIR".into(),
-                    cached_model_dir.clone().into_os_string(),
-                ),
-            ]
+            env_value(&spec, "SCRIPTSCORE_OCR_PADDLE_MODEL_DIR"),
+            cached_model_dir.clone().into_os_string()
         );
+        assert_eq!(
+            env_value(&spec, "SCRIPTSCORE_PII_PADDLE_MODEL_DIR"),
+            cached_model_dir.clone().into_os_string()
+        );
+        #[cfg(target_os = "linux")]
+        assert_env_path_contains(&spec, "LD_LIBRARY_PATH", &paddle_libs);
 
         let _ = fs::remove_dir_all(resource_dir);
         let _ = fs::remove_dir_all(cached_model_dir);
@@ -574,15 +683,31 @@ mod tests {
     }
 
     fn env_model_dir(spec: &WorkerLaunchSpec, env_name: &str) -> PathBuf {
+        PathBuf::from(env_value(spec, env_name))
+    }
+
+    fn env_value(spec: &WorkerLaunchSpec, env_name: &str) -> OsString {
         spec.extra_env
             .iter()
             .find_map(|(key, value)| {
                 if key == env_name {
-                    Some(PathBuf::from(value.clone()))
+                    Some(value.clone())
                 } else {
                     None
                 }
             })
             .unwrap_or_else(|| panic!("{env_name} should be set"))
+    }
+
+    #[cfg(target_os = "linux")]
+    fn assert_env_path_contains(spec: &WorkerLaunchSpec, env_name: &str, expected: &Path) {
+        let value = env_value(spec, env_name);
+        let paths = std::env::split_paths(&value).collect::<Vec<_>>();
+        assert!(
+            paths.iter().any(|path| path == expected),
+            "{env_name} should include {} but was {:?}",
+            expected.display(),
+            value
+        );
     }
 }

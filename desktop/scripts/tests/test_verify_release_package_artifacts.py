@@ -24,6 +24,11 @@ class VerifyReleasePackageArtifactsTests(unittest.TestCase):
         runtime = resources / "runtime"
         (runtime / "cli-src" / "scriptscore").mkdir(parents=True)
         (runtime / "python" / "bin").mkdir(parents=True)
+        paddle_libs = (
+            runtime / "python" / "lib" / "python3.12" / "site-packages" / "paddle" / "libs"
+        )
+        paddle_libs.mkdir(parents=True)
+        (paddle_libs / "libmklml_intel.so").write_text("", encoding="utf-8")
         (runtime / "python" / "bin" / "python3").write_text("", encoding="utf-8")
         (runtime / "runtime-manifest.json").write_text(
             json.dumps(
@@ -71,6 +76,22 @@ class VerifyReleasePackageArtifactsTests(unittest.TestCase):
                 str(payload_root / "app" / "resources" / "runtime" / "cli-src"),
                 env["PYTHONPATH"],
             )
+            if sys.platform.startswith("linux"):
+                self.assertIn(
+                    str(
+                        payload_root
+                        / "app"
+                        / "resources"
+                        / "runtime"
+                        / "python"
+                        / "lib"
+                        / "python3.12"
+                        / "site-packages"
+                        / "paddle"
+                        / "libs"
+                    ),
+                    env["LD_LIBRARY_PATH"],
+                )
             self.assertNotIn("PYTHONHOME", env)
 
     def test_validate_payload_root_rejects_missing_runtime(self) -> None:

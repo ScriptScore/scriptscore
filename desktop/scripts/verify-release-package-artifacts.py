@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 BUNDLE_EXTENSIONS = {
@@ -178,7 +179,31 @@ def runtime_env(runtime_root: Path, manifest: dict[str, object]) -> dict[str, st
         env["PYTHONPATH"] = os.pathsep.join(
             [str(entry) for entry in python_path_entries] + ([existing] if existing else [])
         )
+    if sys.platform.startswith("linux"):
+        prepend_env_paths(env, "LD_LIBRARY_PATH", runtime_native_library_paths(runtime_root))
     return env
+
+
+def runtime_native_library_paths(runtime_root: Path) -> list[Path]:
+    python_lib = runtime_root / "python" / "lib"
+    paths = [python_lib] if python_lib.is_dir() else []
+    paths.extend(
+        path.parent
+        for path in sorted(python_lib.rglob("*"))
+        if path.is_file() and is_shared_library(path)
+    )
+    return list(dict.fromkeys(paths))
+
+
+def is_shared_library(path: Path) -> bool:
+    return path.name.endswith(".so") or ".so." in path.name
+
+
+def prepend_env_paths(env: dict[str, str], name: str, paths: list[Path]) -> None:
+    if not paths:
+        return
+    existing = env.get(name, "")
+    env[name] = os.pathsep.join([str(path) for path in paths] + ([existing] if existing else []))
 
 
 def validate_packaged_ocr_reader(runtime_root: Path, models_root: Path) -> dict[str, object]:
