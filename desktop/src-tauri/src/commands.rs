@@ -151,7 +151,16 @@ pub async fn list_llm_models(
     })
     .await
     .map_err(|err| format!("Task panicked: {err}"))?
-    .map_err(|err| err.to_string())
+    .map_err(runtime_settings_error_message)
+}
+
+fn runtime_settings_error_message(err: crate::errors::HostError) -> String {
+    let message = err.to_string();
+    if message == "A desktop job is already active in this session." {
+        "The desktop runtime is busy with another job. Wait for it to finish, then try the Ollama connection again.".into()
+    } else {
+        message
+    }
 }
 
 #[tauri::command]
@@ -171,7 +180,7 @@ pub async fn validate_llm_model(
     })
     .await
     .map_err(|err| format!("Task panicked: {err}"))?
-    .map_err(|err| err.to_string())
+    .map_err(runtime_settings_error_message)
 }
 
 #[tauri::command]

@@ -50,6 +50,10 @@
       $appSettings.llmModel.trim().length > 0 &&
       $ollamaValidation.connectionStatus === 'ok' &&
       $ollamaValidation.validatedCredentialsKey === ollamaCredentialsKey);
+  $: ollamaValidationEnabled =
+    $appSettings.aiAssistEnabled &&
+    ($appSettings.llmProvider === 'ollama_cloud' ||
+      ($appSettings.llmProvider === 'ollama_native' && !visionModelsBusy));
   $: finishSetupReady = projectTaskComplete && aiTaskComplete;
   $: finishSetupButtonClass = finishSetupReady
     ? '!border-message-success-border !bg-message-success-bg !text-message-success-text hover:!bg-message-success-bg hover:!text-message-success-text'
@@ -57,7 +61,7 @@
 
   $: canvasValidation.handle($appSettings.lmsProvider, canvasBaseUrl, canvasApiKey);
   $: ollamaValidation.handle(
-    $appSettings.aiAssistEnabled,
+    ollamaValidationEnabled,
     $appSettings.llmProvider,
     ollamaBaseUrl,
     $appSettings.llmModel,

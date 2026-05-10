@@ -24,6 +24,7 @@
     SegmentedControl,
     StatusBadge,
     ToggleRow,
+    compactTabActionButtonClass,
     type FeedbackTone
   } from './ui';
 
@@ -67,8 +68,7 @@
     | ((questionId: string, reviewed: boolean) => Promise<boolean>)
     | null = null;
 
-  const tabActionButtonClass =
-    'relative z-10 rounded-md bg-interaction-active px-2 py-0.5 text-[10px] font-semibold text-text-primary transition-colors hover:bg-interaction-hover disabled:cursor-not-allowed disabled:opacity-50';
+  const tabActionButtonClass = compactTabActionButtonClass;
   const evidenceViewOptions = [
     { value: 'png', label: 'PNG' },
     { value: 'text', label: 'Text' },

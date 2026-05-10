@@ -191,7 +191,7 @@ class PreparePortablePythonTests(unittest.TestCase):
                         "numpy==2.2.0",
                         "paddlepaddle==3.3.1",
                         "    # via scriptscore",
-                        "paddleocr==2.10.0",
+                        "paddleocr==3.4.1",
                         "",
                     ]
                 ),
@@ -211,9 +211,33 @@ class PreparePortablePythonTests(unittest.TestCase):
                 rewritten,
             )
             self.assertIn("numpy==2.2.0", rewritten)
-            self.assertIn("paddleocr==2.10.0", rewritten)
+            self.assertIn("paddleocr==3.4.1", rewritten)
             self.assertNotIn("paddlepaddle==3.3.1", rewritten)
             self.assertNotIn("# via scriptscore", rewritten)
+
+    def test_rewrite_requirement_to_local_wheel_can_append_missing_requirement(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            wheel_path = tmp_path / MODULE.MACOS_X86_64_PADDLE_WHEEL_NAME
+            wheel_path.write_bytes(b"wheel")
+            requirements_path = tmp_path / "requirements.txt"
+            requirements_path.write_text("numpy==2.2.0\npaddleocr==3.4.1\n", encoding="utf-8")
+
+            MODULE.rewrite_requirement_to_local_wheel(
+                requirements_path,
+                "paddlepaddle",
+                wheel_path,
+                "file:///__scriptscore_package_overrides__/paddlepaddle.whl",
+                append_if_missing=True,
+            )
+
+            rewritten = requirements_path.read_text(encoding="utf-8")
+            self.assertIn("numpy==2.2.0", rewritten)
+            self.assertIn("paddleocr==3.4.1", rewritten)
+            self.assertIn(
+                "paddlepaddle @ file:///__scriptscore_package_overrides__/paddlepaddle.whl",
+                rewritten,
+            )
 
     def test_remove_requirements_drops_target_stack_with_continuations(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -228,7 +252,7 @@ class PreparePortablePythonTests(unittest.TestCase):
                         "    # via easyocr",
                         "torchvision==0.26.0",
                         "    # via easyocr",
-                        "paddleocr==2.10.0",
+                        "paddleocr==3.4.1",
                         "",
                     ]
                 ),
@@ -242,7 +266,7 @@ class PreparePortablePythonTests(unittest.TestCase):
 
             filtered = requirements_path.read_text(encoding="utf-8")
             self.assertIn("numpy==2.2.0", filtered)
-            self.assertIn("paddleocr==2.10.0", filtered)
+            self.assertIn("paddleocr==3.4.1", filtered)
             self.assertNotIn("easyocr", filtered)
             self.assertNotIn("torch==", filtered)
             self.assertNotIn("torchvision", filtered)
@@ -278,14 +302,17 @@ class PreparePortablePythonTests(unittest.TestCase):
             wheel_path = tmp_path / MODULE.MACOS_X86_64_PADDLE_WHEEL_NAME
             wheel_path.write_bytes(b"release asset bytes")
 
-            with mock.patch.dict(
-                os.environ,
-                {
-                    "SCRIPTSCORE_MACOS_X86_64_PADDLE_WHEEL_PATH": str(wheel_path),
-                    "SCRIPTSCORE_MACOS_X86_64_PADDLE_WHEEL_SHA256": "0" * 64,
-                },
-                clear=False,
-            ), self.assertRaisesRegex(MODULE.PortablePythonError, "SHA256 mismatch"):
+            with (
+                mock.patch.dict(
+                    os.environ,
+                    {
+                        "SCRIPTSCORE_MACOS_X86_64_PADDLE_WHEEL_PATH": str(wheel_path),
+                        "SCRIPTSCORE_MACOS_X86_64_PADDLE_WHEEL_SHA256": "0" * 64,
+                    },
+                    clear=False,
+                ),
+                self.assertRaisesRegex(MODULE.PortablePythonError, "SHA256 mismatch"),
+            ):
                 MODULE.package_overrides_for_target(
                     MODULE.MACOS_X86_64_TARGET_TRIPLE,
                     tmp_path,

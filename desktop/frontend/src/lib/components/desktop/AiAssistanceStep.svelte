@@ -6,7 +6,7 @@
   import { appSettings } from '$lib/stores/appSettings';
   import ConnectionTicker from './ConnectionTicker.svelte';
   import TokenGuidePopover from './TokenGuidePopover.svelte';
-  import { DesktopButton, RadioCardGroup, SelectField, TextField } from './ui';
+  import { DesktopButton, RadioCardGroup, SelectField, TextField, compactTabActionButtonClass } from './ui';
 
   type ConnectionTickerTone = 'warning' | 'info' | 'success' | 'error';
 
@@ -55,6 +55,8 @@
 
   let ollamaApiKeyVisible = false;
   let ollamaTokenHelpOpen = false;
+  let localBaseUrlDraft = '';
+  let lastCommittedLocalBaseUrl = '';
 
   $: aiAssistanceValue = !$appSettings.aiAssistEnabled
     ? 'manual'
@@ -74,6 +76,23 @@
             label: visionModelsBusy ? 'Loading local models...' : 'No vision models found'
           }
         ];
+  $: if (aiAssistanceValue === 'ollama_native' && $appSettings.llmBaseUrl !== lastCommittedLocalBaseUrl) {
+    localBaseUrlDraft = $appSettings.llmBaseUrl;
+    lastCommittedLocalBaseUrl = $appSettings.llmBaseUrl;
+  }
+  $: if (aiAssistanceValue !== 'ollama_native') {
+    localBaseUrlDraft = $appSettings.llmBaseUrl;
+    lastCommittedLocalBaseUrl = $appSettings.llmBaseUrl;
+  }
+  $: localBaseUrlChanged = localBaseUrlDraft.trim() !== $appSettings.llmBaseUrl.trim();
+
+  function acceptLocalBaseUrl() {
+    if (visionModelsBusy || !localBaseUrlChanged) {
+      return;
+    }
+    lastCommittedLocalBaseUrl = localBaseUrlDraft;
+    onLlmBaseUrlInput?.(localBaseUrlDraft);
+  }
 </script>
 
 <div class="grid gap-4 px-2 pb-2 pt-3">
@@ -94,19 +113,49 @@
       <svelte:fragment slot="selected" let:optionValue>
         {#if optionValue === 'ollama_native'}
           <div class="grid gap-4 md:grid-cols-2">
-            <TextField
-              label="Base URL"
-              value={$appSettings.llmBaseUrl}
-              placeholder={OLLAMA_LOCAL_BASE_URL}
-              oninput={(event: Event) => onLlmBaseUrlInput?.((event.currentTarget as HTMLInputElement).value)}
-            />
+            {#if localBaseUrlChanged}
+              <TextField
+                label="Base URL"
+                value={localBaseUrlDraft}
+                placeholder={OLLAMA_LOCAL_BASE_URL}
+                disabled={visionModelsBusy}
+                oninput={(event: Event) => {
+                  localBaseUrlDraft = (event.currentTarget as HTMLInputElement).value;
+                }}
+                onkeydown={(event: KeyboardEvent) => {
+                  if (event.key === 'Enter') {
+                    acceptLocalBaseUrl();
+                  }
+                }}
+              >
+                <button
+                  slot="trailing"
+                  type="button"
+                  class={compactTabActionButtonClass}
+                  disabled={visionModelsBusy}
+                  onclick={acceptLocalBaseUrl}
+                >
+                  Accept
+                </button>
+              </TextField>
+            {:else}
+              <TextField
+                label="Base URL"
+                value={localBaseUrlDraft}
+                placeholder={OLLAMA_LOCAL_BASE_URL}
+                disabled={visionModelsBusy}
+                oninput={(event: Event) => {
+                  localBaseUrlDraft = (event.currentTarget as HTMLInputElement).value;
+                }}
+              />
+            {/if}
             <SelectField
               label="Vision model"
               value={$appSettings.llmModel}
               options={localVisionModelOptions}
               searchable
               searchPlaceholder="Search models"
-              disabled={visionModelsBusy && localModelOptions.length === 0}
+              disabled={visionModelsBusy || localModelOptions.length === 0}
               onChange={(value) => onLlmModelInput?.(value)}
             />
           </div>

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import errno
+import json
 import os
 import select
 import shutil
@@ -159,6 +160,52 @@ def test_dev_frontend_launcher_serves_browser_preview_without_opening_browser() 
         assert "data-sveltekit-preload-data" in html
     finally:
         _terminate(proc)
+
+
+def test_dev_desktop_launcher_override_keeps_frontend_dev_command(tmp_path: Path) -> None:
+    capture_path = tmp_path / "tauri-config.json"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    cargo = bin_dir / "cargo"
+    cargo.write_text(
+        "\n".join(
+            [
+                "#!/usr/bin/env bash",
+                "set -euo pipefail",
+                'if [[ "$1" == "tauri" && "$2" == "--help" ]]; then',
+                "  exit 0",
+                "fi",
+                'if [[ "$1" == "tauri" && "$2" == "dev" && "$3" == "--config" ]]; then',
+                '  printf "%s" "$4" > "${SCRIPTSCORE_TEST_TAURI_CONFIG_CAPTURE}"',
+                "  exit 0",
+                "fi",
+                'echo "unexpected cargo invocation: $*" >&2',
+                "exit 2",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    cargo.chmod(0o755)
+
+    env = _frontend_env(
+        port=4175,
+        extra={
+            "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}",
+            "SCRIPTSCORE_TEST_TAURI_CONFIG_CAPTURE": str(capture_path),
+        },
+    )
+
+    subprocess.run(
+        ["/bin/bash", str(SCRIPTS_DIR / "dev-desktop.sh")],
+        cwd=PROJECT_ROOT,
+        env=env,
+        check=True,
+    )
+
+    config = json.loads(capture_path.read_text(encoding="utf-8"))
+    assert config["build"]["devUrl"] == "http://127.0.0.1:4175"
+    assert config["build"]["beforeDevCommand"] == "bash scripts/dev-vite.sh"
 
 
 @pytest.mark.skipif(shutil.which("xvfb-run") is None, reason="xvfb-run is required")

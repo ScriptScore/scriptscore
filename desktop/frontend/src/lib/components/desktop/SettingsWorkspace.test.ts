@@ -346,6 +346,58 @@ describe('SettingsWorkspace', () => {
     expect(screen.getByLabelText('Vision model')).toBeInstanceOf(HTMLInputElement);
   });
 
+  it('commits local Ollama Base URL edits only after Accept in settings', async () => {
+    const settings: AppSettings = {
+      ...defaultAppSettings,
+      llmProvider: 'ollama_native',
+      llmBaseUrl: 'http://127.0.0.1:11434',
+      llmModel: 'qwen3.5:9b',
+      llmApiKey: null
+    };
+    const onSettingsChange = vi.fn();
+
+    render(SettingsWorkspace, {
+      settings,
+      visionModels: [{ name: 'qwen3.5:9b', displayName: 'qwen3.5:9b' }],
+      onSettingsChange
+    });
+
+    expect(screen.queryByRole('button', { name: 'Accept' })).toBeNull();
+
+    const baseUrlInput = screen.getAllByLabelText('Base URL')[0] as HTMLInputElement;
+    await fireEvent.input(baseUrlInput, { target: { value: 'http://127.0.0.1:11435' } });
+
+    expect(settings.llmBaseUrl).toBe('http://127.0.0.1:11434');
+    expect(onSettingsChange).not.toHaveBeenCalled();
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Accept' }));
+
+    expect(settings.llmBaseUrl).toBe('http://127.0.0.1:11435');
+    expect(onSettingsChange).toHaveBeenCalledWith(
+      expect.objectContaining({ llmBaseUrl: 'http://127.0.0.1:11435' })
+    );
+  });
+
+  it('disables local Ollama endpoint and model controls while settings discovery is busy', () => {
+    const settings: AppSettings = {
+      ...defaultAppSettings,
+      llmProvider: 'ollama_native',
+      llmBaseUrl: 'http://127.0.0.1:11434',
+      llmModel: 'qwen3.5:9b',
+      llmApiKey: null
+    };
+
+    render(SettingsWorkspace, {
+      settings,
+      visionModelsBusy: true,
+      visionModels: [{ name: 'qwen3.5:9b', displayName: 'qwen3.5:9b' }]
+    });
+
+    expect((screen.getAllByLabelText('Base URL')[0] as HTMLInputElement).disabled).toBe(true);
+    expect(screen.queryByRole('button', { name: 'Accept' })).toBeNull();
+    expect((screen.getByRole('combobox', { name: 'Vision model: qwen3.5:9b' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it('does not fire provider changes when reselecting the current provider option', async () => {
     const settings: AppSettings = {
       ...defaultAppSettings,

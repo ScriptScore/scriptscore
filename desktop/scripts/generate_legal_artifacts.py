@@ -65,6 +65,21 @@ BLOCKED_PATTERNS = (
     "field-of-use",
     "proprietary",
 )
+PYTHON_LICENSE_REPLACEMENTS = {
+    "aistudio-sdk": (
+        "LicenseRef-REVIEW-aistudio-sdk",
+        "Upstream wheel metadata declares License: UNKNOWN; keep this runtime "
+        "dependency in release review until upstream publishes usable license "
+        "metadata or the dependency is removed.",
+    ),
+    "scipy": (
+        "BSD-3-Clause AND BSD-3-Clause-Open-MPI AND GPL-3.0-or-later WITH "
+        "GCC-exception-3.1",
+        "SciPy wheel metadata embeds full bundled-library notices. Classify the "
+        "effective license expressions so blocked-word scans do not match GPL "
+        "runtime exception prose.",
+    ),
+}
 NATIVE_SUFFIXES = {".so", ".dylib", ".dll", ".pyd"}
 ASSET_SUFFIXES = {
     ".avif",
@@ -159,6 +174,14 @@ def license_tokens(value: str | None) -> set[str]:
     if not value:
         return set()
     return set(re.findall(r"[A-Za-z0-9][A-Za-z0-9+.-]*", value))
+
+
+def python_license_metadata(row: dict[str, Any]) -> tuple[str | None, str | None]:
+    replacement = PYTHON_LICENSE_REPLACEMENTS.get(row["name"].lower())
+    if replacement is not None:
+        license_value, notice = replacement
+        return normalize_license(license_value), notice
+    return normalize_license(row.get("license")), None
 
 
 def classify_item(item: InventoryItem) -> PolicyFinding | None:
@@ -310,17 +333,21 @@ print(json.dumps(rows, sort_keys=True))
 
     rows = json.loads(completed.stdout)
     scope = "python-runtime" if portable_release else "python-smoke-runtime"
-    return [
-        InventoryItem(
-            name=row["name"],
-            version=row.get("version"),
-            license=normalize_license(row.get("license")),
-            source="python",
-            scope=scope,
-            runtime=portable_release,
+    items: list[InventoryItem] = []
+    for row in sorted(rows, key=lambda row: row["name"].lower()):
+        license_value, notice = python_license_metadata(row)
+        items.append(
+            InventoryItem(
+                name=row["name"],
+                version=row.get("version"),
+                license=license_value,
+                source="python",
+                scope=scope,
+                runtime=portable_release,
+                notice=notice,
+            )
         )
-        for row in sorted(rows, key=lambda row: row["name"].lower())
-    ]
+    return items
 
 
 def npm_inventory(lock_path: Path) -> list[InventoryItem]:

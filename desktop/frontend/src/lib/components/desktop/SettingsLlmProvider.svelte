@@ -5,7 +5,7 @@
   import type { AppSettings, VisionCapableModel } from '$lib/types';
   import ConnectionTicker from './ConnectionTicker.svelte';
   import { createOllamaOnboardingValidator } from './onboardingValidation';
-  import { InlineMessage, SelectField, TextField } from './ui';
+  import { InlineMessage, SelectField, TextField, compactTabActionButtonClass } from './ui';
 
   export let settings: AppSettings;
   export let visionModels: VisionCapableModel[] = [];
@@ -25,6 +25,9 @@
     { value: 'ollama_cloud', label: 'ollama_cloud' }
   ];
 
+  let localBaseUrlDraft = '';
+  let lastCommittedLocalBaseUrl = '';
+
   $: modelOptions =
     settings.llmModel && !visionModels.some((model) => model.name === settings.llmModel)
       ? [{ name: settings.llmModel, displayName: `${settings.llmModel} (current)` }, ...visionModels]
@@ -38,6 +41,15 @@
             label: visionModelsBusy ? 'Loading local models...' : 'No vision models found'
           }
         ];
+  $: if (settings.llmProvider === 'ollama_native' && settings.llmBaseUrl !== lastCommittedLocalBaseUrl) {
+    localBaseUrlDraft = settings.llmBaseUrl;
+    lastCommittedLocalBaseUrl = settings.llmBaseUrl;
+  }
+  $: if (settings.llmProvider !== 'ollama_native') {
+    localBaseUrlDraft = settings.llmBaseUrl;
+    lastCommittedLocalBaseUrl = settings.llmBaseUrl;
+  }
+  $: localBaseUrlChanged = localBaseUrlDraft.trim() !== settings.llmBaseUrl.trim();
 
   $: {
     ollamaCloudValidator.handle(
@@ -65,6 +77,15 @@
     }
     void onChange?.();
   }
+
+  function acceptLocalBaseUrl() {
+    if (visionModelsBusy || !localBaseUrlChanged) {
+      return;
+    }
+    settings.llmBaseUrl = localBaseUrlDraft;
+    lastCommittedLocalBaseUrl = localBaseUrlDraft;
+    void onChange?.();
+  }
 </script>
 
 <section class={framed ? 'rounded-2xl bg-surface-card-subtle p-4' : 'py-1'}>
@@ -84,14 +105,51 @@
       onChange={handleLlmProviderChange}
     />
 
-    <TextField
-      label="Base URL"
-      value={settings.llmBaseUrl}
-      oninput={(event: Event) => {
-        settings.llmBaseUrl = (event.currentTarget as HTMLInputElement).value;
-        void onChange?.();
-      }}
-    />
+    {#if settings.llmProvider === 'ollama_native'}
+      {#if localBaseUrlChanged}
+        <TextField
+          label="Base URL"
+          value={localBaseUrlDraft}
+          disabled={visionModelsBusy}
+          oninput={(event: Event) => {
+            localBaseUrlDraft = (event.currentTarget as HTMLInputElement).value;
+          }}
+          onkeydown={(event: KeyboardEvent) => {
+            if (event.key === 'Enter') {
+              acceptLocalBaseUrl();
+            }
+          }}
+        >
+          <button
+            slot="trailing"
+            type="button"
+            class={compactTabActionButtonClass}
+            disabled={visionModelsBusy}
+            onclick={acceptLocalBaseUrl}
+          >
+            Accept
+          </button>
+        </TextField>
+      {:else}
+        <TextField
+          label="Base URL"
+          value={localBaseUrlDraft}
+          disabled={visionModelsBusy}
+          oninput={(event: Event) => {
+            localBaseUrlDraft = (event.currentTarget as HTMLInputElement).value;
+          }}
+        />
+      {/if}
+    {:else}
+      <TextField
+        label="Base URL"
+        value={settings.llmBaseUrl}
+        oninput={(event: Event) => {
+          settings.llmBaseUrl = (event.currentTarget as HTMLInputElement).value;
+          void onChange?.();
+        }}
+      />
+    {/if}
 
     {#if settings.llmProvider === 'ollama_native'}
       <SelectField
@@ -100,7 +158,7 @@
         options={visionModelOptions}
         searchable
         searchPlaceholder="Search models"
-        disabled={visionModelsBusy && modelOptions.length === 0}
+        disabled={visionModelsBusy || modelOptions.length === 0}
         onChange={(value) => {
           settings.llmModel = value;
           void onChange?.();

@@ -97,9 +97,21 @@ try {
     New-Item -ItemType Directory -Force -Path $DetDest, $RecDest | Out-Null
 
     Write-Host "Installing detector into $DetDest"
+    Remove-Item -Force -ErrorAction SilentlyContinue -LiteralPath `
+        (Join-Path $DetDest "inference.json"), `
+        (Join-Path $DetDest "inference.pdmodel"), `
+        (Join-Path $DetDest "inference.pdiparams"), `
+        (Join-Path $DetDest "inference.pdiparams.info"), `
+        (Join-Path $DetDest "inference.yml")
     Copy-Item -Path (Join-Path $DetSrc "*") -Destination $DetDest -Force
 
     Write-Host "Installing recognizer into $RecDest"
+    Remove-Item -Force -ErrorAction SilentlyContinue -LiteralPath `
+        (Join-Path $RecDest "inference.json"), `
+        (Join-Path $RecDest "inference.pdmodel"), `
+        (Join-Path $RecDest "inference.pdiparams"), `
+        (Join-Path $RecDest "inference.pdiparams.info"), `
+        (Join-Path $RecDest "inference.yml")
     Copy-Item -Path (Join-Path $RecSrc "*") -Destination $RecDest -Force
 
     Assert-ModelDir -ModelDir $DetDest

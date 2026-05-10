@@ -78,6 +78,26 @@ if [[ -z "${SCRIPTSCORE_DESKTOP_PORTABLE_PYTHON_ROOT:-}" ]] && [[ "${AUTO_PORTAB
   fi
 fi
 
+if [[ "$(uname -s)" == "Linux" ]] && bundle_selection_includes "${BUNDLES}" "appimage"; then
+  bundled_python_lib="${DESKTOP_ROOT}/dist/bundled-runtime/python/lib"
+  bundled_python_library_paths=()
+  if [[ -d "${bundled_python_lib}" ]]; then
+    bundled_python_library_paths+=("${bundled_python_lib}")
+    while IFS= read -r shared_library_dir; do
+      bundled_python_library_paths+=("${shared_library_dir}")
+    done < <(
+      find "${bundled_python_lib}" -type f \( -name "*.so" -o -name "*.so.*" \) \
+        -exec dirname {} \; |
+        sort -u
+    )
+
+    old_ifs=${IFS}
+    IFS=:
+    export LD_LIBRARY_PATH="${bundled_python_library_paths[*]}${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+    IFS=${old_ifs}
+  fi
+fi
+
 build_cmd=(
   cargo
   tauri
@@ -92,6 +112,10 @@ fi
 
 if [[ -n "${TARGET}" ]]; then
   build_cmd+=(--target "${TARGET}")
+fi
+
+if [[ "${SCRIPTSCORE_DESKTOP_VERBOSE_TAURI:-0}" == "1" ]]; then
+  build_cmd+=(--verbose)
 fi
 
 "${build_cmd[@]}"

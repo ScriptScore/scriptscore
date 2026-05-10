@@ -64,6 +64,49 @@ def test_license_policy_allows_permissive_and_flags_unknown_runtime() -> None:
     assert "Asset or native binary" in model_finding.message
 
 
+def test_python_license_replacements_stay_in_release_review() -> None:
+    scipy_license, scipy_notice = legal.python_license_metadata(
+        {
+            "name": "scipy",
+            "version": "1.17.1",
+            "license": "BSD-3-Clause plus GPL exception prose mentioning NonCommercial",
+        }
+    )
+    scipy = legal.InventoryItem(
+        name="scipy",
+        version="1.17.1",
+        license=scipy_license,
+        source="python",
+        scope="python-runtime",
+        runtime=True,
+        notice=scipy_notice,
+    )
+    scipy_finding = legal.classify_item(scipy)
+
+    assert scipy_notice
+    assert "GCC-exception-3.1" in scipy_license
+    assert scipy_finding.severity == "review_required"
+    assert "GPL/LGPL" in scipy_finding.message
+
+    aistudio_license, aistudio_notice = legal.python_license_metadata(
+        {"name": "aistudio-sdk", "version": "0.3.8", "license": "UNKNOWN"}
+    )
+    aistudio = legal.InventoryItem(
+        name="aistudio-sdk",
+        version="0.3.8",
+        license=aistudio_license,
+        source="python",
+        scope="python-runtime",
+        runtime=True,
+        notice=aistudio_notice,
+    )
+    aistudio_finding = legal.classify_item(aistudio)
+
+    assert aistudio_notice
+    assert aistudio_license == "LicenseRef-REVIEW-aistudio-sdk"
+    assert aistudio_finding.severity == "review_required"
+
+
 def test_npm_and_cargo_inventory_parse_fixture_metadata(tmp_path: Path) -> None:
     lock_path = tmp_path / "package-lock.json"
     write_json(

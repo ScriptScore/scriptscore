@@ -2,6 +2,23 @@ name: RC Package Validation
 
 on:
   workflow_dispatch:
+    inputs:
+      fast_track:
+        description: "Skip expensive quality gates while iterating on package assembly."
+        required: false
+        default: false
+        type: boolean
+      package_platform:
+        description: "Package platform to build. Use all to build every platform."
+        required: false
+        default: all
+        type: choice
+        options:
+          - all
+          - macos-intel
+          - macos-arm64
+          - windows-x64
+          - linux-x64
   push:
     tags:
       - "v*"
@@ -11,8 +28,98 @@ permissions:
   contents: read
 
 jobs:
+  define-package-matrix:
+    name: Define package matrix
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - name: Select package matrix
+        id: matrix
+        shell: bash
+        run: |
+          python3 <<'PY'
+          import json
+          import os
+
+          packages = [
+              {
+                  "label": "macos-intel",
+                  "runner": "macos-15-intel",
+                  "rust_target": "x86_64-apple-darwin",
+                  "python_target": "x86_64-apple-darwin",
+                  "bundles": "dmg",
+                  "artifact_name": "scriptscore-rc-macos-intel-unsigned-preview",
+              },
+              {
+                  "label": "macos-arm64",
+                  "runner": "macos-15",
+                  "rust_target": "aarch64-apple-darwin",
+                  "python_target": "aarch64-apple-darwin",
+                  "bundles": "dmg",
+                  "artifact_name": "scriptscore-rc-macos-arm64-unsigned-preview",
+              },
+              {
+                  "label": "windows-x64",
+                  "runner": "windows-latest",
+                  "rust_target": "x86_64-pc-windows-msvc",
+                  "python_target": "x86_64-pc-windows-msvc-shared",
+                  "bundles": "nsis,msi",
+                  "artifact_name": "scriptscore-rc-windows-x64",
+              },
+              {
+                  "label": "linux-x64",
+                  "runner": "ubuntu-22.04",
+                  "rust_target": "x86_64-unknown-linux-gnu",
+                  "python_target": "x86_64-unknown-linux-gnu",
+                  "bundles": "appimage,deb,rpm",
+                  "artifact_name": "scriptscore-rc-linux-x64",
+              },
+          ]
+
+          selected = os.environ.get("PACKAGE_PLATFORM", "all")
+          if selected != "all":
+              packages = [package for package in packages if package["label"] == selected]
+          if not packages:
+              raise SystemExit(f"Unknown package platform: {selected}")
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              print(f"matrix={json.dumps({'include': packages}, separators=(',', ':'))}", file=output)
+          PY
+        env:
+          PACKAGE_PLATFORM: ${{ inputs.package_platform || 'all' }}
+
+  prepare-paddle-models:
+    name: Prepare Paddle models
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Paddle model resources
+        run: |
+          cli/scripts/install_paddle_models.sh cli/models/paddle
+          test -f cli/models/paddle/det/inference.yml
+          test -f cli/models/paddle/det/inference.pdiparams
+          test -f cli/models/paddle/rec/inference.yml
+          test -f cli/models/paddle/rec/inference.pdiparams
+
+      - name: Pack Paddle model resources
+        run: tar -czf paddle-models.tar.gz -C cli/models paddle
+
+      - name: Upload Paddle model resources
+        uses: actions/upload-artifact@v4
+        with:
+          name: scriptscore-paddle-models
+          if-no-files-found: error
+          path: paddle-models.tar.gz
+
   package:
     name: ${{ matrix.label }}
+    needs:
+      - define-package-matrix
+      - prepare-paddle-models
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 120
     defaults:
@@ -20,32 +127,7 @@ jobs:
         shell: bash
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - label: macos-intel
-            runner: macos-15-intel
-            rust_target: x86_64-apple-darwin
-            python_target: x86_64-apple-darwin
-            bundles: dmg
-            artifact_name: scriptscore-rc-macos-intel-unsigned-preview
-          - label: macos-arm64
-            runner: macos-15
-            rust_target: aarch64-apple-darwin
-            python_target: aarch64-apple-darwin
-            bundles: dmg
-            artifact_name: scriptscore-rc-macos-arm64-unsigned-preview
-          - label: windows-x64
-            runner: windows-latest
-            rust_target: x86_64-pc-windows-msvc
-            python_target: x86_64-pc-windows-msvc-shared
-            bundles: nsis,msi
-            artifact_name: scriptscore-rc-windows-x64
-          - label: linux-x64
-            runner: ubuntu-latest
-            rust_target: x86_64-unknown-linux-gnu
-            python_target: x86_64-unknown-linux-gnu
-            bundles: appimage,deb,rpm
-            artifact_name: scriptscore-rc-linux-x64
+      matrix: ${{ fromJSON(needs.define-package-matrix.outputs.matrix) }}
     env:
       SCRIPTSCORE_DESKTOP_BUNDLES: ${{ matrix.bundles }}
       SCRIPTSCORE_DESKTOP_TARGET: ${{ matrix.rust_target }}
@@ -94,9 +176,12 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
+            appstream \
+            binutils \
             build-essential \
             curl \
             cpio \
+            desktop-file-utils \
             dpkg-dev \
             fakeroot \
             file \
@@ -111,18 +196,20 @@ jobs:
             pkg-config \
             rpm \
             squashfs-tools \
-            wget
+            wget \
+            zsync
 
       - name: Install Windows package dependencies
         if: ${{ runner.os == 'Windows' }}
         shell: powershell
-        run: choco install nsis wixtoolset -y --no-progress
+        run: choco install lessmsi nsis wixtoolset -y --no-progress
 
       - name: Install frontend dependencies
         working-directory: desktop/frontend
         run: npm ci
 
       - name: Install CLI fast-quality dependencies
+        if: ${{ !inputs.fast_track }}
         working-directory: cli
         run: uv sync --only-group ci-runtime --only-group quality --no-install-project --frozen
 
@@ -138,6 +225,7 @@ jobs:
         run: cargo install tauri-cli --version '^2'
 
       - name: CLI fast-quality gate
+        if: ${{ !inputs.fast_track }}
         working-directory: cli
         run: |
           uv run --no-sync ruff check .
@@ -145,13 +233,20 @@ jobs:
           uv run --no-sync mypy
 
       - name: Frontend quality gate
+        if: ${{ !inputs.fast_track }}
         working-directory: desktop/frontend
         run: |
           npm run lint
           npm run check
           npm test
 
+      - name: Prepare Tauri resource directories
+        run: |
+          mkdir -p desktop/dist/bundled-runtime
+          mkdir -p desktop/dist/legal
+
       - name: Desktop host quality gate
+        if: ${{ !inputs.fast_track }}
         run: |
           cargo fmt --check --manifest-path desktop/src-tauri/Cargo.toml
           cargo clippy --manifest-path desktop/src-tauri/Cargo.toml --workspace --all-targets --all-features --target "${SCRIPTSCORE_DESKTOP_TARGET}" -- -D warnings
@@ -188,6 +283,22 @@ jobs:
           ./desktop/scripts/prepare-portable-python.sh
           echo "SCRIPTSCORE_DESKTOP_PORTABLE_PYTHON_ROOT=$(pwd)/desktop/dist/portable-python" >> "${GITHUB_ENV}"
 
+      - name: Download Paddle model resources
+        uses: actions/download-artifact@v4
+        with:
+          name: scriptscore-paddle-models
+          path: desktop/dist/paddle-model-artifact
+
+      - name: Extract Paddle model resources
+        run: |
+          rm -rf cli/models/paddle
+          mkdir -p cli/models
+          tar -xzf desktop/dist/paddle-model-artifact/paddle-models.tar.gz -C cli/models
+          test -f cli/models/paddle/det/inference.yml
+          test -f cli/models/paddle/det/inference.pdiparams
+          test -f cli/models/paddle/rec/inference.yml
+          test -f cli/models/paddle/rec/inference.pdiparams
+
       - name: Prepare bundled runtime and legal artifacts
         run: |
           ./desktop/scripts/prepare-bundled-runtime.sh
@@ -196,7 +307,13 @@ jobs:
           python desktop/scripts/check_scriptscoreplus_boundary.py
 
       - name: Build Tauri packages
-        run: ./desktop/scripts/build-desktop-package.sh "${SCRIPTSCORE_DESKTOP_BUNDLES}"
+        run: |
+          if [[ "${RUNNER_OS}" == "Linux" ]]; then
+            export DEBUG=1
+            export NO_STRIP=true
+            export SCRIPTSCORE_DESKTOP_VERBOSE_TAURI=1
+          fi
+          ./desktop/scripts/build-desktop-package.sh "${SCRIPTSCORE_DESKTOP_BUNDLES}"
 
       - name: Smoke AppImage extraction
         if: ${{ runner.os == 'Linux' }}
@@ -206,12 +323,23 @@ jobs:
           chmod +x "${appimage}"
           tmp_dir=$(mktemp -d)
           payload_root="$(pwd)/desktop/dist/package-payload/${{ matrix.label }}"
+          rm -rf "${payload_root}"
           mkdir -p "${payload_root}"
           (
             cd "${tmp_dir}"
-            "${GITHUB_WORKSPACE}/${appimage}" --appimage-extract >/tmp/scriptscore-appimage-extract.log
+            set +e
+            "${GITHUB_WORKSPACE}/${appimage}" --appimage-extract >/tmp/scriptscore-appimage-extract.log 2>&1
+            extract_status=$?
+            set -e
             test -d squashfs-root
-            test -d squashfs-root/usr
+            if [[ ${extract_status} -ne 0 ]]; then
+              echo "warning: AppImage extraction returned ${extract_status} after creating squashfs-root" >&2
+              cat /tmp/scriptscore-appimage-extract.log >&2
+            fi
+            if [[ ! -d squashfs-root/usr ]]; then
+              echo "warning: AppImage extraction did not create squashfs-root/usr; verifier will inspect extracted payload" >&2
+              find squashfs-root -maxdepth 2 -mindepth 1 -print | sort | sed -n '1,80p' >&2
+            fi
             cp -R squashfs-root "${payload_root}/appimage"
           )
           deb=$(find desktop/src-tauri/target -type f -name '*.deb' | head -n 1)
@@ -223,7 +351,14 @@ jobs:
           mkdir -p "${payload_root}/rpm"
           (
             cd "${payload_root}/rpm"
+            set +e
             rpm2cpio "${GITHUB_WORKSPACE}/${rpm}" | cpio -idmu
+            rpm_extract_status=$?
+            set -e
+            test -n "$(find . -mindepth 1 -print -quit)"
+            if [[ ${rpm_extract_status} -ne 0 ]]; then
+              echo "warning: RPM extraction returned ${rpm_extract_status} after producing files" >&2
+            fi
           )
 
       - name: Mount unsigned preview DMG
@@ -245,17 +380,20 @@ jobs:
         shell: powershell
         run: |
           $payloadRoot = Join-Path (Get-Location) "desktop/dist/package-payload/${{ matrix.label }}"
+          $inspectionRoot = Join-Path (Get-Location) "desktop/dist/package-inspection/${{ matrix.label }}"
           New-Item -ItemType Directory -Force -Path $payloadRoot | Out-Null
+          New-Item -ItemType Directory -Force -Path $inspectionRoot | Out-Null
 
           $msi = Get-ChildItem desktop/src-tauri/target -Recurse -Filter *.msi | Select-Object -First 1
           if ($null -eq $msi) { throw "MSI package was not found" }
-          $msiPayload = Join-Path $payloadRoot "msi"
+          $msiPayload = Join-Path $inspectionRoot "msi"
           New-Item -ItemType Directory -Force -Path $msiPayload | Out-Null
-          $msiArgs = "/a `"$($msi.FullName)`" /qn TARGETDIR=`"$msiPayload`""
-          $msiProcess = Start-Process msiexec.exe -ArgumentList $msiArgs -Wait -PassThru
-          if ($msiProcess.ExitCode -ne 0) { throw "MSI administrative extraction failed with exit code $($msiProcess.ExitCode)" }
+          lessmsi.exe x $msi.FullName "$msiPayload\"
+          if ($LASTEXITCODE -ne 0) { throw "MSI extraction failed with exit code $LASTEXITCODE" }
 
-          $nsis = Get-ChildItem desktop/src-tauri/target -Recurse -Filter *.exe | Select-Object -First 1
+          $nsis = Get-ChildItem desktop/src-tauri/target -Recurse -Filter *setup.exe |
+            Where-Object { $_.FullName -like "*\bundle\nsis\*" } |
+            Select-Object -First 1
           if ($null -eq $nsis) { throw "NSIS package was not found" }
           $nsisPayload = Join-Path $payloadRoot "nsis"
           New-Item -ItemType Directory -Force -Path $nsisPayload | Out-Null
@@ -269,14 +407,90 @@ jobs:
             --bundles "${SCRIPTSCORE_DESKTOP_BUNDLES}"
             --target-triple "${SCRIPTSCORE_DESKTOP_TARGET}"
           )
-          payload_root="desktop/dist/package-payload/${{ matrix.label }}"
-          if [[ -d "${payload_root}" ]]; then
-            while IFS= read -r payload_dir; do
-              verify_args+=(--payload-root "${payload_dir}")
-            done < <(find "${payload_root}" -mindepth 1 -maxdepth 1 -type d | sort)
-          fi
+          for payload_parent in \
+            "desktop/dist/package-payload/${{ matrix.label }}" \
+            "desktop/dist/package-inspection/${{ matrix.label }}"
+          do
+            if [[ -d "${payload_parent}" ]]; then
+              while IFS= read -r payload_dir; do
+                verify_args+=(--payload-root "${payload_dir}")
+              done < <(find "${payload_parent}" -mindepth 1 -maxdepth 1 -type d | sort)
+            fi
+          done
           python desktop/scripts/verify-release-package-artifacts.py \
             "${verify_args[@]}"
+
+      - name: Stage release assets
+        run: |
+          if command -v python3 >/dev/null 2>&1; then
+            release_python=python3
+          else
+            release_python=python
+          fi
+          "${release_python}" <<'PY'
+          import json
+          import shutil
+          from pathlib import Path
+
+          label = "${{ matrix.label }}"
+          version = json.loads(Path("desktop/src-tauri/tauri.conf.json").read_text(encoding="utf-8"))[
+              "version"
+          ]
+          bundle_root = Path("desktop/src-tauri/target")
+          output_dir = Path("desktop/dist/release-assets") / label
+          package_dirs = {"appimage", "deb", "dmg", "msi", "nsis", "rpm"}
+          target_names = {
+              ("macos-intel", ".dmg"): f"ScriptScore-Desktop-{version}-macos-intel.dmg",
+              ("macos-arm64", ".dmg"): f"ScriptScore-Desktop-{version}-macos-arm64.dmg",
+              ("windows-x64", ".exe"): f"ScriptScore-Desktop-{version}-windows-x64-setup.exe",
+              ("windows-x64", ".msi"): f"ScriptScore-Desktop-{version}-windows-x64.msi",
+              ("linux-x64", ".AppImage"): f"ScriptScore-Desktop-{version}-linux-x64.AppImage",
+              ("linux-x64", ".deb"): f"ScriptScore-Desktop-{version}-linux-x64.deb",
+              ("linux-x64", ".rpm"): f"ScriptScore-Desktop-{version}-linux-x64.rpm",
+          }
+
+          if output_dir.exists():
+              shutil.rmtree(output_dir)
+          output_dir.mkdir(parents=True)
+
+          staged: dict[str, Path] = {}
+          for package_file in sorted(bundle_root.rglob("*")):
+              if not package_file.is_file() or package_file.parent.name.lower() not in package_dirs:
+                  continue
+              suffix = package_file.suffix
+              if suffix.lower() != ".appimage":
+                  suffix = suffix.lower()
+              destination_name = target_names.get((label, suffix))
+              if destination_name is None:
+                  continue
+              if destination_name in staged:
+                  raise SystemExit(
+                      f"Multiple package files map to {destination_name}: "
+                      f"{staged[destination_name]} and {package_file}"
+                  )
+              staged[destination_name] = package_file
+              shutil.copy2(package_file, output_dir / destination_name)
+
+          expected_names = {
+              target_names[(label, ".AppImage")]
+              for bundle in "${{ matrix.bundles }}".split(",")
+              if bundle == "appimage"
+          }
+          expected_names.update(
+              target_names[(label, f".{bundle}")]
+              for bundle in "${{ matrix.bundles }}".split(",")
+              if bundle in {"deb", "dmg", "msi", "rpm"}
+          )
+          if "nsis" in "${{ matrix.bundles }}".split(","):
+              expected_names.add(target_names[(label, ".exe")])
+
+          missing = sorted(expected_names.difference(staged))
+          if missing:
+              raise SystemExit(f"Missing staged release asset(s): {', '.join(missing)}")
+
+          for destination_name, source in sorted(staged.items()):
+              print(f"staged {source} -> {output_dir / destination_name}")
+          PY
 
       - name: Upload package artifacts
         uses: actions/upload-artifact@v4
@@ -284,13 +498,82 @@ jobs:
           name: ${{ matrix.artifact_name }}
           if-no-files-found: error
           path: |
-            desktop/src-tauri/target/**/release/bundle/**/*.AppImage
-            desktop/src-tauri/target/**/release/bundle/**/*.deb
-            desktop/src-tauri/target/**/release/bundle/**/*.dmg
-            desktop/src-tauri/target/**/release/bundle/**/*.exe
-            desktop/src-tauri/target/**/release/bundle/**/*.msi
-            desktop/src-tauri/target/**/release/bundle/**/*.rpm
+            desktop/dist/release-assets/${{ matrix.label }}/*
             desktop/dist/release-package-validation/${{ matrix.label }}/SHA256SUMS
             desktop/dist/release-package-validation/${{ matrix.label }}/summary.json
-            desktop/dist/bundled-runtime/runtime-manifest.json
-            desktop/dist/legal/**
+
+  publish-release-assets:
+    name: Publish draft prerelease assets
+    if: ${{ startsWith(github.ref, 'refs/tags/rc-') }}
+    needs: package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download package artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: scriptscore-rc-*
+          path: release-artifacts
+          merge-multiple: true
+
+      - name: Prepare release assets
+        run: |
+          python3 <<'PY'
+          import hashlib
+          import shutil
+          from pathlib import Path
+
+          source_root = Path("release-artifacts")
+          output_dir = Path("release-assets")
+          package_suffixes = {".AppImage", ".deb", ".dmg", ".exe", ".msi", ".rpm"}
+
+          if output_dir.exists():
+              shutil.rmtree(output_dir)
+          output_dir.mkdir()
+
+          staged: list[Path] = []
+          for source in sorted(source_root.rglob("*")):
+              if not source.is_file() or source.name == "SHA256SUMS":
+                  continue
+              if source.suffix not in package_suffixes:
+                  continue
+              destination = output_dir / source.name
+              if destination.exists():
+                  raise SystemExit(f"Duplicate release asset name: {source.name}")
+              shutil.copy2(source, destination)
+              staged.append(destination)
+
+          if not staged:
+              raise SystemExit("No release assets were found in downloaded package artifacts.")
+
+          with (output_dir / "SHA256SUMS").open("w", encoding="utf-8") as handle:
+              for asset in sorted(staged, key=lambda path: path.name):
+                  digest = hashlib.sha256(asset.read_bytes()).hexdigest()
+                  handle.write(f"{digest}  {asset.name}\n")
+
+          for asset in sorted(output_dir.iterdir()):
+              print(asset)
+          PY
+
+      - name: Create or update draft prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          release_title="ScriptScore ${TAG_NAME}"
+          release_notes="Draft RC package assets from ${GITHUB_WORKFLOW} run ${GITHUB_RUN_NUMBER}."
+          if gh release view "${TAG_NAME}" >/dev/null 2>&1; then
+            gh release edit "${TAG_NAME}" \
+              --draft \
+              --prerelease \
+              --title "${release_title}" \
+              --notes "${release_notes}"
+          else
+            gh release create "${TAG_NAME}" \
+              --draft \
+              --prerelease \
+              --title "${release_title}" \
+              --notes "${release_notes}"
+          fi
+          gh release upload "${TAG_NAME}" release-assets/* --clobber

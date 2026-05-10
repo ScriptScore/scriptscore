@@ -24,6 +24,7 @@ export { default as TextareaField } from './TextareaField.svelte';
 export { default as TextField } from './TextField.svelte';
 export { default as ToggleRow } from './ToggleRow.svelte';
 export { default as ToneIcon } from './ToneIcon.svelte';
+export { compactTabActionButtonClass, compactWorkspaceTabActionButtonClass } from './buttonClasses';
 export { feedbackRole, feedbackToneClass, type FeedbackTone } from './feedback';
 export type {
   ImageRegion,

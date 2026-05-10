@@ -4,8 +4,8 @@
   "version": "0.1.0",
   "identifier": "com.scriptscore.desktop",
   "build": {
-    "beforeDevCommand": "bash \"${SCRIPTSCORE_DESKTOP_DIR:-..}/scripts/dev-vite.sh\"",
-    "beforeBuildCommand": "bash \"${SCRIPTSCORE_DESKTOP_DIR:-..}/scripts/build-release-assets.sh\"",
+    "beforeDevCommand": "bash scripts/dev-vite.sh",
+    "beforeBuildCommand": "bash ../scripts/build-release-assets.sh",
     "frontendDist": "../frontend/build",
     "devUrl": "http://127.0.0.1:5173"
   },
