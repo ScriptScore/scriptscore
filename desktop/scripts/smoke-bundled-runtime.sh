@@ -41,6 +41,9 @@ python_path_entries = [
 ]
 
 env = os.environ.copy()
+# AppImageKit can inherit PYTHONHOME=$APPDIR/usr, which breaks portable Python.
+env["PYTHONHOME"] = os.path.join(runtime_root, "appimagekit-pythonhome-poison")
+env.pop("PYTHONHOME", None)
 if python_path_entries:
     existing = env.get("PYTHONPATH", "")
     env["PYTHONPATH"] = os.pathsep.join(

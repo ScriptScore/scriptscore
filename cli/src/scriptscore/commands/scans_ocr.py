@@ -22,6 +22,7 @@ from pydantic import BaseModel, ConfigDict
 from scriptscore.contracts import ErrorCategory, ScriptscoreError
 from scriptscore.ocr.easyocr import _suppress_easyocr_runtime_warnings
 from scriptscore.pii_scan.reader import create_reader
+from scriptscore.pii_scan.types import ReadResult
 from scriptscore.runtime import CommandContext, CommandOutcome, CommandSpec
 
 
@@ -74,7 +75,7 @@ def _paddle_model_dir() -> Path | None:
     return repo_dir if repo_dir.exists() else None
 
 
-def _load_paddle_ocr_engine() -> Any | None:
+def _load_paddle_reader() -> Any | None:
     model_dir = _paddle_model_dir()
     if model_dir is None:
         return None
@@ -82,10 +83,9 @@ def _load_paddle_ocr_engine() -> Any | None:
         import contextlib
 
         with contextlib.redirect_stdout(io.StringIO()):
-            reader = create_reader(model_dir)
+            return create_reader(model_dir)
     except Exception:
         return None
-    return getattr(reader, "_engine", None)
 
 
 def _read_stdin_png_bytes(*, max_bytes: int = 10_000_000) -> bytes:
@@ -286,38 +286,16 @@ def _hint_text_from_easyocr_results(results: Any) -> tuple[str, int]:
     return _clean_ocr_hint_text(" ".join(r[2] for r in rows)), segment_count
 
 
-def _collect_text_score_pairs(value: Any) -> list[tuple[str, float | None]]:
-    pairs: list[tuple[str, float | None]] = []
-    if isinstance(value, dict):
-        texts = value.get("rec_texts") or []
-        scores = value.get("rec_scores") or []
-        for index, raw_text in enumerate(texts):
-            raw_score = scores[index] if index < len(scores) else None
-            try:
-                score = float(raw_score) if raw_score is not None else None
-            except (TypeError, ValueError):
-                score = None
-            text = str(raw_text).strip()
-            if text:
-                pairs.append((text, score))
-        return pairs
-    if isinstance(value, list | tuple):
-        if len(value) >= 2 and isinstance(value[0], str):
-            try:
-                score = float(value[1])
-            except (TypeError, ValueError):
-                score = None
-            text = value[0].strip()
-            return [(text, score)] if text else []
-        for item in value:
-            pairs.extend(_collect_text_score_pairs(item))
-    return pairs
-
-
-def _hint_text_from_paddle_recognition(results: Any) -> tuple[str, int, float | None]:
-    pairs = _collect_text_score_pairs(results)
-    texts = [text for text, _score in pairs if text]
-    scores = [score for _text, score in pairs if score is not None and math.isfinite(score)]
+def _hint_text_from_paddle_read_result(result: ReadResult) -> tuple[str, int, float | None]:
+    tokens = sorted(
+        result.tokens,
+        key=lambda token: (
+            min(corner[1] for corner in token.corners),
+            min(corner[0] for corner in token.corners),
+        ),
+    )
+    texts = [token.text.strip() for token in tokens if token.text.strip()]
+    scores = [token.confidence for token in tokens if math.isfinite(token.confidence)]
     mean_score = sum(scores) / len(scores) if scores else None
     return " ".join(texts).strip(), len(texts), mean_score
 
@@ -339,8 +317,8 @@ def _paddle_hint_score(hint_text: str, mean_score: float | None) -> float:
 
 
 def _read_paddle_hint(raw: bytes) -> tuple[str, int] | None:
-    engine = _load_paddle_ocr_engine()
-    if engine is None:
+    reader = _load_paddle_reader()
+    if reader is None:
         return None
     try:
         import contextlib
@@ -349,8 +327,8 @@ def _read_paddle_hint(raw: bytes) -> tuple[str, int] | None:
         best_hint: tuple[float, str, int] | None = None
         with contextlib.redirect_stdout(io.StringIO()):
             for image in candidates:
-                results = engine.ocr(image, det=False, rec=True, cls=False)
-                hint_text, segment_count, mean_score = _hint_text_from_paddle_recognition(results)
+                result = reader.read(image)
+                hint_text, segment_count, mean_score = _hint_text_from_paddle_read_result(result)
                 cleaned_hint = _clean_ocr_hint_text(hint_text)
                 if not _usable_ocr_hint(cleaned_hint, mean_score):
                     continue

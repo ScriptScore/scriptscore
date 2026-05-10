@@ -3,24 +3,84 @@
 
 from __future__ import annotations
 
+import importlib.metadata
 import importlib.util
 import json
 import os
 import sys
+import tempfile
 from collections.abc import Iterable, Sequence
 from pathlib import Path
 from typing import Any, cast
 
 import cv2
+import yaml
 
 from scriptscore.pii_scan.types import ReadResult, VisionToken
 
 
-def _is_paddle_3_or_newer(version: str) -> bool:
+def _major_version(version: str) -> int | None:
     try:
-        return int(version.split(".", 1)[0]) >= 3
+        return int(version.split(".", 1)[0])
     except ValueError:
-        return False
+        return None
+
+
+def _is_paddle_3_or_newer(version: str) -> bool:
+    major = _major_version(version)
+    return major is not None and major >= 3
+
+
+def _installed_distribution_version(package_name: str) -> str | None:
+    try:
+        return importlib.metadata.version(package_name)
+    except importlib.metadata.PackageNotFoundError:
+        return None
+
+
+def _model_name_from_yaml(model_dir: Path) -> str | None:
+    metadata_path = model_dir / "inference.yml"
+    if not metadata_path.is_file():
+        return None
+    try:
+        payload = yaml.safe_load(metadata_path.read_text(encoding="utf-8"))
+    except yaml.YAMLError as exc:
+        raise RuntimeError(f"invalid PaddleOCR model metadata: {metadata_path}: {exc}") from exc
+    if not isinstance(payload, dict):
+        return None
+    global_config = payload.get("Global")
+    if not isinstance(global_config, dict):
+        return None
+    model_name = global_config.get("model_name")
+    return str(model_name).strip() if model_name is not None else None
+
+
+def _model_names(model_root: Path) -> dict[str, str | None]:
+    return {name: _model_name_from_yaml(model_root / name) for name in ("det", "rec")}
+
+
+def _verify_model_family_compatible(
+    model_root: Path,
+    *,
+    paddleocr_version: str | None,
+) -> None:
+    if paddleocr_version is None:
+        return
+    major = _major_version(paddleocr_version)
+    if major is None:
+        return
+    names = _model_names(model_root)
+    v5_names = {
+        role: name
+        for role, name in names.items()
+        if name is not None and name.startswith("PP-OCRv5")
+    }
+    if v5_names and major < 3:
+        described = ", ".join(f"{role}={name}" for role, name in sorted(v5_names.items()))
+        raise RuntimeError(
+            "PaddleOCR PP-OCRv5 model resources require PaddleOCR 3.x or newer; "
+            f"found paddleocr {paddleocr_version} with {described}"
+        )
 
 
 def _disable_windows_paddle_ir_optim() -> None:
@@ -44,7 +104,7 @@ def _disable_windows_paddle_ir_optim() -> None:
     inference.Config.switch_ir_optim = switch_ir_optim_off  # type: ignore[assignment, method-assign]
 
 
-def verify_model_root(model_root: Path) -> None:
+def verify_model_root(model_root: Path, *, paddleocr_version: str | None = None) -> None:
     """Validate the expected PaddleOCR model layout."""
 
     for name in ("det", "rec"):
@@ -64,6 +124,14 @@ def verify_model_root(model_root: Path) -> None:
             raise RuntimeError(
                 f"PaddleOCR {name} model directory is missing inference.pdiparams: {model_dir}"
             )
+    _verify_model_family_compatible(
+        model_root,
+        paddleocr_version=(
+            _installed_distribution_version("paddleocr")
+            if paddleocr_version is None
+            else paddleocr_version
+        ),
+    )
 
 
 def _token_from_payload(payload: dict[str, Any]) -> VisionToken:
@@ -113,6 +181,10 @@ class PaddleTextReader:
 
         os.environ["DISABLE_MODEL_SOURCE_CHECK"] = "True"
         os.environ["PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK"] = "True"
+        os.environ.setdefault(
+            "PADDLE_PDX_CACHE_HOME",
+            str(Path(tempfile.gettempdir()) / "scriptscore-paddlex-cache"),
+        )
         # On Windows, Paddle can load DLLs before Torch in a way that makes
         # Torch's shm.dll import fail. Importing Torch first avoids that clash.
         if importlib.util.find_spec("torch") is not None:
@@ -122,12 +194,17 @@ class PaddleTextReader:
 
         from paddleocr import PaddleOCR  # type: ignore[import-untyped]
 
+        model_names = _model_names(model_root)
         self._engine = PaddleOCR(
-            lang="en",
-            det_model_dir=str(model_root / "det"),
-            rec_model_dir=str(model_root / "rec"),
-            use_angle_cls=False,
-            show_log=False,
+            text_detection_model_name=model_names["det"] or "PP-OCRv5_mobile_det",
+            text_detection_model_dir=str(model_root / "det"),
+            text_recognition_model_name=model_names["rec"] or "PP-OCRv5_mobile_rec",
+            text_recognition_model_dir=str(model_root / "rec"),
+            use_doc_orientation_classify=False,
+            use_doc_unwarping=False,
+            use_textline_orientation=False,
+            enable_mkldnn=False,
+            device="cpu",
         )
 
     def read(self, image: object) -> ReadResult:
@@ -139,35 +216,56 @@ class PaddleTextReader:
             grayscale_image = cast("cv2.typing.MatLike", image)
             image = cv2.cvtColor(grayscale_image, cv2.COLOR_GRAY2BGR)
 
-        result = self._engine.ocr(image)
-        if not result:
-            return ReadResult(tokens=[], backend_name=self.name)
-
         tokens: list[VisionToken] = []
-        first_page = result[0]
-        if first_page is None:
-            return ReadResult(tokens=tokens, backend_name=self.name)
-        if isinstance(first_page, dict):
-            texts = first_page.get("rec_texts") or []
-            scores = first_page.get("rec_scores") or []
-            polygons = first_page.get("rec_polys") or []
-            for text, score, polygon in zip(texts, scores, polygons, strict=False):
-                token = _normalize_token(text=text, confidence=score, polygon=polygon)
-                if token is not None:
-                    tokens.append(token)
-            return ReadResult(tokens=tokens, backend_name=self.name)
-
-        for row in first_page:
-            if not isinstance(row, list | tuple) or len(row) != 2:
-                continue
-            polygon, payload = row
-            if not isinstance(payload, list | tuple) or len(payload) != 2:
-                continue
-            text, score = payload
-            token = _normalize_token(text=text, confidence=score, polygon=polygon)
-            if token is not None:
-                tokens.append(token)
+        for payload in _prediction_payloads(self._engine.predict(input=image)):
+            tokens.extend(_tokens_from_prediction_payload(payload))
         return ReadResult(tokens=tokens, backend_name=self.name)
+
+
+def _prediction_payloads(result: object) -> list[object]:
+    if result is None:
+        return []
+    if isinstance(result, dict):
+        return [result.get("res", result)]
+    if isinstance(result, list | tuple):
+        payloads: list[object] = []
+        for item in result:
+            payloads.extend(_prediction_payloads(item))
+        return payloads
+    result_object = cast(Any, result)
+    if hasattr(result, "json"):
+        json_payload = result_object.json
+        if callable(json_payload):
+            json_payload = json_payload()
+        if isinstance(json_payload, dict):
+            return _prediction_payloads(json_payload)
+    if hasattr(result, "res"):
+        return _prediction_payloads(result_object.res)
+    try:
+        return _prediction_payloads(result_object["res"])
+    except Exception:
+        return []
+
+
+def _tokens_from_prediction_payload(payload: object) -> list[VisionToken]:
+    if not isinstance(payload, dict):
+        return []
+    texts = _payload_sequence(payload, "rec_texts")
+    scores = _payload_sequence(payload, "rec_scores")
+    polygons = _payload_sequence(payload, "rec_polys")
+    tokens: list[VisionToken] = []
+    for text, score, polygon in zip(texts, scores, polygons, strict=False):
+        token = _normalize_token(text=text, confidence=score, polygon=polygon)
+        if token is not None:
+            tokens.append(token)
+    return tokens
+
+
+def _payload_sequence(payload: dict[str, object], key: str) -> Iterable[Any]:
+    value = payload.get(key)
+    if value is None:
+        return []
+    return cast(Iterable[Any], value)
 
 
 def _normalize_token(*, text: object, confidence: object, polygon: object) -> VisionToken | None:
