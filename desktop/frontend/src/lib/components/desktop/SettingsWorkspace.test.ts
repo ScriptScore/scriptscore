@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const desktopMocks = vi.hoisted(() => ({
   getLegalDisclosure: vi.fn(),
+  isDesktopHost: vi.fn(),
   listCanvasCourses: vi.fn(),
   validateVisionModel: vi.fn()
 }));
@@ -19,6 +20,8 @@ describe('SettingsWorkspace', () => {
     desktopMocks.listCanvasCourses.mockReset();
     desktopMocks.listCanvasCourses.mockResolvedValue([{ id: 'course-1', name: 'Course 1' }]);
     desktopMocks.getLegalDisclosure.mockReset();
+    desktopMocks.isDesktopHost.mockReset();
+    desktopMocks.isDesktopHost.mockReturnValue(false);
     desktopMocks.getLegalDisclosure.mockResolvedValue({
       licenseExpression: 'AGPL-3.0-only',
       sourceUrl: 'https://example.test/source',
@@ -481,17 +484,61 @@ describe('SettingsWorkspace', () => {
   });
 
   it('shows source code and open source license disclosure from bundled artifacts', async () => {
+    desktopMocks.getLegalDisclosure.mockResolvedValue({
+      licenseExpression: 'AGPL-3.0-only',
+      sourceUrl: 'https://example.test/source',
+      localNoticesPath: 'legal/THIRD_PARTY_NOTICES.md',
+      thirdPartyNotices:
+        '# Third-Party Notices\n\nGenerated notices\n\n## Inventory Summary\n\nName,Version,License,Source,Scope\nexample,1.0,MIT,npm,npm-runtime\npandas,3.0.2,BSD-3-Clause [1],python,python-runtime\ndesktop/frontend/build/scriptscore-app-icon.png,,,assets,frontend-asset\n\n## License Notes\n\n- [1] pandas: Full license text continues for a long time and should not stretch the table.\n\n## Review Findings\n\n- review: example package needs review',
+      policyReportJson: '{}',
+      artifactStatus: 'bundled'
+    });
+
     render(SettingsWorkspace, {
       settings: structuredClone(defaultAppSettings)
     });
 
     await fireEvent.click(screen.getByRole('button', { name: 'Legal' }));
 
-    expect(
-      screen.getByRole('heading', { name: 'Source Code and Open Source Licenses' })
-    ).toBeTruthy();
-    expect(await screen.findByText('https://example.test/source')).toBeTruthy();
-    expect(screen.getByText('legal/THIRD_PARTY_NOTICES.md')).toBeTruthy();
+    const legalHeading = screen.getByRole('heading', {
+      name: 'Source Code and Open Source Licenses'
+    });
+    expect(legalHeading).toBeTruthy();
+    expect(legalHeading.closest('.bg-surface-card-subtle')).toBeNull();
+    const sourceLink = await screen.findByRole('link', { name: 'https://example.test/source' });
+    expect(sourceLink).toHaveProperty('href', 'https://example.test/source');
+    expect(sourceLink).toHaveProperty('target', '_blank');
+    expect(sourceLink.className).toContain('underline');
+    expect(sourceLink.className).not.toContain('border');
+    const browserClick = new MouseEvent('click', { bubbles: true, cancelable: true });
+    sourceLink.dispatchEvent(browserClick);
+    expect(browserClick.defaultPrevented).toBe(false);
+    expect(screen.getByText('AGPL-3.0-only')).toBeTruthy();
+    expect(screen.getByText('Bundled Third-Party Notices')).toBeTruthy();
+    expect(screen.queryByText('legal/THIRD_PARTY_NOTICES.md')).toBeNull();
+    expect(screen.queryByText('Generated notices')).toBeNull();
+
+    const showNotices = screen.getByRole('button', { name: 'Show notices' });
+    expect(showNotices.className).toContain('min-w-32');
+    expect(showNotices.className).toContain('whitespace-nowrap');
+    await fireEvent.click(showNotices);
+
+    expect(screen.getByRole('heading', { name: 'Third-Party Notices' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Inventory Summary' })).toBeTruthy();
+    expect(screen.queryByText(/Name,Version,License,Source,Scope/)).toBeNull();
+    expect(screen.getByText('example')).toBeTruthy();
+    expect(screen.getByText('pandas')).toBeTruthy();
+    expect(screen.getByText('1.0')).toBeTruthy();
+    expect(screen.getByText('npm-runtime')).toBeTruthy();
+    expect(screen.getByText('BSD-3-Clause [1]')).toBeTruthy();
+    expect(screen.getByText('License Notes')).toBeTruthy();
+    expect(screen.getByText('[1] pandas: Full license text continues for a long time and should not stretch the table.')).toBeTruthy();
+    expect(screen.getByText(/Full license text continues/)).toBeTruthy();
+    expect(screen.getByText('desktop/frontend/build/scriptscore-app-icon.png')).toBeTruthy();
+    expect(screen.getByText('Not applicable')).toBeTruthy();
+    expect(screen.getByText('Release review required')).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: 'Review Findings' })).toBeNull();
+    expect(screen.queryByText('review: example package needs review')).toBeNull();
     expect(screen.getByText('Generated notices')).toBeTruthy();
   });
 
@@ -531,7 +578,9 @@ describe('SettingsWorkspace', () => {
     });
 
     await fireEvent.click(screen.getByRole('button', { name: 'Preferences' }));
-    await fireEvent.click(screen.getByRole('combobox', { name: /Preliminary grading workers:/ }));
+    const workerControl = screen.getByRole('combobox', { name: /Preliminary grading workers:/ });
+    expect(workerControl.closest('.max-w-xs')).toBeTruthy();
+    await fireEvent.click(workerControl);
     await fireEvent.click(screen.getByRole('option', { name: /3/ }));
 
     expect(settings.preliminaryGradingMaxWorkers).toBe(3);

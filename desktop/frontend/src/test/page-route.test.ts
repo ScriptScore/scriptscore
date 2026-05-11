@@ -611,6 +611,30 @@ describe('desktop route shell', () => {
     expect(screen.queryByText('Action failed')).toBeNull();
   });
 
+  it('docks no-project Settings notifications in the topbar', async () => {
+    desktopMocks.isDesktopHost.mockReturnValue(true);
+    desktopMocks.getShellState.mockResolvedValue({
+      currentProject: null,
+      workerStatus: 'ready',
+      lastRuntimeError: null
+    });
+
+    render(Page);
+
+    expect(await screen.findByRole('button', { name: 'Create Project' })).toBeTruthy();
+    await fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    expect(await screen.findByRole('heading', { name: 'Connections' })).toBeTruthy();
+
+    notifications.pushError('Runtime smoke test failed', 0);
+    await tick();
+
+    const header = document.querySelector('header');
+    const toast = screen.getByRole('alert');
+    expect(header).toBeTruthy();
+    expect(toast.textContent).toContain('Runtime smoke test failed');
+    expect(toast.closest('header')).toBe(header);
+  });
+
   it('does not render contextual setup or review trace controls', async () => {
     desktopMocks.isDesktopHost.mockReturnValue(true);
     desktopMocks.getShellState.mockResolvedValue({
