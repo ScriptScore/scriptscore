@@ -12,6 +12,9 @@ If PyMuPDF is removed, isolated from distributed runtime artifacts, or otherwise
 
 Permissive dependencies such as MIT, BSD, ISC, and Apache-2.0 are generally compatible with the current AGPL client posture. MPL-2.0 dependencies may be acceptable with file-level notice obligations. GPL/LGPL, unknown, native binary, model, and custom-license dependencies require explicit release review.
 
+Review decisions live in `docs/licensing/dependency-review-register.md`.
+Generated legal artifacts are evidence, not the human record of approval.
+
 ## Adding Dependencies
 
 Before adding a dependency, check:

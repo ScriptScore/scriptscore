@@ -60,8 +60,6 @@
   const compactPageSelectorMaxWidth = 1280;
   const stackedSetupMaxWidth = 960;
 
-  const inputClass =
-    'h-10 w-full rounded-xl border border-border-default bg-workspace-empty px-3 text-sm text-text-primary outline-none transition-colors focus:border-border-focus';
   const strictnessOptions = [
     { value: 'strict', label: 'strict' },
     { value: 'balanced', label: 'balanced' },
@@ -623,15 +621,15 @@
                   {/if}
                 </div>
               {:else}
-                <label for="setupCourseCode" class="grid gap-1.5 shell-body text-workspace-text-secondary">
-                  <span>Course code</span>
-                  <input
-                    id="setupCourseCode"
-                    class={inputClass}
-                    bind:value={projectConfig.courseCode}
-                    placeholder="HIST 201"
-                  />
-                </label>
+                <TextField
+                  id="setupCourseCode"
+                  label="Course Code"
+                  value={projectConfig.courseCode ?? ''}
+                  placeholder="HIST 201"
+                  oninput={(event: Event) => {
+                    projectConfig.courseCode = (event.currentTarget as HTMLInputElement).value;
+                  }}
+                />
               {/if}
               {#if currentAssignmentCourseId}
                 <div class="grid gap-1.5 shell-body text-workspace-text-secondary">

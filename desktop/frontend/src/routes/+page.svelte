@@ -2156,11 +2156,12 @@
           Back
         </DesktopButton>
         <div class="text-base font-semibold text-workspace-text-primary">Settings</div>
-        <div class="w-[4.5rem]" aria-hidden="true"></div>
+        <div class="flex min-w-0 justify-end">
+          <NotificationToasts placement="topbar" />
+        </div>
       </div>
     </header>
     <WorkspaceMessages actionError={actionError} runtimeError={visibleRuntimeError} />
-    <NotificationToasts />
     <div class="min-h-0 flex-1 overflow-hidden">
       <SettingsWorkspace
         settings={settingsDraft}
