@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-use std::path::PathBuf;
+use std::fmt::Write as _;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -17,6 +18,8 @@ use scriptscore_desktop_host::models::{
 use scriptscore_desktop_host::state::AppState;
 use scriptscore_desktop_host::test_support::{lock_env_vars, EnvVarGuard};
 
+const POST_SETUP_EVENT_TIMEOUT: Duration = Duration::from_secs(30);
+
 #[derive(Clone, Default)]
 struct RecordingEventSink {
     events: Arc<Mutex<Vec<RuntimeJobEvent>>>,
@@ -32,6 +35,16 @@ impl RecordingEventSink {
     }
 
     fn wait_for_with_timeout(&self, event_type: &str, command_name: &str, timeout: Duration) {
+        self.wait_for_with_timeout_and_diagnostics(event_type, command_name, timeout, None);
+    }
+
+    fn wait_for_with_timeout_and_diagnostics(
+        &self,
+        event_type: &str,
+        command_name: &str,
+        timeout: Duration,
+        diagnostics_root: Option<&Path>,
+    ) {
         let deadline = Instant::now() + timeout;
         loop {
             if self
@@ -41,16 +54,27 @@ impl RecordingEventSink {
             {
                 return;
             }
-            assert!(
-                Instant::now() < deadline,
-                "timed out waiting for runtime event {event_type} for {command_name}; observed events: {}",
-                self.event_summary()
-            );
+            if Instant::now() >= deadline {
+                panic!(
+                    "timed out waiting for runtime event {event_type} for {command_name}; observed events: {}; diagnostics: {}",
+                    self.event_summary(),
+                    timeout_diagnostics(diagnostics_root)
+                );
+            }
             thread::sleep(Duration::from_millis(20));
         }
     }
 
     fn wait_for_terminal(&self, command_name: &str, timeout: Duration) -> RuntimeJobEvent {
+        self.wait_for_terminal_with_diagnostics(command_name, timeout, None)
+    }
+
+    fn wait_for_terminal_with_diagnostics(
+        &self,
+        command_name: &str,
+        timeout: Duration,
+        diagnostics_root: Option<&Path>,
+    ) -> RuntimeJobEvent {
         let deadline = Instant::now() + timeout;
         loop {
             if let Some(event) = self.snapshot().into_iter().find(|event| {
@@ -62,11 +86,13 @@ impl RecordingEventSink {
             }) {
                 return event;
             }
-            assert!(
-                Instant::now() < deadline,
-                "timed out waiting for terminal runtime event for {command_name}; observed events: {}",
-                self.event_summary()
-            );
+            if Instant::now() >= deadline {
+                panic!(
+                    "timed out waiting for terminal runtime event for {command_name}; observed events: {}; diagnostics: {}",
+                    self.event_summary(),
+                    timeout_diagnostics(diagnostics_root)
+                );
+            }
             thread::sleep(Duration::from_millis(20));
         }
     }
@@ -82,6 +108,167 @@ impl RecordingEventSink {
             .collect::<Vec<_>>()
             .join(", ")
     }
+}
+
+fn timeout_diagnostics(root: Option<&Path>) -> String {
+    root.map(durable_project_state_summary)
+        .unwrap_or_else(|| "no durable project diagnostics root provided".into())
+}
+
+fn durable_project_state_summary(root: &Path) -> String {
+    let mut db_paths = Vec::new();
+    collect_project_db_paths(root, &mut db_paths);
+    db_paths.sort();
+    if db_paths.is_empty() {
+        return format!("no scriptscore.db files found under {}", root.display());
+    }
+
+    let mut summary = String::new();
+    for db_path in db_paths {
+        let project_path = db_path.parent().unwrap_or(root);
+        let _ = write!(summary, "[project: {}]", project_path.display());
+        match Connection::open(&db_path) {
+            Ok(connection) => {
+                append_job_run_summary(&connection, &mut summary);
+                append_template_setup_summary(&connection, &mut summary);
+            }
+            Err(err) => {
+                let _ = write!(summary, " db_open_error={err}");
+            }
+        }
+        summary.push(' ');
+    }
+    summary.trim().to_string()
+}
+
+fn collect_project_db_paths(root: &Path, db_paths: &mut Vec<PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.file_name().and_then(|name| name.to_str()) == Some("scriptscore.db") {
+            db_paths.push(path);
+        } else if path.is_dir() {
+            collect_project_db_paths(&path, db_paths);
+        }
+    }
+}
+
+fn append_job_run_summary(connection: &Connection, summary: &mut String) {
+    let mut statement = match connection.prepare(
+        "SELECT command_name, state, started_at, finished_at, error_json
+         FROM job_run
+         ORDER BY rowid ASC",
+    ) {
+        Ok(statement) => statement,
+        Err(err) => {
+            let _ = write!(summary, " job_run_query_error={err}");
+            return;
+        }
+    };
+    let rows = match statement.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, Option<String>>(2)?,
+            row.get::<_, Option<String>>(3)?,
+            row.get::<_, Option<String>>(4)?,
+        ))
+    }) {
+        Ok(rows) => rows,
+        Err(err) => {
+            let _ = write!(summary, " job_run_rows_error={err}");
+            return;
+        }
+    };
+
+    let mut count = 0;
+    summary.push_str(" job_run=[");
+    for row in rows {
+        let Ok((command_name, state, started_at, finished_at, error_json)) = row else {
+            continue;
+        };
+        if count > 0 {
+            summary.push_str("; ");
+        }
+        let _ = write!(
+            summary,
+            "{command_name}:{state}:started={}:finished={}",
+            started_at.as_deref().unwrap_or("null"),
+            finished_at.as_deref().unwrap_or("null")
+        );
+        if let Some(error_json) = error_json.as_deref().filter(|value| !value.is_empty()) {
+            let _ = write!(summary, ":error={error_json}");
+        }
+        count += 1;
+    }
+    if count == 0 {
+        summary.push_str("none");
+    }
+    summary.push(']');
+}
+
+fn append_template_setup_summary(connection: &Connection, summary: &mut String) {
+    let mut statement = match connection.prepare(
+        "SELECT scope_id, payload_json
+         FROM workflow_state
+         WHERE state_key = 'template_setup'
+         ORDER BY rowid ASC",
+    ) {
+        Ok(statement) => statement,
+        Err(err) => {
+            let _ = write!(summary, " template_setup_query_error={err}");
+            return;
+        }
+    };
+    let rows = match statement.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    }) {
+        Ok(rows) => rows,
+        Err(err) => {
+            let _ = write!(summary, " template_setup_rows_error={err}");
+            return;
+        }
+    };
+
+    let mut count = 0;
+    summary.push_str(" template_setup=[");
+    for row in rows {
+        let Ok((scope_id, payload_json)) = row else {
+            continue;
+        };
+        let payload = serde_json::from_str::<serde_json::Value>(&payload_json)
+            .unwrap_or(serde_json::Value::Null);
+        let failure = payload
+            .get("failureMessage")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("");
+        let last_setup_job_id = payload
+            .get("lastSetupJobId")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("null");
+        let question_count = payload
+            .get("questionCount")
+            .and_then(serde_json::Value::as_i64)
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "null".into());
+        if count > 0 {
+            summary.push_str("; ");
+        }
+        let _ = write!(
+            summary,
+            "{scope_id}:lastSetupJobId={last_setup_job_id}:questionCount={question_count}"
+        );
+        if !failure.is_empty() {
+            let _ = write!(summary, ":failure={failure}");
+        }
+        count += 1;
+    }
+    if count == 0 {
+        summary.push_str("none");
+    }
+    summary.push(']');
 }
 
 impl scriptscore_desktop_host::state::RuntimeEventSink for RecordingEventSink {
@@ -720,9 +907,29 @@ fn start_create_project_job_enqueues_exam_analyze_with_matching_job_history_payl
         .start_create_project_job(&input, settings, Arc::new(events.clone()))
         .expect("create project job should start");
 
-    events.wait_for("job_finished", "create_project");
-    events.wait_for("job_started", "scans.pdf-detect-aruco");
-    events.wait_for("job_started", "exam.analyze");
+    let create_project_event = events.wait_for_terminal_with_diagnostics(
+        "create_project",
+        POST_SETUP_EVENT_TIMEOUT,
+        Some(&test_root),
+    );
+    assert_eq!(
+        create_project_event.event_type,
+        "job_finished",
+        "create project should finish before post-setup jobs; diagnostics: {}",
+        durable_project_state_summary(&test_root)
+    );
+    events.wait_for_with_timeout_and_diagnostics(
+        "job_started",
+        "scans.pdf-detect-aruco",
+        POST_SETUP_EVENT_TIMEOUT,
+        Some(&test_root),
+    );
+    events.wait_for_with_timeout_and_diagnostics(
+        "job_started",
+        "exam.analyze",
+        POST_SETUP_EVENT_TIMEOUT,
+        Some(&test_root),
+    );
 
     let emitted = events.snapshot();
     let create_finished_index = emitted
@@ -784,8 +991,23 @@ fn start_create_project_job_skips_exam_analyze_when_exam_analysis_is_disabled() 
         .start_create_project_job(&input, settings, Arc::new(events.clone()))
         .expect("create project job should start");
 
-    events.wait_for("job_finished", "create_project");
-    events.wait_for("job_finished", "scans.pdf-detect-aruco");
+    let create_project_event = events.wait_for_terminal_with_diagnostics(
+        "create_project",
+        POST_SETUP_EVENT_TIMEOUT,
+        Some(&test_root),
+    );
+    assert_eq!(
+        create_project_event.event_type,
+        "job_finished",
+        "create project should finish before post-setup jobs; diagnostics: {}",
+        durable_project_state_summary(&test_root)
+    );
+    events.wait_for_with_timeout_and_diagnostics(
+        "job_finished",
+        "scans.pdf-detect-aruco",
+        POST_SETUP_EVENT_TIMEOUT,
+        Some(&test_root),
+    );
 
     assert!(
         !events
