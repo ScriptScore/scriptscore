@@ -25,6 +25,7 @@
 
 <section class="space-y-2">
   <SelectField
+    class="max-w-xs"
     label="Preliminary grading workers"
     value={String(settings.preliminaryGradingMaxWorkers)}
     options={workerOptions}

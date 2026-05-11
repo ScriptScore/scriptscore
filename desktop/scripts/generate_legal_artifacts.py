@@ -8,14 +8,12 @@ import argparse
 import csv
 import hashlib
 import json
-import os
 import re
 import subprocess
 import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
-
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SCRIPT_DIR.parents[1]
@@ -72,6 +70,11 @@ PYTHON_LICENSE_REPLACEMENTS = {
         "dependency in release review until upstream publishes usable license "
         "metadata or the dependency is removed.",
     ),
+    "pandas": (
+        "BSD-3-Clause",
+        "Wheel metadata can embed full bundled dependency notices in the License "
+        "field; keep the inventory summary to the package license expression.",
+    ),
     "scipy": (
         "BSD-3-Clause AND BSD-3-Clause-Open-MPI AND GPL-3.0-or-later WITH "
         "GCC-exception-3.1",
@@ -100,6 +103,7 @@ ASSET_SUFFIXES = {
     ".woff2",
     ".yml",
 }
+FRONTEND_GENERATED_SUFFIXES = {".css", ".html", ".js", ".json", ".map"}
 
 
 @dataclass(frozen=True)
@@ -197,6 +201,9 @@ def classify_item(item: InventoryItem) -> PolicyFinding | None:
                 item.license,
                 "Blocked license or redistribution term detected.",
             )
+
+    if item.scope == "frontend-build-output":
+        return None
 
     if item.scope in {"frontend-asset", "model-asset", "native-library"}:
         return PolicyFinding(
@@ -453,6 +460,40 @@ def file_inventory(root: Path, scope: str, source: str, runtime: bool) -> list[I
     return items
 
 
+def frontend_build_scope(root: Path, path: Path) -> str:
+    if path.suffix.lower() in NATIVE_SUFFIXES:
+        return "native-library"
+    rel_path = path.relative_to(root).as_posix()
+    if path.suffix.lower() in FRONTEND_GENERATED_SUFFIXES and (
+        rel_path == "index.html" or rel_path.startswith("_app/")
+    ):
+        return "frontend-build-output"
+    return "frontend-asset"
+
+
+def frontend_build_inventory(root: Path) -> list[InventoryItem]:
+    if not root.exists():
+        return []
+    items: list[InventoryItem] = []
+    for path in sorted(item for item in root.rglob("*") if item.is_file()):
+        suffix = path.suffix.lower()
+        if suffix not in ASSET_SUFFIXES and suffix not in NATIVE_SUFFIXES:
+            continue
+        items.append(
+            InventoryItem(
+                name=project_relative(path),
+                version=None,
+                license=None,
+                source="assets",
+                scope=frontend_build_scope(root, path),
+                path=project_relative(path),
+                runtime=True,
+                checksum_sha256=digest_file(path),
+            )
+        )
+    return items
+
+
 def runtime_native_inventory(runtime_root: Path) -> list[InventoryItem]:
     if not runtime_root.exists():
         return []
@@ -463,8 +504,27 @@ def runtime_native_inventory(runtime_root: Path) -> list[InventoryItem]:
     ]
 
 
-def write_notices(path: Path, items: list[InventoryItem], findings: list[PolicyFinding]) -> None:
+def notice_inventory_version(item: InventoryItem) -> str:
+    return item.version or "Not applicable"
+
+
+def notice_inventory_license(item: InventoryItem) -> str:
+    if item.license:
+        return item.license
+    if item.scope == "frontend-build-output":
+        return "Covered by source package"
+    if item.scope in {"frontend-asset", "model-asset", "native-library"}:
+        return "Release review required"
+    return "Not specified"
+
+
+def write_notices(path: Path, items: list[InventoryItem], _findings: list[PolicyFinding]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    notice_items = [
+        (index, item)
+        for index, item in enumerate((item for item in items if item.notice), start=1)
+    ]
+    notice_ids = {id(item): index for index, item in notice_items}
     with path.open("w", encoding="utf-8", newline="\n") as handle:
         handle.write("# Third-Party Notices\n\n")
         handle.write(
@@ -480,19 +540,22 @@ def write_notices(path: Path, items: list[InventoryItem], findings: list[PolicyF
         writer = csv.writer(handle)
         writer.writerow(["Name", "Version", "License", "Source", "Scope"])
         for item in items:
+            license_value = notice_inventory_license(item)
+            if item_notice_id := notice_ids.get(id(item)):
+                license_value = f"{license_value} [{item_notice_id}]"
             writer.writerow(
-                [item.name, item.version or "", item.license or "", item.source, item.scope]
+                [
+                    item.name,
+                    notice_inventory_version(item),
+                    license_value,
+                    item.source,
+                    item.scope,
+                ]
             )
-        handle.write("\n## Review Findings\n\n")
-        if not findings:
-            handle.write("No blocked, unknown, or review-required findings.\n")
-            return
-        for finding in findings:
-            handle.write(
-                f"- {finding.severity}: {finding.item} "
-                f"({finding.source}, {finding.scope}, {finding.license or 'missing license'}) - "
-                f"{finding.message}\n"
-            )
+        if notice_items:
+            handle.write("\n## License Notes\n\n")
+            for index, item in notice_items:
+                handle.write(f"- [{index}] {item.name}: {item.notice}\n")
 
 
 def write_sbom(path: Path, items: list[InventoryItem]) -> None:
@@ -514,7 +577,7 @@ def generate(args: argparse.Namespace) -> int:
     python_items = python_inventory(runtime_manifest, args.python_root)
     npm_items = npm_inventory(args.npm_lock)
     cargo_items = cargo_inventory(args.cargo_manifest, args.cargo_metadata_file)
-    asset_items = file_inventory(args.frontend_build, "frontend-asset", "assets", runtime=True)
+    asset_items = frontend_build_inventory(args.frontend_build)
     asset_items.extend(file_inventory(args.paddle_models, "model-asset", "assets", runtime=True))
     native_items = runtime_native_inventory(runtime_root)
 

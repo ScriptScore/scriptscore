@@ -128,7 +128,9 @@ describe('SetupWorkspace', () => {
 
     expect(screen.queryByRole('combobox', { name: 'Course' })).toBeNull();
     expect(screen.queryByRole('combobox', { name: 'Assignment' })).toBeNull();
-    expect(screen.getByLabelText('Course code')).toBeTruthy();
+    const courseCode = screen.getByLabelText('Course Code');
+    expect(courseCode).toBeTruthy();
+    expect(courseCode.className).toContain('bg-workspace-empty');
     expect(desktopMocks.listCanvasCourses).not.toHaveBeenCalled();
     expect(desktopMocks.listLmsAssignmentsForCourse).not.toHaveBeenCalled();
   });

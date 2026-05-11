@@ -56,15 +56,34 @@ def test_license_policy_allows_permissive_and_flags_unknown_runtime() -> None:
         scope="model-asset",
         runtime=True,
     )
+    build_output = legal.InventoryItem(
+        name="desktop/frontend/build/_app/immutable/assets/2.CNLA_Ghp.css",
+        version=None,
+        license=None,
+        source="assets",
+        scope="frontend-build-output",
+        runtime=True,
+    )
 
     assert legal.classify_item(allowed) is None
     assert legal.classify_item(unknown).severity == "unknown"
+    assert legal.classify_item(build_output) is None
     model_finding = legal.classify_item(model)
     assert model_finding.severity == "review_required"
     assert "Asset or native binary" in model_finding.message
 
 
 def test_python_license_replacements_stay_in_release_review() -> None:
+    pandas_license, pandas_notice = legal.python_license_metadata(
+        {
+            "name": "pandas",
+            "version": "3.0.2",
+            "license": "BSD 3-Clause License Copyright text that continues with bundled notices.",
+        }
+    )
+    assert pandas_notice
+    assert pandas_license == "BSD-3-Clause"
+
     scipy_license, scipy_notice = legal.python_license_metadata(
         {
             "name": "scipy",
@@ -105,6 +124,82 @@ def test_python_license_replacements_stay_in_release_review() -> None:
     assert aistudio_notice
     assert aistudio_license == "LicenseRef-REVIEW-aistudio-sdk"
     assert aistudio_finding.severity == "review_required"
+
+
+def test_notice_inventory_uses_display_values_for_assets_and_long_metadata(tmp_path: Path) -> None:
+    notices_path = tmp_path / "THIRD_PARTY_NOTICES.md"
+    items = [
+        legal.InventoryItem(
+            name="pandas",
+            version="3.0.2",
+            license="BSD-3-Clause",
+            source="python",
+            scope="python-runtime",
+            notice="Wheel metadata can embed full bundled dependency notices.",
+        ),
+        legal.InventoryItem(
+            name="desktop/frontend/build/_app/immutable/assets/2.CNLA_Ghp.css",
+            version=None,
+            license=None,
+            source="assets",
+            scope="frontend-build-output",
+            runtime=True,
+        ),
+        legal.InventoryItem(
+            name="desktop/frontend/build/scriptscore-app-icon.png",
+            version=None,
+            license=None,
+            source="assets",
+            scope="frontend-asset",
+            runtime=True,
+        ),
+    ]
+
+    legal.write_notices(notices_path, items, [])
+
+    notices = notices_path.read_text(encoding="utf-8")
+    assert "pandas,3.0.2,BSD-3-Clause [1],python,python-runtime" in notices
+    assert "## License Notes" in notices
+    assert "- [1] pandas: Wheel metadata can embed full bundled dependency notices." in notices
+    assert (
+        "desktop/frontend/build/_app/immutable/assets/2.CNLA_Ghp.css,Not applicable,"
+        "Covered by source package,assets,frontend-build-output"
+    ) in notices
+    assert (
+        "desktop/frontend/build/scriptscore-app-icon.png,Not applicable,"
+        "Release review required,assets,frontend-asset"
+    ) in notices
+    assert "## Review Findings" not in notices
+
+
+def test_frontend_build_inventory_separates_generated_outputs_from_assets(tmp_path: Path) -> None:
+    build_root = tmp_path / "desktop" / "frontend" / "build"
+    files = [
+        "_app/env.js",
+        "_app/immutable/assets/2.CNLA_Ghp.css",
+        "_app/immutable/assets/inter-latin-wght-normal.Dx4kXJAl.woff2",
+        "_app/immutable/chunks/C0uQTxXd.js",
+        "_app/version.json",
+        "index.html",
+        "scriptscore-app-icon.png",
+    ]
+    for file_name in files:
+        path = build_root / file_name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("fixture", encoding="utf-8")
+
+    items = legal.frontend_build_inventory(build_root)
+    scopes = {Path(item.name).relative_to(build_root).as_posix(): item.scope for item in items}
+
+    assert scopes["_app/env.js"] == "frontend-build-output"
+    assert scopes["_app/immutable/assets/2.CNLA_Ghp.css"] == "frontend-build-output"
+    assert scopes["_app/immutable/chunks/C0uQTxXd.js"] == "frontend-build-output"
+    assert scopes["_app/version.json"] == "frontend-build-output"
+    assert scopes["index.html"] == "frontend-build-output"
+    assert scopes["_app/immutable/assets/inter-latin-wght-normal.Dx4kXJAl.woff2"] == (
+        "frontend-asset"
+    )
+    assert scopes["scriptscore-app-icon.png"] == "frontend-asset"
 
 
 def test_npm_and_cargo_inventory_parse_fixture_metadata(tmp_path: Path) -> None:
@@ -200,6 +295,10 @@ def test_check_mode_fails_only_blocked_or_unknown_runtime(tmp_path: Path) -> Non
     assert legal.generate(args) == 1
     report = json.loads((tmp_path / "legal" / "license-policy-report.json").read_text())
     assert report["summary"]["blockedOrUnknownRuntimeCount"] == 1
+    notices = (tmp_path / "legal" / "THIRD_PARTY_NOTICES.md").read_text(encoding="utf-8")
+    assert "## Review Findings" not in notices
+    assert "missing-python" not in notices
+    assert report["findings"][0]["item"] == "python-runtime"
 
 
 def test_scriptscoreplus_guard_allows_placeholder_but_blocks_import(tmp_path: Path) -> None:
