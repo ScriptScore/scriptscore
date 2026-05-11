@@ -18,6 +18,9 @@ from typing import Any
 SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SCRIPT_DIR.parents[1]
 DESKTOP_ROOT = PROJECT_ROOT / "desktop"
+FRONTEND_STATIC_ASSET_PROVENANCE = (
+    PROJECT_ROOT / "docs" / "licensing" / "frontend-static-asset-provenance.json"
+)
 
 ALLOWED_LICENSE_TOKENS = {
     "0BSD",
@@ -177,6 +180,8 @@ FONTSOURCE_ASSET_MAPPINGS = (
         "license_path": "desktop/frontend/node_modules/@fontsource-variable/inter/LICENSE",
     },
 )
+FRONTEND_STATIC_ASSET_SOURCE = "first-party"
+FRONTEND_STATIC_ASSET_SCOPE = "frontend-static-asset"
 
 
 @dataclass(frozen=True)
@@ -650,9 +655,7 @@ def frontend_build_scope(root: Path, path: Path) -> str:
     return "frontend-asset"
 
 
-def fontsource_asset_item(
-    path: Path, package_versions: dict[str, str]
-) -> InventoryItem | None:
+def fontsource_asset_item(path: Path, package_versions: dict[str, str]) -> InventoryItem | None:
     if path.suffix.lower() != ".woff2":
         return None
     filename = path.name.lower()
@@ -678,12 +681,70 @@ def fontsource_asset_item(
     return None
 
 
+def frontend_static_asset_provenance(
+    provenance_path: Path,
+) -> dict[str, dict[str, Any]]:
+    if not provenance_path.exists():
+        return {}
+    data = read_json(provenance_path)
+    entries = data.get("assets", [])
+    if not isinstance(entries, list):
+        raise ValueError(f"{provenance_path} must contain an assets list")
+
+    provenance: dict[str, dict[str, Any]] = {}
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise ValueError(f"{provenance_path} contains a non-object asset entry")
+        source_path = entry.get("source_path")
+        if not isinstance(source_path, str) or not source_path:
+            raise ValueError(f"{provenance_path} asset entries must include source_path")
+        license_value = normalize_license(entry.get("license"))
+        if not license_value:
+            raise ValueError(f"{source_path} must include usable license provenance")
+        provenance[Path(source_path).name] = {
+            **entry,
+            "source_path": source_path,
+            "license": license_value,
+        }
+    return provenance
+
+
+def frontend_static_asset_item(
+    path: Path, provenance: dict[str, dict[str, Any]]
+) -> InventoryItem | None:
+    entry = provenance.get(path.name)
+    if entry is None:
+        return None
+
+    source_path = entry["source_path"]
+    origin = entry.get("origin") or "First-party ScriptScore static frontend asset."
+    evidence = entry.get("evidence", [])
+    evidence_note = ""
+    if isinstance(evidence, list) and evidence:
+        evidence_note = " Evidence: " + ", ".join(f"`{item}`" for item in evidence) + "."
+
+    return InventoryItem(
+        name=project_relative(path),
+        version=None,
+        license=entry["license"],
+        source=FRONTEND_STATIC_ASSET_SOURCE,
+        scope=FRONTEND_STATIC_ASSET_SCOPE,
+        path=project_relative(path),
+        runtime=True,
+        checksum_sha256=digest_file(path),
+        notice=f"{origin} Source asset: `{source_path}`.{evidence_note}",
+    )
+
+
 def frontend_build_inventory(
-    root: Path, package_versions: dict[str, str] | None = None
+    root: Path,
+    package_versions: dict[str, str] | None = None,
+    static_asset_provenance: dict[str, dict[str, Any]] | None = None,
 ) -> list[InventoryItem]:
     if not root.exists():
         return []
     resolved_package_versions = package_versions or {}
+    resolved_static_asset_provenance = static_asset_provenance or {}
     items: list[InventoryItem] = []
     for path in sorted(item for item in root.rglob("*") if item.is_file()):
         suffix = path.suffix.lower()
@@ -691,6 +752,9 @@ def frontend_build_inventory(
             continue
         if font_item := fontsource_asset_item(path, resolved_package_versions):
             items.append(font_item)
+            continue
+        if static_item := frontend_static_asset_item(path, resolved_static_asset_provenance):
+            items.append(static_item)
             continue
         items.append(
             InventoryItem(
@@ -794,8 +858,11 @@ def generate(args: argparse.Namespace) -> int:
         args.npm_lock,
         {mapping["package_name"] for mapping in FONTSOURCE_ASSET_MAPPINGS},
     )
+    static_asset_provenance = frontend_static_asset_provenance(args.frontend_asset_provenance)
     cargo_items = cargo_inventory(args.cargo_manifest, args.cargo_metadata_file)
-    asset_items = frontend_build_inventory(args.frontend_build, fontsource_package_versions)
+    asset_items = frontend_build_inventory(
+        args.frontend_build, fontsource_package_versions, static_asset_provenance
+    )
     asset_items.extend(file_inventory(args.paddle_models, "model-asset", "assets", runtime=True))
     native_items = runtime_native_inventory(runtime_root)
 
@@ -869,6 +936,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument("--cargo-metadata-file", type=Path)
     parser.add_argument("--frontend-build", type=Path, default=DESKTOP_ROOT / "frontend" / "build")
+    parser.add_argument(
+        "--frontend-asset-provenance",
+        type=Path,
+        default=FRONTEND_STATIC_ASSET_PROVENANCE,
+    )
     parser.add_argument(
         "--paddle-models", type=Path, default=PROJECT_ROOT / "cli" / "models" / "paddle"
     )

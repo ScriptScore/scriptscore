@@ -449,6 +449,51 @@ def test_frontend_build_inventory_separates_generated_outputs_from_assets(tmp_pa
     assert scopes["scriptscore-app-icon.png"] == "frontend-asset"
 
 
+def test_frontend_build_inventory_uses_static_asset_provenance(tmp_path: Path) -> None:
+    build_root = tmp_path / "desktop" / "frontend" / "build"
+    static_assets = (
+        "alignment-marks-infographic.png",
+        "canvas-api-token-guide.png",
+        "ollama-api-token-guide.png",
+        "redaction-regions-infographic.png",
+        "student-intake-guide.png",
+        "scriptscore-app-icon.png",
+        "scriptscore-mark.svg",
+    )
+    for file_name in static_assets:
+        path = build_root / file_name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"{file_name} fixture", encoding="utf-8")
+
+    provenance_path = tmp_path / "frontend-static-asset-provenance.json"
+    write_json(
+        provenance_path,
+        {
+            "assets": [
+                {
+                    "source_path": f"desktop/frontend/static/{file_name}",
+                    "license": "AGPL-3.0-only",
+                    "origin": f"First-party fixture for {file_name}.",
+                    "evidence": ["desktop/frontend/static"],
+                }
+                for file_name in static_assets
+            ]
+        },
+    )
+
+    items = legal.frontend_build_inventory(
+        build_root,
+        static_asset_provenance=legal.frontend_static_asset_provenance(provenance_path),
+    )
+
+    assert {Path(item.name).name for item in items} == set(static_assets)
+    assert {item.scope for item in items} == {legal.FRONTEND_STATIC_ASSET_SCOPE}
+    assert {item.source for item in items} == {legal.FRONTEND_STATIC_ASSET_SOURCE}
+    assert {item.license for item in items} == {"AGPL-3.0-only"}
+    assert all("desktop/frontend/static/" in (item.notice or "") for item in items)
+    assert all(legal.classify_item(item) is None for item in items)
+
+
 def test_generate_maps_fontsource_woff2_assets_without_frontend_asset_findings(
     tmp_path: Path,
 ) -> None:
@@ -516,6 +561,88 @@ def test_generate_maps_fontsource_woff2_assets_without_frontend_asset_findings(
     assert "@fontsource-variable/figtree" in notices
     assert "@fontsource-variable/inter" in notices
     assert "frontend-asset" not in notices
+
+
+def test_generate_maps_static_asset_provenance_without_frontend_asset_findings(
+    tmp_path: Path,
+) -> None:
+    build_root = tmp_path / "desktop" / "frontend" / "build"
+    for file_name in (
+        "alignment-marks-infographic.png",
+        "canvas-api-token-guide.png",
+        "ollama-api-token-guide.png",
+        "redaction-regions-infographic.png",
+        "student-intake-guide.png",
+        "scriptscore-app-icon.png",
+        "scriptscore-mark.svg",
+    ):
+        path = build_root / file_name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"{file_name} fixture", encoding="utf-8")
+
+    provenance_path = tmp_path / "frontend-static-asset-provenance.json"
+    write_json(
+        provenance_path,
+        {
+            "assets": [
+                {
+                    "source_path": f"desktop/frontend/static/{file_name}",
+                    "license": "AGPL-3.0-only",
+                    "origin": f"First-party fixture for {file_name}.",
+                    "evidence": ["desktop/frontend/static"],
+                }
+                for file_name in (
+                    "alignment-marks-infographic.png",
+                    "canvas-api-token-guide.png",
+                    "ollama-api-token-guide.png",
+                    "redaction-regions-infographic.png",
+                    "student-intake-guide.png",
+                    "scriptscore-app-icon.png",
+                    "scriptscore-mark.svg",
+                )
+            ]
+        },
+    )
+    cargo_path = tmp_path / "cargo.json"
+    write_json(cargo_path, {"workspace_members": [], "packages": []})
+
+    args = legal.parse_args(
+        [
+            "--check",
+            "--output-dir",
+            str(tmp_path / "legal"),
+            "--runtime-manifest",
+            str(tmp_path / "missing-runtime" / "runtime-manifest.json"),
+            "--npm-lock",
+            str(tmp_path / "missing-package-lock.json"),
+            "--cargo-metadata-file",
+            str(cargo_path),
+            "--frontend-build",
+            str(build_root),
+            "--frontend-asset-provenance",
+            str(provenance_path),
+            "--paddle-models",
+            str(tmp_path / "missing-models"),
+        ]
+    )
+
+    assert legal.generate(args) == 0
+    report = json.loads((tmp_path / "legal" / "license-policy-report.json").read_text())
+    assert report["summary"]["findingCount"] == 0
+    sbom = json.loads((tmp_path / "legal" / "sbom-assets.json").read_text())
+    static_assets = [
+        component
+        for component in sbom["components"]
+        if component["scope"] == legal.FRONTEND_STATIC_ASSET_SCOPE
+    ]
+    assert len(static_assets) == 7
+    assert all(
+        component["source"] == legal.FRONTEND_STATIC_ASSET_SOURCE for component in static_assets
+    )
+    assert all(component["license"] == "AGPL-3.0-only" for component in static_assets)
+    notices = (tmp_path / "legal" / "THIRD_PARTY_NOTICES.md").read_text(encoding="utf-8")
+    assert "frontend-asset" not in notices
+    assert "desktop/frontend/static/scriptscore-mark.svg" in notices
 
 
 def test_npm_and_cargo_inventory_parse_fixture_metadata(tmp_path: Path) -> None:
