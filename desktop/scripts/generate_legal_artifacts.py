@@ -63,6 +63,9 @@ BLOCKED_PATTERNS = (
     "field-of-use",
     "proprietary",
 )
+BLOCKED_RUNTIME_PACKAGES = {
+    "aistudio-sdk": "Package must not appear in distributed runtime artifacts until upstream publishes usable license/source evidence.",
+}
 PYTHON_LICENSE_REPLACEMENTS = {
     "aistudio-sdk": (
         "LicenseRef-REVIEW-aistudio-sdk",
@@ -189,6 +192,17 @@ def python_license_metadata(row: dict[str, Any]) -> tuple[str | None, str | None
 
 
 def classify_item(item: InventoryItem) -> PolicyFinding | None:
+    blocked_package_message = BLOCKED_RUNTIME_PACKAGES.get(item.name.lower())
+    if item.runtime and blocked_package_message is not None:
+        return PolicyFinding(
+            "blocked",
+            item.name,
+            item.source,
+            item.scope,
+            item.license,
+            blocked_package_message,
+        )
+
     license_value = normalize_license(item.license)
     lowered = (license_value or "").lower()
     for pattern in BLOCKED_PATTERNS:
