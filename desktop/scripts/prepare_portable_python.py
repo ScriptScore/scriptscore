@@ -33,6 +33,14 @@ PORTABLE_RUNTIME_EXCLUDED_REQUIREMENT_NAMES = frozenset(
         "aistudio-sdk",
     }
 )
+DEV_ONLY_RELEASE_RUNTIME_REQUIREMENTS = frozenset(
+    {
+        "astroid",
+        "pip-api",
+        "pip-audit",
+        "pylint",
+    }
+)
 PORTABLE_RUNTIME_EXCLUDED_REQUIREMENT_PREFIXES = (
     "cuda-",
     "nvidia-",
@@ -283,6 +291,7 @@ def export_locked_runtime_requirements(requirements_path: Path) -> None:
     ]
     subprocess.run(command, check=True, env=subprocess_env())
     filter_portable_runtime_requirements(requirements_path)
+    validate_no_dev_only_runtime_requirements(requirements_path)
 
 
 def requirement_name(requirement_line: str) -> str:
@@ -312,6 +321,22 @@ def filter_portable_runtime_requirements(requirements_path: Path) -> None:
             continue
         filtered_lines.append(line)
     requirements_path.write_text("".join(filtered_lines), encoding="utf-8")
+
+
+def validate_no_dev_only_runtime_requirements(requirements_path: Path) -> None:
+    found = sorted(
+        {
+            requirement_name(line)
+            for line in requirements_path.read_text(encoding="utf-8").splitlines()
+            if line.strip() and not line.startswith((" ", "\t", "#"))
+        }
+        & DEV_ONLY_RELEASE_RUNTIME_REQUIREMENTS
+    )
+    if found:
+        raise PortablePythonError(
+            "Portable desktop runtime requirements include dev-only quality/security "
+            f"package(s): {', '.join(found)}."
+        )
 
 
 def install_uv_managed_python(install_dir: Path, python_version: str) -> Path:

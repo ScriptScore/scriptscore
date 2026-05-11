@@ -184,6 +184,29 @@ class PreparePortablePythonTests(unittest.TestCase):
             self.assertNotIn("triton", filtered)
             self.assertNotIn("# via torch\ntriton", filtered)
 
+    def test_validate_no_dev_only_runtime_requirements_rejects_quality_tools(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            requirements_path = Path(tmp_dir) / "requirements.txt"
+            requirements_path.write_text(
+                "\n".join(
+                    [
+                        "numpy==2.2.0",
+                        "pylint==3.3.9",
+                        "    # via dev",
+                        "pip-api==0.0.34",
+                        "    # via pip-audit",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(
+                MODULE.PortablePythonError,
+                "pip-api, pylint",
+            ):
+                MODULE.validate_no_dev_only_runtime_requirements(requirements_path)
+
     def test_rewrite_requirement_to_local_wheel_replaces_only_target_requirement(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             tmp_path = Path(tmp_dir)

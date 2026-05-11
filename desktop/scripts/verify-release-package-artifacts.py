@@ -25,10 +25,16 @@ SECRET_MARKERS = (
     "Authorization: Bearer",
 )
 ALLOWED_SECRET_MARKER_PATHS = {
-    "Authorization: Bearer": (
-        Path("huggingface_hub") / "cli" / "auth.py",
-    ),
+    "Authorization: Bearer": (Path("huggingface_hub") / "cli" / "auth.py",),
 }
+FORBIDDEN_RUNTIME_PYTHON_PACKAGES = frozenset(
+    {
+        "astroid",
+        "pip-api",
+        "pip-audit",
+        "pylint",
+    }
+)
 TEXT_SUFFIXES = {
     ".css",
     ".html",
@@ -133,6 +139,48 @@ def runtime_python_path_entries(runtime_root: Path, manifest: dict[str, object])
     return paths
 
 
+def normalize_python_package_name(name: str) -> str:
+    return name.strip().lower().replace("_", "-")
+
+
+def distribution_name(metadata_dir: Path) -> str | None:
+    for metadata_name in ("METADATA", "PKG-INFO"):
+        metadata_path = metadata_dir / metadata_name
+        if not metadata_path.is_file():
+            continue
+        try:
+            for line in metadata_path.read_text(encoding="utf-8", errors="ignore").splitlines():
+                if line.lower().startswith("name:"):
+                    return normalize_python_package_name(line.split(":", 1)[1])
+        except OSError:
+            continue
+    return None
+
+
+def installed_python_distribution_names(python_root: Path) -> set[str]:
+    names: set[str] = set()
+    for suffix in (".dist-info", ".egg-info"):
+        for metadata_dir in python_root.rglob(f"*{suffix}"):
+            if not metadata_dir.is_dir():
+                continue
+            name = distribution_name(metadata_dir)
+            if name:
+                names.add(name)
+    return names
+
+
+def validate_no_forbidden_runtime_python_packages(python_root: Path) -> list[str]:
+    found = sorted(
+        installed_python_distribution_names(python_root) & FORBIDDEN_RUNTIME_PYTHON_PACKAGES
+    )
+    if found:
+        raise VerificationError(
+            "Bundled Python runtime contains dev-only quality/security package(s): "
+            + ", ".join(found)
+        )
+    return found
+
+
 def validate_runtime(runtime_root: Path) -> dict[str, object]:
     cli_src = runtime_root / "cli-src" / "scriptscore"
     python_root = runtime_root / "python"
@@ -148,11 +196,13 @@ def validate_runtime(runtime_root: Path) -> dict[str, object]:
     if not python_root.exists():
         raise VerificationError(f"Bundled Python root was not found: {python_root}")
     python_path_entries = runtime_python_path_entries(runtime_root, manifest)
+    validate_no_forbidden_runtime_python_packages(python_root)
 
     return {
         "manifest": str(runtime_root / "runtime-manifest.json"),
         "pythonExecutable": str(resolved_python),
         "pythonPathEntries": [str(entry) for entry in python_path_entries],
+        "forbiddenPythonPackages": [],
         "runtimeMode": manifest.get("runtimeMode"),
     }
 
@@ -231,8 +281,7 @@ def validate_packaged_ocr_reader(runtime_root: Path, models_root: Path) -> dict[
     if result.returncode != 0:
         details = (result.stderr or result.stdout or "").strip()
         raise VerificationError(
-            "Packaged PaddleOCR runtime smoke failed"
-            + (f": {details[-1000:]}" if details else ".")
+            "Packaged PaddleOCR runtime smoke failed" + (f": {details[-1000:]}" if details else ".")
         )
     return {
         "pythonExecutable": str(python_executable),

@@ -102,6 +102,25 @@ class VerifyReleasePackageArtifactsTests(unittest.TestCase):
             with self.assertRaisesRegex(MODULE.VerificationError, "missing a valid runtime"):
                 MODULE.validate_payload_root(payload_root)
 
+    def test_validate_runtime_rejects_dev_only_python_distribution(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            payload_root = Path(tmp_dir) / "payload"
+            self._write_payload_layout(payload_root)
+            runtime_root = payload_root / "app" / "resources" / "runtime"
+            dist_info = (
+                runtime_root
+                / "python"
+                / "lib"
+                / "python3.12"
+                / "site-packages"
+                / "pylint-3.3.9.dist-info"
+            )
+            dist_info.mkdir(parents=True)
+            (dist_info / "METADATA").write_text("Name: pylint\nVersion: 3.3.9\n", encoding="utf-8")
+
+            with self.assertRaisesRegex(MODULE.VerificationError, "pylint"):
+                MODULE.validate_runtime(runtime_root)
+
     def test_validate_packaged_ocr_reader_reports_smoke_failure(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             payload_root = Path(tmp_dir) / "payload"

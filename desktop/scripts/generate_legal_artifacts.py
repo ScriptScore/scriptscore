@@ -69,6 +69,10 @@ BLOCKED_PATTERNS = (
 )
 BLOCKED_RUNTIME_PACKAGES = {
     "aistudio-sdk": "Package must not appear in distributed runtime artifacts until upstream publishes usable license/source evidence.",
+    "astroid": "Dev-only quality package must not appear in distributed runtime artifacts.",
+    "pip-api": "Dev-only security tooling dependency must not appear in distributed runtime artifacts.",
+    "pip-audit": "Dev-only security tooling must not appear in distributed runtime artifacts.",
+    "pylint": "Dev-only quality package must not appear in distributed runtime artifacts.",
 }
 LICENSE_NORMALIZATIONS = {
     "apache 2.0": "Apache-2.0",
@@ -95,8 +99,7 @@ PYTHON_LICENSE_REPLACEMENTS = {
         "field; keep the inventory summary to the package license expression.",
     ),
     "scipy": (
-        "BSD-3-Clause AND BSD-3-Clause-Open-MPI AND GPL-3.0-or-later WITH "
-        "GCC-exception-3.1",
+        "BSD-3-Clause AND BSD-3-Clause-Open-MPI AND GPL-3.0-or-later WITH GCC-exception-3.1",
         "SciPy wheel metadata embeds full bundled-library notices. Classify the "
         "effective license expressions so blocked-word scans do not match GPL "
         "runtime exception prose.",
@@ -614,8 +617,7 @@ def notice_inventory_license(item: InventoryItem) -> str:
 def write_notices(path: Path, items: list[InventoryItem], _findings: list[PolicyFinding]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     notice_items = [
-        (index, item)
-        for index, item in enumerate((item for item in items if item.notice), start=1)
+        (index, item) for index, item in enumerate((item for item in items if item.notice), start=1)
     ]
     notice_ids = {id(item): index for index, item in notice_items}
     with path.open("w", encoding="utf-8", newline="\n") as handle:
@@ -681,10 +683,7 @@ def generate(args: argparse.Namespace) -> int:
     blocked_or_unknown_runtime = [
         finding
         for finding in findings
-        if (
-            finding.severity == "blocked"
-            and finding.scope not in blocked_skip_scopes
-        )
+        if (finding.severity == "blocked" and finding.scope not in blocked_skip_scopes)
         or (finding.severity == "unknown" and finding.scope in unknown_failure_scopes)
     ]
 
@@ -737,7 +736,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         default=DESKTOP_ROOT / "dist" / "bundled-runtime" / "runtime-manifest.json",
     )
     parser.add_argument("--python-root", type=Path)
-    parser.add_argument("--npm-lock", type=Path, default=DESKTOP_ROOT / "frontend" / "package-lock.json")
+    parser.add_argument(
+        "--npm-lock", type=Path, default=DESKTOP_ROOT / "frontend" / "package-lock.json"
+    )
     parser.add_argument(
         "--cargo-manifest",
         type=Path,
@@ -745,7 +746,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument("--cargo-metadata-file", type=Path)
     parser.add_argument("--frontend-build", type=Path, default=DESKTOP_ROOT / "frontend" / "build")
-    parser.add_argument("--paddle-models", type=Path, default=PROJECT_ROOT / "cli" / "models" / "paddle")
+    parser.add_argument(
+        "--paddle-models", type=Path, default=PROJECT_ROOT / "cli" / "models" / "paddle"
+    )
     return parser.parse_args(argv)
 
 
