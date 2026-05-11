@@ -121,6 +121,47 @@ class VerifyReleasePackageArtifactsTests(unittest.TestCase):
             with self.assertRaisesRegex(MODULE.VerificationError, "pylint"):
                 MODULE.validate_runtime(runtime_root)
 
+    def test_validate_runtime_rejects_non_headless_opencv_distribution(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            payload_root = Path(tmp_dir) / "payload"
+            self._write_payload_layout(payload_root)
+            runtime_root = payload_root / "app" / "resources" / "runtime"
+            dist_info = (
+                runtime_root
+                / "python"
+                / "lib"
+                / "python3.12"
+                / "site-packages"
+                / "opencv_contrib_python-4.10.0.84.dist-info"
+            )
+            dist_info.mkdir(parents=True)
+            (dist_info / "METADATA").write_text(
+                "Name: opencv-contrib-python\nVersion: 4.10.0.84\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(MODULE.VerificationError, "opencv-contrib-python"):
+                MODULE.validate_runtime(runtime_root)
+
+    def test_validate_runtime_rejects_crc32c_candidate_exclusion(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            payload_root = Path(tmp_dir) / "payload"
+            self._write_payload_layout(payload_root)
+            runtime_root = payload_root / "app" / "resources" / "runtime"
+            dist_info = (
+                runtime_root
+                / "python"
+                / "lib"
+                / "python3.12"
+                / "site-packages"
+                / "crc32c-2.8.dist-info"
+            )
+            dist_info.mkdir(parents=True)
+            (dist_info / "METADATA").write_text("Name: crc32c\nVersion: 2.8\n", encoding="utf-8")
+
+            with self.assertRaisesRegex(MODULE.VerificationError, "crc32c"):
+                MODULE.validate_runtime(runtime_root)
+
     def test_validate_packaged_ocr_reader_reports_smoke_failure(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             payload_root = Path(tmp_dir) / "payload"

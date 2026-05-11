@@ -130,6 +130,53 @@ def _install_aistudio_download_stub() -> None:
     sys.modules["aistudio_sdk.snapshot_download"] = snapshot_module
 
 
+def _allow_headless_opencv_for_paddlex_ocr_extra() -> None:
+    """Let PaddleX's OCR extra check accept ScriptScore's headless OpenCV wheel."""
+
+    try:
+        from paddlex.utils import deps as paddlex_deps  # type: ignore[import-untyped]
+    except Exception:
+        return
+
+    extras = getattr(paddlex_deps, "EXTRAS", None)
+    if not isinstance(extras, dict):
+        return
+
+    is_dep_available = getattr(paddlex_deps, "is_dep_available", None)
+    if callable(is_dep_available) and not getattr(
+        is_dep_available, "_scriptscore_headless_opencv_patch", False
+    ):
+        original_is_dep_available = is_dep_available
+
+        def patched_is_dep_available(dep: str, /, check_version: bool = False) -> bool:
+            if dep == "opencv-contrib-python":
+                return bool(
+                    original_is_dep_available("opencv-contrib-python-headless", check_version=False)
+                )
+            return bool(original_is_dep_available(dep, check_version=check_version))
+
+        patched_is_dep_available._scriptscore_headless_opencv_patch = True  # type: ignore[attr-defined]
+        patched_is_dep_available.cache_clear = (  # type: ignore[attr-defined]
+            getattr(original_is_dep_available, "cache_clear", lambda: None)
+        )
+        paddlex_deps.is_dep_available = patched_is_dep_available
+
+    for extra_name in ("ocr-core", "ocr", "base"):
+        extra = extras.get(extra_name)
+        if not isinstance(extra, dict) or "opencv-contrib-python" not in extra:
+            continue
+        extra.setdefault("opencv-contrib-python-headless", extra["opencv-contrib-python"])
+        extra.pop("opencv-contrib-python", None)
+
+    cache_clear = getattr(getattr(paddlex_deps, "is_extra_available", None), "cache_clear", None)
+    if callable(cache_clear):
+        cache_clear()
+
+    for module_name, module in list(sys.modules.items()):
+        if module_name.startswith("paddlex.") and not hasattr(module, "cv2"):
+            module.cv2 = cv2  # type: ignore[attr-defined]
+
+
 def verify_model_root(model_root: Path, *, paddleocr_version: str | None = None) -> None:
     """Validate the expected PaddleOCR model layout."""
 
@@ -220,6 +267,8 @@ class PaddleTextReader:
         _install_aistudio_download_stub()
 
         from paddleocr import PaddleOCR  # type: ignore[import-untyped]
+
+        _allow_headless_opencv_for_paddlex_ocr_extra()
 
         model_names = _model_names(model_root)
         self._engine = PaddleOCR(

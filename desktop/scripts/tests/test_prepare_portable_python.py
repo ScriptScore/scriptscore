@@ -156,6 +156,14 @@ class PreparePortablePythonTests(unittest.TestCase):
                         "# generated",
                         "aistudio-sdk==0.3.8",
                         "    # via paddlex",
+                        "bce-python-sdk==0.9.71",
+                        "    # via aistudio-sdk",
+                        "crc32c==2.8",
+                        "    # via bce-python-sdk",
+                        "opencv-contrib-python==4.10.0.84",
+                        "    # via paddlex",
+                        "opencv-contrib-python-headless==4.13.0.92",
+                        "    # via scriptscore",
                         "torch==2.11.0",
                         "    # via scriptscore",
                         "nvidia-cublas==13.1.0.3 ; sys_platform == 'linux'",
@@ -177,8 +185,14 @@ class PreparePortablePythonTests(unittest.TestCase):
             filtered = requirements_path.read_text(encoding="utf-8")
             self.assertIn("torch==2.11.0", filtered)
             self.assertIn("torchvision==0.26.0", filtered)
+            self.assertIn("opencv-contrib-python-headless", filtered)
             self.assertNotIn("aistudio-sdk", filtered)
+            self.assertNotIn("bce-python-sdk", filtered)
+            self.assertNotIn("crc32c", filtered)
+            self.assertNotIn("opencv-contrib-python==", filtered)
             self.assertNotIn("# via paddlex", filtered)
+            self.assertNotIn("# via aistudio-sdk", filtered)
+            self.assertNotIn("# via bce-python-sdk", filtered)
             self.assertNotIn("nvidia-cublas", filtered)
             self.assertNotIn("cuda-toolkit", filtered)
             self.assertNotIn("triton", filtered)

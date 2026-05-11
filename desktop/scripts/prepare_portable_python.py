@@ -31,6 +31,13 @@ PORTABLE_RUNTIME_EXCLUDED_REQUIREMENT_NAMES = frozenset(
         # path does not import it. Keep it out of release runtimes until
         # upstream publishes usable license/source evidence.
         "aistudio-sdk",
+        # bce-python-sdk is pulled through the excluded aistudio/cloud path; it
+        # and its crc32c dependency are not used by ScriptScore's offline OCR.
+        "bce-python-sdk",
+        "crc32c",
+        # PaddleX's ocr-core extra requests the GUI-enabled OpenCV wheel, but
+        # ScriptScore releases use the direct headless contrib dependency.
+        "opencv-contrib-python",
     }
 )
 DEV_ONLY_RELEASE_RUNTIME_REQUIREMENTS = frozenset(
