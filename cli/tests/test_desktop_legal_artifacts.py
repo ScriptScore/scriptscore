@@ -73,7 +73,78 @@ def test_license_policy_allows_permissive_and_flags_unknown_runtime() -> None:
     assert "Asset or native binary" in model_finding.message
 
 
-def test_python_license_replacements_stay_in_release_review() -> None:
+def test_license_policy_normalizes_approved_permissive_metadata() -> None:
+    assert legal.normalize_license("PSFL") == "PSF-2.0"
+    assert legal.normalize_license("Python Software Foundation License (PSFL)") == "PSF-2.0"
+    assert legal.normalize_license("Apache Software License") == "Apache-2.0"
+    assert legal.normalize_license("Apache 2.0") == "Apache-2.0"
+
+    for license_value in (
+        "PSF-2.0",
+        "MIT-CMU",
+        "BlueOak-1.0.0",
+        "CDLA-Permissive-2.0",
+    ):
+        item = legal.InventoryItem(
+            name=f"package-{license_value}",
+            version="1",
+            license=license_value,
+            source="python",
+            scope="python-runtime",
+            runtime=True,
+        )
+        assert legal.classify_item(item) is None
+
+
+def test_license_policy_accepts_permissive_or_branch_without_accepting_lgpl_and() -> None:
+    r_efi = legal.InventoryItem(
+        name="r-efi",
+        version="6.0.0",
+        license="MIT OR Apache-2.0 OR LGPL-2.1-or-later",
+        source="cargo",
+        scope="cargo-runtime",
+        runtime=True,
+    )
+    and_expression = legal.InventoryItem(
+        name="and-expression",
+        version="1",
+        license="MIT AND LGPL-2.1-or-later",
+        source="cargo",
+        scope="cargo-runtime",
+        runtime=True,
+    )
+    gpl_exception = legal.InventoryItem(
+        name="gpl-exception",
+        version="1",
+        license="BSD-3-Clause AND GPL-3.0-or-later WITH GCC-exception-3.1",
+        source="python",
+        scope="python-runtime",
+        runtime=True,
+    )
+
+    assert legal.classify_item(r_efi) is None
+    assert legal.classify_item(and_expression).severity == "review_required"
+    assert legal.classify_item(gpl_exception).severity == "review_required"
+
+
+def test_python_license_replacements_normalize_or_keep_release_review() -> None:
+    dateutil_license, dateutil_notice = legal.python_license_metadata(
+        {"name": "python-dateutil", "version": "2.9.0.post0", "license": "Dual License"}
+    )
+    dateutil = legal.InventoryItem(
+        name="python-dateutil",
+        version="2.9.0.post0",
+        license=dateutil_license,
+        source="python",
+        scope="python-runtime",
+        runtime=True,
+        notice=dateutil_notice,
+    )
+
+    assert dateutil_notice
+    assert dateutil_license == "BSD-3-Clause OR Apache-2.0"
+    assert legal.classify_item(dateutil) is None
+
     pandas_license, pandas_notice = legal.python_license_metadata(
         {
             "name": "pandas",

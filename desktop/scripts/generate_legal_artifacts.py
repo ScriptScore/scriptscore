@@ -24,16 +24,20 @@ ALLOWED_LICENSE_TOKENS = {
     "AGPL-3.0",
     "AGPL-3.0-only",
     "Apache-2.0",
+    "BlueOak-1.0.0",
     "BSD",
     "BSD-2-Clause",
     "BSD-3-Clause",
+    "CDLA-Permissive-2.0",
     "CC0",
     "CC0-1.0",
     "ISC",
     "MIT",
     "MIT-0",
+    "MIT-CMU",
     "MPL-2.0",
     "OFL-1.1",
+    "PSF-2.0",
     "Unicode-3.0",
     "Unicode-DFS-2016",
     "Zlib",
@@ -66,6 +70,18 @@ BLOCKED_PATTERNS = (
 BLOCKED_RUNTIME_PACKAGES = {
     "aistudio-sdk": "Package must not appear in distributed runtime artifacts until upstream publishes usable license/source evidence.",
 }
+LICENSE_NORMALIZATIONS = {
+    "apache 2.0": "Apache-2.0",
+    "apache 2.0 license": "Apache-2.0",
+    "apache license 2.0": "Apache-2.0",
+    "apache license, version 2.0": "Apache-2.0",
+    "apache license version 2.0": "Apache-2.0",
+    "apache software license": "Apache-2.0",
+    "apache software license (apache 2.0)": "Apache-2.0",
+    "psfl": "PSF-2.0",
+    "python software foundation license": "PSF-2.0",
+    "python software foundation license (psfl)": "PSF-2.0",
+}
 PYTHON_LICENSE_REPLACEMENTS = {
     "aistudio-sdk": (
         "LicenseRef-REVIEW-aistudio-sdk",
@@ -84,6 +100,11 @@ PYTHON_LICENSE_REPLACEMENTS = {
         "SciPy wheel metadata embeds full bundled-library notices. Classify the "
         "effective license expressions so blocked-word scans do not match GPL "
         "runtime exception prose.",
+    ),
+    "python-dateutil": (
+        "BSD-3-Clause OR Apache-2.0",
+        "Wheel metadata can declare only 'Dual License'; normalize to the "
+        "upstream-documented BSD-3-Clause or Apache-2.0 expression.",
     ),
 }
 NATIVE_SUFFIXES = {".so", ".dylib", ".dll", ".pyd"}
@@ -166,10 +187,10 @@ def normalize_license(value: str | None) -> str | None:
     if normalized in {"", "UNKNOWN", "Unknown", "LicenseRef-UNKNOWN"}:
         return None
     lowered = normalized.lower()
+    if lowered in LICENSE_NORMALIZATIONS:
+        return LICENSE_NORMALIZATIONS[lowered]
     if lowered.startswith("mit license") or lowered == "expat license":
         return "MIT"
-    if lowered in {"apache license 2.0", "apache license, version 2.0"}:
-        return "Apache-2.0"
     if lowered.startswith("bsd license"):
         return "BSD"
     if lowered.startswith("mozilla public license 2.0"):
@@ -181,6 +202,64 @@ def license_tokens(value: str | None) -> set[str]:
     if not value:
         return set()
     return set(re.findall(r"[A-Za-z0-9][A-Za-z0-9+.-]*", value))
+
+
+def strip_wrapping_parentheses(value: str) -> str:
+    expression = value.strip()
+    while expression.startswith("(") and expression.endswith(")"):
+        depth = 0
+        wraps_full_expression = True
+        for index, char in enumerate(expression):
+            if char == "(":
+                depth += 1
+            elif char == ")":
+                depth -= 1
+                if depth == 0 and index != len(expression) - 1:
+                    wraps_full_expression = False
+                    break
+        if not wraps_full_expression:
+            break
+        expression = expression[1:-1].strip()
+    return expression
+
+
+def split_top_level_operator(value: str, operator: str) -> list[str]:
+    expression = strip_wrapping_parentheses(value)
+    parts: list[str] = []
+    depth = 0
+    start = 0
+    pattern = re.compile(rf"\(|\)|(?<![A-Za-z0-9+.-]){operator}(?![A-Za-z0-9+.-])")
+    for match in pattern.finditer(expression):
+        token = match.group(0)
+        if token == "(":
+            depth += 1
+        elif token == ")":
+            depth = max(depth - 1, 0)
+        elif depth == 0:
+            parts.append(expression[start : match.start()].strip())
+            start = match.end()
+    parts.append(expression[start:].strip())
+    return [part for part in parts if part]
+
+
+def license_expression_is_allowed(value: str | None) -> bool:
+    license_value = normalize_license(value)
+    if not license_value:
+        return False
+
+    expression = strip_wrapping_parentheses(license_value)
+    or_parts = split_top_level_operator(expression, "OR")
+    if len(or_parts) > 1:
+        return any(license_expression_is_allowed(part) for part in or_parts)
+
+    and_parts = split_top_level_operator(expression, "AND")
+    if len(and_parts) > 1:
+        return all(license_expression_is_allowed(part) for part in and_parts)
+
+    if expression.lower().startswith("http"):
+        return False
+    tokens = license_tokens(expression)
+    return bool(tokens & ALLOWED_LICENSE_TOKENS) and not bool(tokens & REVIEW_LICENSE_TOKENS)
 
 
 def python_license_metadata(row: dict[str, Any]) -> tuple[str | None, str | None]:
@@ -241,6 +320,8 @@ def classify_item(item: InventoryItem) -> PolicyFinding | None:
         )
 
     tokens = license_tokens(license_value)
+    if license_expression_is_allowed(license_value):
+        return None
     if tokens & REVIEW_LICENSE_TOKENS:
         return PolicyFinding(
             "review_required",
@@ -250,8 +331,6 @@ def classify_item(item: InventoryItem) -> PolicyFinding | None:
             item.license,
             "GPL/LGPL or custom copyleft terms require release review.",
         )
-    if tokens & ALLOWED_LICENSE_TOKENS:
-        return None
     if license_value.lower().startswith("http"):
         return PolicyFinding(
             "review_required",
