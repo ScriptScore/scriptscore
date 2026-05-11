@@ -1,0 +1,69 @@
+{
+  "format": "scriptscore-frontend-static-asset-provenance-v1",
+  "assets": [
+    {
+      "source_path": "desktop/frontend/static/alignment-marks-infographic.png",
+      "license": "AGPL-3.0-only",
+      "provenance": "first_party",
+      "origin": "First-party ScriptScore UI guide image created for the desktop alignment-mark workflow.",
+      "evidence": [
+        "desktop/frontend/src/lib/components/desktop/SetupWorkspace.svelte"
+      ]
+    },
+    {
+      "source_path": "desktop/frontend/static/canvas-api-token-guide.png",
+      "license": "AGPL-3.0-only",
+      "provenance": "first_party",
+      "origin": "First-party ScriptScore UI guide image created for the Canvas API token setup workflow.",
+      "evidence": [
+        "desktop/frontend/src/lib/components/desktop/ProjectModeStep.svelte"
+      ]
+    },
+    {
+      "source_path": "desktop/frontend/static/ollama-api-token-guide.png",
+      "license": "AGPL-3.0-only",
+      "provenance": "first_party",
+      "origin": "First-party ScriptScore UI guide image created for the Ollama API token setup workflow.",
+      "evidence": [
+        "desktop/frontend/src/lib/components/desktop/AiAssistanceStep.svelte"
+      ]
+    },
+    {
+      "source_path": "desktop/frontend/static/redaction-regions-infographic.png",
+      "license": "AGPL-3.0-only",
+      "provenance": "first_party",
+      "origin": "First-party ScriptScore UI guide image created for the redaction-region setup workflow.",
+      "evidence": [
+        "desktop/frontend/src/lib/components/desktop/SetupWorkspace.svelte"
+      ]
+    },
+    {
+      "source_path": "desktop/frontend/static/student-intake-guide.png",
+      "license": "AGPL-3.0-only",
+      "provenance": "first_party",
+      "origin": "First-party ScriptScore UI guide image created for the student intake workflow.",
+      "evidence": [
+        "desktop/frontend/src/lib/components/desktop/StudentWorkflowSidebar.svelte"
+      ]
+    },
+    {
+      "source_path": "desktop/frontend/static/scriptscore-app-icon.png",
+      "license": "AGPL-3.0-only",
+      "provenance": "first_party",
+      "origin": "First-party ScriptScore app icon rendering used by the desktop frontend and browser icon metadata.",
+      "evidence": [
+        "desktop/frontend/src/app.html",
+        "desktop/frontend/src/lib/components/desktop/AppMark.svelte"
+      ]
+    },
+    {
+      "source_path": "desktop/frontend/static/scriptscore-mark.svg",
+      "license": "AGPL-3.0-only",
+      "provenance": "first_party",
+      "origin": "First-party ScriptScore mark SVG source committed as a static frontend asset.",
+      "evidence": [
+        "desktop/frontend/static/scriptscore-mark.svg"
+      ]
+    }
+  ]
+}
