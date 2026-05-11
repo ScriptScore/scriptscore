@@ -131,6 +131,20 @@ ASSET_SUFFIXES = {
     ".yml",
 }
 FRONTEND_GENERATED_SUFFIXES = {".css", ".html", ".js", ".json", ".map"}
+FONTSOURCE_ASSET_MAPPINGS = (
+    {
+        "filename_prefix": "figtree-",
+        "package_name": "@fontsource-variable/figtree",
+        "license": "OFL-1.1",
+        "license_path": "desktop/frontend/node_modules/@fontsource-variable/figtree/LICENSE",
+    },
+    {
+        "filename_prefix": "inter-",
+        "package_name": "@fontsource-variable/inter",
+        "license": "OFL-1.1",
+        "license_path": "desktop/frontend/node_modules/@fontsource-variable/inter/LICENSE",
+    },
+)
 
 
 @dataclass(frozen=True)
@@ -477,6 +491,18 @@ def npm_inventory(lock_path: Path) -> list[InventoryItem]:
     return items
 
 
+def npm_package_versions(lock_path: Path, package_names: set[str]) -> dict[str, str]:
+    if not lock_path.is_file():
+        return {}
+    lock = read_json(lock_path)
+    versions: dict[str, str] = {}
+    for package_name in package_names:
+        package = lock.get("packages", {}).get(f"node_modules/{package_name}")
+        if package and package.get("version"):
+            versions[package_name] = package["version"]
+    return versions
+
+
 def cargo_metadata(manifest_path: Path, metadata_file: Path | None) -> dict[str, Any]:
     if metadata_file is not None:
         return read_json(metadata_file)
@@ -567,13 +593,47 @@ def frontend_build_scope(root: Path, path: Path) -> str:
     return "frontend-asset"
 
 
-def frontend_build_inventory(root: Path) -> list[InventoryItem]:
+def fontsource_asset_item(
+    path: Path, package_versions: dict[str, str]
+) -> InventoryItem | None:
+    if path.suffix.lower() != ".woff2":
+        return None
+    filename = path.name.lower()
+    for mapping in FONTSOURCE_ASSET_MAPPINGS:
+        package_name = mapping["package_name"]
+        license_value = mapping["license"]
+        if filename.startswith(mapping["filename_prefix"]):
+            return InventoryItem(
+                name=project_relative(path),
+                version=package_versions.get(package_name),
+                license=license_value,
+                source="npm",
+                scope="frontend-font-asset",
+                path=project_relative(path),
+                runtime=True,
+                checksum_sha256=digest_file(path),
+                notice=(
+                    "Emitted frontend font asset mapped to "
+                    f"{package_name}; package metadata declares {license_value}, "
+                    f"with license text at `{mapping['license_path']}`."
+                ),
+            )
+    return None
+
+
+def frontend_build_inventory(
+    root: Path, package_versions: dict[str, str] | None = None
+) -> list[InventoryItem]:
     if not root.exists():
         return []
+    resolved_package_versions = package_versions or {}
     items: list[InventoryItem] = []
     for path in sorted(item for item in root.rglob("*") if item.is_file()):
         suffix = path.suffix.lower()
         if suffix not in ASSET_SUFFIXES and suffix not in NATIVE_SUFFIXES:
+            continue
+        if font_item := fontsource_asset_item(path, resolved_package_versions):
+            items.append(font_item)
             continue
         items.append(
             InventoryItem(
@@ -671,8 +731,12 @@ def generate(args: argparse.Namespace) -> int:
 
     python_items = python_inventory(runtime_manifest, args.python_root)
     npm_items = npm_inventory(args.npm_lock)
+    fontsource_package_versions = npm_package_versions(
+        args.npm_lock,
+        {mapping["package_name"] for mapping in FONTSOURCE_ASSET_MAPPINGS},
+    )
     cargo_items = cargo_inventory(args.cargo_manifest, args.cargo_metadata_file)
-    asset_items = frontend_build_inventory(args.frontend_build)
+    asset_items = frontend_build_inventory(args.frontend_build, fontsource_package_versions)
     asset_items.extend(file_inventory(args.paddle_models, "model-asset", "assets", runtime=True))
     native_items = runtime_native_inventory(runtime_root)
 

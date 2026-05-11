@@ -274,6 +274,7 @@ def test_frontend_build_inventory_separates_generated_outputs_from_assets(tmp_pa
     files = [
         "_app/env.js",
         "_app/immutable/assets/2.CNLA_Ghp.css",
+        "_app/immutable/assets/figtree-latin-wght-normal.D_ZTVpCC.woff2",
         "_app/immutable/assets/inter-latin-wght-normal.Dx4kXJAl.woff2",
         "_app/immutable/chunks/C0uQTxXd.js",
         "_app/version.json",
@@ -285,18 +286,105 @@ def test_frontend_build_inventory_separates_generated_outputs_from_assets(tmp_pa
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("fixture", encoding="utf-8")
 
-    items = legal.frontend_build_inventory(build_root)
-    scopes = {Path(item.name).relative_to(build_root).as_posix(): item.scope for item in items}
+    items = legal.frontend_build_inventory(
+        build_root,
+        {
+            "@fontsource-variable/figtree": "5.2.10",
+            "@fontsource-variable/inter": "5.2.8",
+        },
+    )
+    by_path = {Path(item.name).relative_to(build_root).as_posix(): item for item in items}
+    scopes = {path: item.scope for path, item in by_path.items()}
 
     assert scopes["_app/env.js"] == "frontend-build-output"
     assert scopes["_app/immutable/assets/2.CNLA_Ghp.css"] == "frontend-build-output"
     assert scopes["_app/immutable/chunks/C0uQTxXd.js"] == "frontend-build-output"
     assert scopes["_app/version.json"] == "frontend-build-output"
     assert scopes["index.html"] == "frontend-build-output"
-    assert scopes["_app/immutable/assets/inter-latin-wght-normal.Dx4kXJAl.woff2"] == (
-        "frontend-asset"
-    )
+    figtree = by_path["_app/immutable/assets/figtree-latin-wght-normal.D_ZTVpCC.woff2"]
+    inter = by_path["_app/immutable/assets/inter-latin-wght-normal.Dx4kXJAl.woff2"]
+    assert figtree.scope == "frontend-font-asset"
+    assert figtree.source == "npm"
+    assert figtree.version == "5.2.10"
+    assert figtree.license == "OFL-1.1"
+    assert "@fontsource-variable/figtree" in figtree.notice
+    assert legal.classify_item(figtree) is None
+    assert inter.scope == "frontend-font-asset"
+    assert inter.source == "npm"
+    assert inter.version == "5.2.8"
+    assert inter.license == "OFL-1.1"
+    assert "@fontsource-variable/inter" in inter.notice
+    assert legal.classify_item(inter) is None
     assert scopes["scriptscore-app-icon.png"] == "frontend-asset"
+
+
+def test_generate_maps_fontsource_woff2_assets_without_frontend_asset_findings(
+    tmp_path: Path,
+) -> None:
+    build_root = tmp_path / "desktop" / "frontend" / "build"
+    for file_name in (
+        "_app/immutable/assets/figtree-latin-ext-wght-normal.DCwSJGxG.woff2",
+        "_app/immutable/assets/inter-latin-wght-normal.Dx4kXJAl.woff2",
+    ):
+        path = build_root / file_name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("font fixture", encoding="utf-8")
+
+    lock_path = tmp_path / "package-lock.json"
+    write_json(
+        lock_path,
+        {
+            "packages": {
+                "node_modules/@fontsource-variable/figtree": {
+                    "version": "5.2.10",
+                    "license": "OFL-1.1",
+                    "dev": True,
+                },
+                "node_modules/@fontsource-variable/inter": {
+                    "version": "5.2.8",
+                    "license": "OFL-1.1",
+                    "dev": True,
+                },
+            }
+        },
+    )
+    cargo_path = tmp_path / "cargo.json"
+    write_json(cargo_path, {"workspace_members": [], "packages": []})
+
+    args = legal.parse_args(
+        [
+            "--check",
+            "--output-dir",
+            str(tmp_path / "legal"),
+            "--runtime-manifest",
+            str(tmp_path / "missing-runtime" / "runtime-manifest.json"),
+            "--npm-lock",
+            str(lock_path),
+            "--cargo-metadata-file",
+            str(cargo_path),
+            "--frontend-build",
+            str(build_root),
+            "--paddle-models",
+            str(tmp_path / "missing-models"),
+        ]
+    )
+
+    assert legal.generate(args) == 0
+    report = json.loads((tmp_path / "legal" / "license-policy-report.json").read_text())
+    assert report["summary"]["findingCount"] == 0
+    sbom = json.loads((tmp_path / "legal" / "sbom-assets.json").read_text())
+    font_assets = {
+        component["path"]: component
+        for component in sbom["components"]
+        if component["scope"] == "frontend-font-asset"
+    }
+    assert len(font_assets) == 2
+    assert all(component["license"] == "OFL-1.1" for component in font_assets.values())
+    assert all(component["source"] == "npm" for component in font_assets.values())
+    notices = (tmp_path / "legal" / "THIRD_PARTY_NOTICES.md").read_text(encoding="utf-8")
+    assert "@fontsource-variable/figtree" in notices
+    assert "@fontsource-variable/inter" in notices
+    assert "frontend-asset" not in notices
 
 
 def test_npm_and_cargo_inventory_parse_fixture_metadata(tmp_path: Path) -> None:
