@@ -9,6 +9,7 @@ import json
 import os
 import sys
 import tempfile
+import types
 from collections.abc import Iterable, Sequence
 from pathlib import Path
 from typing import Any, cast
@@ -104,6 +105,31 @@ def _disable_windows_paddle_ir_optim() -> None:
     inference.Config.switch_ir_optim = switch_ir_optim_off  # type: ignore[assignment, method-assign]
 
 
+def _install_aistudio_download_stub() -> None:
+    """Satisfy PaddleX's import-time AI Studio hook when local models are used."""
+
+    if (
+        "aistudio_sdk.snapshot_download" in sys.modules
+        or importlib.util.find_spec("aistudio_sdk") is not None
+    ):
+        return
+
+    package = types.ModuleType("aistudio_sdk")
+    package.__path__ = []  # type: ignore[attr-defined]
+    snapshot_module = types.ModuleType("aistudio_sdk.snapshot_download")
+
+    def snapshot_download(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError(
+            "AI Studio model downloads are disabled in ScriptScore's bundled PaddleOCR runtime; "
+            "configure local PaddleOCR model directories instead."
+        )
+
+    snapshot_module.snapshot_download = snapshot_download  # type: ignore[attr-defined]
+    package.snapshot_download = snapshot_module  # type: ignore[attr-defined]
+    sys.modules["aistudio_sdk"] = package
+    sys.modules["aistudio_sdk.snapshot_download"] = snapshot_module
+
+
 def verify_model_root(model_root: Path, *, paddleocr_version: str | None = None) -> None:
     """Validate the expected PaddleOCR model layout."""
 
@@ -191,6 +217,7 @@ class PaddleTextReader:
             import torch  # noqa: F401  # type: ignore[import-untyped]
 
         _disable_windows_paddle_ir_optim()
+        _install_aistudio_download_stub()
 
         from paddleocr import PaddleOCR  # type: ignore[import-untyped]
 

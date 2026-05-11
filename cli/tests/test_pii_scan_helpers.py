@@ -14,7 +14,7 @@ import numpy as np
 import pytest
 from PIL import Image, ImageDraw
 
-from scriptscore.pii_scan import engine
+from scriptscore.pii_scan import engine, reader
 from scriptscore.pii_scan.images import prepare_crop, region_ink_fraction, text_structure_score
 from scriptscore.pii_scan.matching import _normalized_phone, detect_student_pii
 from scriptscore.pii_scan.reader import PaddleTextReader, create_reader, verify_model_root
@@ -241,6 +241,34 @@ def test_paddle_reader_uses_paddleocr_3_constructor(
         "enable_mkldnn": False,
         "device": "cpu",
     }
+
+
+def test_aistudio_download_stub_satisfies_import_and_blocks_downloads(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delitem(sys.modules, "aistudio_sdk", raising=False)
+    monkeypatch.delitem(sys.modules, "aistudio_sdk.snapshot_download", raising=False)
+
+    original_find_spec = importlib.util.find_spec
+
+    def find_spec(name: str, path: object = None, target: object = None) -> object:
+        del path, target
+        if name == "aistudio_sdk":
+            return None
+        return original_find_spec(name)
+
+    monkeypatch.setattr("scriptscore.pii_scan.reader.importlib.util.find_spec", find_spec)
+
+    try:
+        reader._install_aistudio_download_stub()
+        snapshot_module = importlib.import_module("aistudio_sdk.snapshot_download")
+        snapshot_download = snapshot_module.snapshot_download
+
+        with pytest.raises(RuntimeError, match="AI Studio model downloads are disabled"):
+            snapshot_download(repo_id="PaddleX/PP-OCRv5_mobile_det", local_dir="/tmp/model")
+    finally:
+        sys.modules.pop("aistudio_sdk.snapshot_download", None)
+        sys.modules.pop("aistudio_sdk", None)
 
 
 def test_paddle_reader_normalizes_predict_payloads(monkeypatch: pytest.MonkeyPatch) -> None:

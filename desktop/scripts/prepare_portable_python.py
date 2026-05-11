@@ -22,6 +22,17 @@ DEFAULT_TORCH_BACKEND = "cpu"
 MACOS_X86_64_TARGET_TRIPLE = "x86_64-apple-darwin"
 MACOS_X86_64_PADDLE_WHEEL_NAME = "paddlepaddle-3.3.1-cp312-cp312-macosx_11_0_x86_64.whl"
 MACOS_X86_64_EXCLUDED_REQUIREMENTS = frozenset({"easyocr", "torch", "torchvision"})
+MACOS_X86_64_PADDLE_SUPPORT_REQUIREMENTS = frozenset(
+    {"networkx", "opt-einsum", "protobuf", "safetensors"}
+)
+PORTABLE_RUNTIME_EXCLUDED_REQUIREMENT_NAMES = frozenset(
+    {
+        # Paddlex declares this dependency, but ScriptScore's local PaddleOCR
+        # path does not import it. Keep it out of release runtimes until
+        # upstream publishes usable license/source evidence.
+        "aistudio-sdk",
+    }
+)
 PORTABLE_RUNTIME_EXCLUDED_REQUIREMENT_PREFIXES = (
     "cuda-",
     "nvidia-",
@@ -283,7 +294,7 @@ def requirement_name(requirement_line: str) -> str:
 
 def should_exclude_portable_runtime_requirement(requirement_line: str) -> bool:
     name = requirement_name(requirement_line)
-    return any(
+    return name in PORTABLE_RUNTIME_EXCLUDED_REQUIREMENT_NAMES or any(
         name == prefix.rstrip("-") or name.startswith(prefix)
         for prefix in PORTABLE_RUNTIME_EXCLUDED_REQUIREMENT_PREFIXES
     )
@@ -534,6 +545,29 @@ def remove_requirements(requirements_path: Path, package_names: set[str]) -> Non
     requirements_path.write_text("".join(filtered_lines), encoding="utf-8")
 
 
+def forced_requirements_for_target(target_triple: str) -> set[str]:
+    if target_triple == MACOS_X86_64_TARGET_TRIPLE:
+        return set(MACOS_X86_64_PADDLE_SUPPORT_REQUIREMENTS)
+    return set()
+
+
+def force_include_requirements(requirements_path: Path, package_names: set[str]) -> None:
+    if not package_names:
+        return
+
+    normalized_names = {name.lower().replace("_", "-") for name in package_names}
+    rewritten_lines: list[str] = []
+    for line in requirements_path.read_text(encoding="utf-8").splitlines(keepends=True):
+        stripped = line.strip()
+        is_requirement = bool(stripped) and not line.startswith((" ", "\t", "#"))
+        if is_requirement and requirement_name(line) in normalized_names and ";" in line:
+            requirement_without_marker = line.split(";", 1)[0].rstrip()
+            rewritten_lines.append(requirement_without_marker + "\n")
+            continue
+        rewritten_lines.append(line)
+    requirements_path.write_text("".join(rewritten_lines), encoding="utf-8")
+
+
 def install_locked_requirements(
     python_executable: Path,
     requirements_path: Path,
@@ -548,6 +582,7 @@ def install_locked_requirements(
         "--break-system-packages",
         "--torch-backend",
         torch_backend,
+        "--no-deps",
         "-r",
         str(requirements_path),
     ]
@@ -577,6 +612,7 @@ def prepare_portable_python(
         requirements_path = tmp_path / "runtime-requirements.txt"
         export_locked_runtime_requirements(requirements_path)
         remove_requirements(requirements_path, excluded_requirements_for_target(target_triple))
+        force_include_requirements(requirements_path, forced_requirements_for_target(target_triple))
         package_overrides = package_overrides_for_target(target_triple, tmp_path)
         cache_requirements_path = tmp_path / "runtime-requirements-cache-key.txt"
         shutil.copyfile(requirements_path, cache_requirements_path)

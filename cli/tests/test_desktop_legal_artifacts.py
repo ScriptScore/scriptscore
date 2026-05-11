@@ -123,7 +123,8 @@ def test_python_license_replacements_stay_in_release_review() -> None:
 
     assert aistudio_notice
     assert aistudio_license == "LicenseRef-REVIEW-aistudio-sdk"
-    assert aistudio_finding.severity == "review_required"
+    assert aistudio_finding.severity == "blocked"
+    assert "must not appear in distributed runtime" in aistudio_finding.message
 
 
 def test_notice_inventory_uses_display_values_for_assets_and_long_metadata(tmp_path: Path) -> None:

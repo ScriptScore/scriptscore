@@ -27,7 +27,6 @@
     "@testing-library/user-event": "^14.6.1",
     "@vitest/coverage-v8": "^4.1.2",
     "eslint": "^10.1.0",
-    "eslint-plugin-sonarjs": "^4.0.2",
     "eslint-plugin-svelte": "^3.16.0",
     "globals": "^17.4.0",
     "jsdom": "^29.0.1",

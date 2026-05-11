@@ -139,6 +139,7 @@ class PreparePortablePythonTests(unittest.TestCase):
                 "--break-system-packages",
                 "--torch-backend",
                 "cpu",
+                "--no-deps",
                 "-r",
                 str(requirements_path),
             ],
@@ -146,13 +147,15 @@ class PreparePortablePythonTests(unittest.TestCase):
             env=mock.ANY,
         )
 
-    def test_filter_portable_runtime_requirements_removes_gpu_torch_helpers(self) -> None:
+    def test_filter_portable_runtime_requirements_removes_blocked_and_gpu_helpers(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             requirements_path = Path(tmp_dir) / "requirements.txt"
             requirements_path.write_text(
                 "\n".join(
                     [
                         "# generated",
+                        "aistudio-sdk==0.3.8",
+                        "    # via paddlex",
                         "torch==2.11.0",
                         "    # via scriptscore",
                         "nvidia-cublas==13.1.0.3 ; sys_platform == 'linux'",
@@ -174,6 +177,8 @@ class PreparePortablePythonTests(unittest.TestCase):
             filtered = requirements_path.read_text(encoding="utf-8")
             self.assertIn("torch==2.11.0", filtered)
             self.assertIn("torchvision==0.26.0", filtered)
+            self.assertNotIn("aistudio-sdk", filtered)
+            self.assertNotIn("# via paddlex", filtered)
             self.assertNotIn("nvidia-cublas", filtered)
             self.assertNotIn("cuda-toolkit", filtered)
             self.assertNotIn("triton", filtered)
@@ -270,6 +275,34 @@ class PreparePortablePythonTests(unittest.TestCase):
             self.assertNotIn("easyocr", filtered)
             self.assertNotIn("torch==", filtered)
             self.assertNotIn("torchvision", filtered)
+
+    def test_force_include_requirements_removes_platform_marker_for_target_deps(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            requirements_path = Path(tmp_dir) / "requirements.txt"
+            requirements_path.write_text(
+                "\n".join(
+                    [
+                        "protobuf==7.34.1 ; platform_machine != 'x86_64' or sys_platform != 'darwin'",
+                        "    # via paddlepaddle",
+                        "networkx==3.6.1 ; platform_machine != 'x86_64' or sys_platform != 'darwin'",
+                        "    # via paddlepaddle",
+                        "numpy==2.4.3",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            MODULE.force_include_requirements(
+                requirements_path,
+                MODULE.forced_requirements_for_target(MODULE.MACOS_X86_64_TARGET_TRIPLE),
+            )
+
+            rewritten = requirements_path.read_text(encoding="utf-8")
+            self.assertIn("protobuf==7.34.1\n", rewritten)
+            self.assertIn("networkx==3.6.1\n", rewritten)
+            self.assertNotIn("platform_machine", rewritten)
+            self.assertIn("numpy==2.4.3", rewritten)
 
     def test_macos_x86_paddle_override_verifies_local_wheel_without_persisting_url(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
