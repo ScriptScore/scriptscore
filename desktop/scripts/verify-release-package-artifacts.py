@@ -30,6 +30,9 @@ ALLOWED_SECRET_MARKER_PATHS = {
 FORBIDDEN_RUNTIME_PYTHON_PACKAGES = frozenset(
     {
         "astroid",
+        "bce-python-sdk",
+        "crc32c",
+        "opencv-contrib-python",
         "pip-api",
         "pip-audit",
         "pylint",

@@ -213,14 +213,132 @@ def test_python_license_replacements_normalize_or_keep_release_review() -> None:
         scope="python-runtime",
         runtime=True,
     )
+    opencv_non_headless = legal.InventoryItem(
+        name="opencv-contrib-python",
+        version="4.10.0.84",
+        license="Apache-2.0",
+        source="python",
+        scope="python-runtime",
+        runtime=True,
+    )
+    crc32c = legal.InventoryItem(
+        name="crc32c",
+        version="2.8",
+        license="LGPL-2.1-or-later",
+        source="python",
+        scope="python-runtime",
+        runtime=True,
+    )
+    bce_python_sdk = legal.InventoryItem(
+        name="bce-python-sdk",
+        version="0.9.71",
+        license="Apache-2.0",
+        source="python",
+        scope="python-runtime",
+        runtime=True,
+    )
 
     pylint_finding = legal.classify_item(pylint)
     pip_audit_finding = legal.classify_item(pip_audit)
+    opencv_non_headless_finding = legal.classify_item(opencv_non_headless)
+    crc32c_finding = legal.classify_item(crc32c)
+    bce_python_sdk_finding = legal.classify_item(bce_python_sdk)
 
     assert pylint_finding.severity == "blocked"
     assert pip_audit_finding.severity == "blocked"
+    assert opencv_non_headless_finding.severity == "blocked"
+    assert crc32c_finding.severity == "blocked"
+    assert bce_python_sdk_finding.severity == "blocked"
     assert "dev-only" in pylint_finding.message.lower()
     assert "dev-only" in pip_audit_finding.message.lower()
+    assert "headless" in opencv_non_headless_finding.message.lower()
+    assert "offline ocr" in crc32c_finding.message.lower()
+    assert "offline ocr" in bce_python_sdk_finding.message.lower()
+
+
+def test_license_policy_accepts_reviewed_pymupdf_and_python_bidi_exceptions() -> None:
+    pymupdf_license, pymupdf_notice = legal.python_license_metadata(
+        {
+            "name": "PyMuPDF",
+            "version": "1.27.2.2",
+            "license": "Dual Licensed - GNU AFFERO GPL 3.0 or Artifex Commercial License",
+        }
+    )
+    python_bidi_license, python_bidi_notice = legal.python_license_metadata(
+        {
+            "name": "python-bidi",
+            "version": "0.6.7",
+            "license": "GNU Library or Lesser General Public License (LGPL)",
+        }
+    )
+    pymupdf = legal.InventoryItem(
+        name="PyMuPDF",
+        version="1.27.2.2",
+        license=pymupdf_license,
+        source="python",
+        scope="python-runtime",
+        runtime=True,
+        notice=pymupdf_notice,
+    )
+    python_bidi = legal.InventoryItem(
+        name="python-bidi",
+        version="0.6.7",
+        license=python_bidi_license,
+        source="python",
+        scope="python-runtime",
+        runtime=True,
+        notice=python_bidi_notice,
+    )
+    changed_bidi = legal.InventoryItem(
+        name="python-bidi",
+        version="0.6.8",
+        license=python_bidi_license,
+        source="python",
+        scope="python-runtime",
+        runtime=True,
+        notice=python_bidi_notice,
+    )
+
+    assert pymupdf_notice
+    assert python_bidi_notice
+    assert legal.classify_item(pymupdf) is None
+    assert legal.classify_item(python_bidi) is None
+    changed_bidi_finding = legal.classify_item(changed_bidi)
+    assert changed_bidi_finding.severity == "review_required"
+
+
+def test_license_policy_covers_native_libraries_for_reviewed_runtime_exceptions() -> None:
+    pymupdf_native = legal.InventoryItem(
+        name="desktop/dist/bundled-runtime/python/lib/python3.12/site-packages/pymupdf/libmupdf.dylib",
+        version=None,
+        license=None,
+        source="runtime",
+        scope="native-library",
+        path="desktop/dist/bundled-runtime/python/lib/python3.12/site-packages/pymupdf/libmupdf.dylib",
+        runtime=True,
+    )
+    python_bidi_native = legal.InventoryItem(
+        name="desktop/dist/bundled-runtime/python/lib/python3.12/site-packages/bidi/bidi.so",
+        version=None,
+        license=None,
+        source="runtime",
+        scope="native-library",
+        path="desktop/dist/bundled-runtime/python/lib/python3.12/site-packages/bidi/bidi.so",
+        runtime=True,
+    )
+    unknown_native = legal.InventoryItem(
+        name="desktop/dist/bundled-runtime/python/lib/native/other.so",
+        version=None,
+        license=None,
+        source="runtime",
+        scope="native-library",
+        path="desktop/dist/bundled-runtime/python/lib/native/other.so",
+        runtime=True,
+    )
+
+    assert legal.classify_item(pymupdf_native) is None
+    assert legal.classify_item(python_bidi_native) is None
+    assert legal.classify_item(unknown_native).severity == "review_required"
 
 
 def test_notice_inventory_uses_display_values_for_assets_and_long_metadata(tmp_path: Path) -> None:
@@ -250,6 +368,15 @@ def test_notice_inventory_uses_display_values_for_assets_and_long_metadata(tmp_p
             scope="frontend-asset",
             runtime=True,
         ),
+        legal.InventoryItem(
+            name="desktop/dist/bundled-runtime/python/lib/python3.12/site-packages/pymupdf/libmupdf.dylib",
+            version=None,
+            license=None,
+            source="runtime",
+            scope="native-library",
+            path="desktop/dist/bundled-runtime/python/lib/python3.12/site-packages/pymupdf/libmupdf.dylib",
+            runtime=True,
+        ),
     ]
 
     legal.write_notices(notices_path, items, [])
@@ -265,6 +392,10 @@ def test_notice_inventory_uses_display_values_for_assets_and_long_metadata(tmp_p
     assert (
         "desktop/frontend/build/scriptscore-app-icon.png,Not applicable,"
         "Release review required,assets,frontend-asset"
+    ) in notices
+    assert (
+        "desktop/dist/bundled-runtime/python/lib/python3.12/site-packages/pymupdf/libmupdf.dylib,"
+        "Not applicable,Covered by reviewed runtime package,runtime,native-library"
     ) in notices
     assert "## Review Findings" not in notices
 

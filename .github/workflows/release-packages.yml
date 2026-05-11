@@ -304,6 +304,7 @@ jobs:
           ./desktop/scripts/prepare-bundled-runtime.sh
           ./desktop/scripts/smoke-bundled-runtime.sh
           python desktop/scripts/generate_legal_artifacts.py
+          python desktop/scripts/enforce_release_legal_policy.py
           python desktop/scripts/check_scriptscoreplus_boundary.py
 
       - name: Build Tauri packages

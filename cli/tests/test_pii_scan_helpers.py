@@ -243,6 +243,51 @@ def test_paddle_reader_uses_paddleocr_3_constructor(
     }
 
 
+def test_paddlex_ocr_extra_allows_headless_opencv(monkeypatch: pytest.MonkeyPatch) -> None:
+    deps_module = types.ModuleType("paddlex.utils.deps")
+    deps_module.EXTRAS = {  # type: ignore[attr-defined]
+        "ocr-core": {
+            "opencv-contrib-python": ["opencv-contrib-python==4.10.0.84"],
+            "python-bidi": ["python-bidi"],
+        },
+        "ocr": {"opencv-contrib-python": ["opencv-contrib-python==4.10.0.84"]},
+    }
+
+    def is_dep_available(dep: str, /, check_version: bool = False) -> bool:
+        del check_version
+        return dep == "opencv-contrib-python-headless"
+
+    is_dep_available.cache_clear = lambda: None  # type: ignore[attr-defined]
+    deps_module.is_dep_available = is_dep_available  # type: ignore[attr-defined]
+
+    def is_extra_available(_extra: str) -> bool:
+        return False
+
+    is_extra_available.cache_clear = lambda: None  # type: ignore[attr-defined]
+    deps_module.is_extra_available = is_extra_available  # type: ignore[attr-defined]
+
+    utils_module = types.ModuleType("paddlex.utils")
+    utils_module.deps = deps_module  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "paddlex", types.ModuleType("paddlex"))
+    monkeypatch.setitem(sys.modules, "paddlex.utils", utils_module)
+    monkeypatch.setitem(sys.modules, "paddlex.utils.deps", deps_module)
+    image_reader_module = types.ModuleType("paddlex.inference.common.reader.image_reader")
+    monkeypatch.setitem(
+        sys.modules,
+        "paddlex.inference.common.reader.image_reader",
+        image_reader_module,
+    )
+
+    reader._allow_headless_opencv_for_paddlex_ocr_extra()
+
+    assert "opencv-contrib-python" not in deps_module.EXTRAS["ocr-core"]
+    assert "opencv-contrib-python-headless" in deps_module.EXTRAS["ocr-core"]
+    assert "python-bidi" in deps_module.EXTRAS["ocr-core"]
+    assert "opencv-contrib-python-headless" in deps_module.EXTRAS["ocr"]
+    assert deps_module.is_dep_available("opencv-contrib-python")
+    assert image_reader_module.cv2 is reader.cv2  # type: ignore[attr-defined]
+
+
 def test_aistudio_download_stub_satisfies_import_and_blocks_downloads(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

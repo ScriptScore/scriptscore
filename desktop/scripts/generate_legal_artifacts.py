@@ -70,10 +70,29 @@ BLOCKED_PATTERNS = (
 BLOCKED_RUNTIME_PACKAGES = {
     "aistudio-sdk": "Package must not appear in distributed runtime artifacts until upstream publishes usable license/source evidence.",
     "astroid": "Dev-only quality package must not appear in distributed runtime artifacts.",
+    "bce-python-sdk": "Baidu cloud SDK is not used by ScriptScore's offline OCR path and must not appear in distributed runtime artifacts.",
+    "crc32c": "Transitive bce-python-sdk dependency is not used by ScriptScore's offline OCR path and must not appear in distributed runtime artifacts.",
+    "opencv-contrib-python": "Non-headless OpenCV must not appear in distributed runtime artifacts; use opencv-contrib-python-headless instead.",
     "pip-api": "Dev-only security tooling dependency must not appear in distributed runtime artifacts.",
     "pip-audit": "Dev-only security tooling must not appear in distributed runtime artifacts.",
     "pylint": "Dev-only quality package must not appear in distributed runtime artifacts.",
 }
+APPROVED_RUNTIME_REVIEW_PACKAGES: dict[str, tuple[set[str], set[str], str]] = {
+    "pymupdf": (
+        {"1.27.2.2"},
+        {"Dual Licensed - GNU AFFERO GPL 3.0 or Artifex Commercial License"},
+        "python-runtime",
+    ),
+    "python-bidi": (
+        {"0.6.7"},
+        {"GNU Library or Lesser General Public License (LGPL)"},
+        "python-runtime",
+    ),
+}
+APPROVED_NATIVE_LIBRARY_PATH_PARTS = (
+    "/site-packages/bidi/",
+    "/site-packages/pymupdf/",
+)
 LICENSE_NORMALIZATIONS = {
     "apache 2.0": "Apache-2.0",
     "apache 2.0 license": "Apache-2.0",
@@ -108,6 +127,19 @@ PYTHON_LICENSE_REPLACEMENTS = {
         "BSD-3-Clause OR Apache-2.0",
         "Wheel metadata can declare only 'Dual License'; normalize to the "
         "upstream-documented BSD-3-Clause or Apache-2.0 expression.",
+    ),
+    "pymupdf": (
+        "Dual Licensed - GNU AFFERO GPL 3.0 or Artifex Commercial License",
+        "Release-approved exception for ScriptScore's AGPL-3.0-only client posture. "
+        "Include PyMuPDF/MuPDF notices and source availability/source-offer evidence "
+        "for the released artifact, or use Artifex commercial licensing for any "
+        "non-AGPL distribution.",
+    ),
+    "python-bidi": (
+        "GNU Library or Lesser General Public License (LGPL)",
+        "Release-approved LGPL-family exception for the PaddleOCR/PaddleX OCR path. "
+        "Include LGPL license text, package notices, and source/relink compliance notes "
+        "for the released artifact.",
     ),
 }
 NATIVE_SUFFIXES = {".so", ".dylib", ".dll", ".pyd"}
@@ -287,6 +319,25 @@ def python_license_metadata(row: dict[str, Any]) -> tuple[str | None, str | None
     return normalize_license(row.get("license")), None
 
 
+def approved_runtime_review_package(item: InventoryItem, license_value: str | None) -> bool:
+    approval = APPROVED_RUNTIME_REVIEW_PACKAGES.get(item.name.lower())
+    if approval is None or not item.runtime:
+        return False
+    versions, licenses, scope = approval
+    if item.scope != scope:
+        return False
+    if item.version not in versions:
+        return False
+    return license_value in licenses
+
+
+def approved_native_library(item: InventoryItem) -> bool:
+    if item.scope != "native-library" or not item.path:
+        return False
+    path = item.path.replace("\\", "/")
+    return any(part in path for part in APPROVED_NATIVE_LIBRARY_PATH_PARTS)
+
+
 def classify_item(item: InventoryItem) -> PolicyFinding | None:
     blocked_package_message = BLOCKED_RUNTIME_PACKAGES.get(item.name.lower())
     if item.runtime and blocked_package_message is not None:
@@ -315,6 +366,9 @@ def classify_item(item: InventoryItem) -> PolicyFinding | None:
     if item.scope == "frontend-build-output":
         return None
 
+    if approved_native_library(item):
+        return None
+
     if item.scope in {"frontend-asset", "model-asset", "native-library"}:
         return PolicyFinding(
             "review_required",
@@ -335,6 +389,9 @@ def classify_item(item: InventoryItem) -> PolicyFinding | None:
             item.license,
             "No usable license metadata was found.",
         )
+
+    if approved_runtime_review_package(item, license_value):
+        return None
 
     tokens = license_tokens(license_value)
     if license_expression_is_allowed(license_value):
@@ -669,6 +726,8 @@ def notice_inventory_license(item: InventoryItem) -> str:
         return item.license
     if item.scope == "frontend-build-output":
         return "Covered by source package"
+    if approved_native_library(item):
+        return "Covered by reviewed runtime package"
     if item.scope in {"frontend-asset", "model-asset", "native-library"}:
         return "Release review required"
     return "Not specified"
