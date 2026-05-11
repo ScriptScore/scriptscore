@@ -197,6 +197,31 @@ def test_python_license_replacements_normalize_or_keep_release_review() -> None:
     assert aistudio_finding.severity == "blocked"
     assert "must not appear in distributed runtime" in aistudio_finding.message
 
+    pylint = legal.InventoryItem(
+        name="pylint",
+        version="3.3.9",
+        license="GPL-2.0-or-later",
+        source="python",
+        scope="python-runtime",
+        runtime=True,
+    )
+    pip_audit = legal.InventoryItem(
+        name="pip-audit",
+        version="2.10.0",
+        license="Apache-2.0",
+        source="python",
+        scope="python-runtime",
+        runtime=True,
+    )
+
+    pylint_finding = legal.classify_item(pylint)
+    pip_audit_finding = legal.classify_item(pip_audit)
+
+    assert pylint_finding.severity == "blocked"
+    assert pip_audit_finding.severity == "blocked"
+    assert "dev-only" in pylint_finding.message.lower()
+    assert "dev-only" in pip_audit_finding.message.lower()
+
 
 def test_notice_inventory_uses_display_values_for_assets_and_long_metadata(tmp_path: Path) -> None:
     notices_path = tmp_path / "THIRD_PARTY_NOTICES.md"
