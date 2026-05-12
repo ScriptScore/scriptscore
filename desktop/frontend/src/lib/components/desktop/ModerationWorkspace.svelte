@@ -8,6 +8,7 @@
     CheckListIcon,
     EyeIcon,
     File02Icon,
+    FileQuestionMarkIcon,
     SquareArrowShrink02Icon
   } from '@hugeicons/core-free-icons';
   import {
@@ -105,6 +106,7 @@
   let evidenceLineHeightStyle = '1rem';
   let feedbackFontSizeStyle = '0.6875rem';
   let feedbackLineHeightStyle = '1rem';
+  let moderationTipsOpen = false;
   let previewPopoverRef: HTMLDivElement | null = null;
   let previewTriggerElement: HTMLElement | null = null;
   let previewOpenSuppressedTarget: Node | null = null;
@@ -759,61 +761,88 @@
                 {/each}
               </div>
             </div>
-            <DesktopPopover
-              bind:open={evidenceControlsOpen}
-              rootClass="relative shrink-0"
-              triggerClass="inline-flex h-10 w-10 items-center justify-center p-0 text-text-muted transition-colors hover:text-text-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
-              triggerLabel="Moderation view settings"
-              triggerAriaHaspopup="dialog"
-              panelRole="dialog"
-              panelAriaLabel="Moderation view settings"
-              panelClass="w-64 p-3"
-              align="end"
-              aria-label="Moderation view settings"
-            >
-              <svelte:fragment slot="trigger">
-                <HugeiconsIcon icon={AccountSetting01Icon} size={16} strokeWidth={1.8} aria-hidden="true" />
-              </svelte:fragment>
+            <div class="flex shrink-0 items-center">
+              <DesktopPopover
+                bind:open={moderationTipsOpen}
+                rootClass="relative shrink-0"
+                triggerClass="inline-flex h-10 items-center justify-center gap-1.5 px-2.5 text-xs font-medium text-text-muted transition-colors hover:text-text-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                triggerLabel="Moderation tips"
+                triggerAriaHaspopup="dialog"
+                panelRole="dialog"
+                panelAriaLabel="Moderation tips"
+                panelClass="w-[min(42rem,calc(100vw-4rem))] max-w-[calc(100vw-4rem)] space-y-3 p-3"
+                align="end"
+                aria-label="Moderation tips"
+              >
+                <svelte:fragment slot="trigger">
+                  <HugeiconsIcon icon={FileQuestionMarkIcon} size={16} strokeWidth={1.8} aria-hidden="true" />
+                  <span>Moderation Tips</span>
+                </svelte:fragment>
+                <img
+                  class="block h-auto w-full rounded-lg border border-border-subtle object-contain"
+                  src="/moderation-question-selection-tips.png"
+                  alt="Synthetic guide showing moderation question tabs, score lanes, outlier review, and accept action"
+                />
+                <p class="text-sm leading-5 text-workspace-text-secondary">
+                  Pick one question, compare anonymous answers within the vertical score lanes, review outliers, then use Accept in the question tab once the lanes look consistent.
+                </p>
+              </DesktopPopover>
+              <DesktopPopover
+                bind:open={evidenceControlsOpen}
+                rootClass="relative shrink-0"
+                triggerClass="inline-flex h-10 w-10 items-center justify-center p-0 text-text-muted transition-colors hover:text-text-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                triggerLabel="Moderation view settings"
+                triggerAriaHaspopup="dialog"
+                panelRole="dialog"
+                panelAriaLabel="Moderation view settings"
+                panelClass="w-64 p-3"
+                align="end"
+                aria-label="Moderation view settings"
+              >
+                <svelte:fragment slot="trigger">
+                  <HugeiconsIcon icon={AccountSetting01Icon} size={16} strokeWidth={1.8} aria-hidden="true" />
+                </svelte:fragment>
 
-              <div class="text-[11px] font-semibold uppercase tracking-wide text-text-muted">
-                Evidence
-              </div>
-              <SegmentedControl
-                class="mt-2 w-full"
-                options={evidenceViewOptions}
-                value={evidenceView}
-                ariaLabel="Evidence view"
-                onChange={(value) => {
-                  evidenceView = value as EvidenceViewMode;
-                }}
-              />
-
-              <div class="mt-3 border-t border-border-default pt-3">
-                <ToggleRow
-                  checked={showStudentNames}
-                  title="Actual student names"
-                  description={showStudentNames
-                    ? 'Show live LMS roster names on answer cards.'
-                    : 'Keep moderation cards anonymous by default.'}
-                  onToggle={(checked) => {
-                    showStudentNames = checked;
+                <div class="text-[11px] font-semibold uppercase tracking-wide text-text-muted">
+                  Evidence
+                </div>
+                <SegmentedControl
+                  class="mt-2 w-full"
+                  options={evidenceViewOptions}
+                  value={evidenceView}
+                  ariaLabel="Evidence view"
+                  onChange={(value) => {
+                    evidenceView = value as EvidenceViewMode;
                   }}
                 />
-              </div>
 
-              <label class="mt-3 block text-[11px] font-semibold uppercase tracking-wide text-text-muted">
-                Size
-                <input
-                  class="mt-2 w-full accent-interaction-selected"
-                  type="range"
-                  min="0"
-                  max="192"
-                  step="1"
-                  bind:value={cardSize}
-                  aria-label="Answer card size"
-                />
-              </label>
-            </DesktopPopover>
+                <div class="mt-3 border-t border-border-default pt-3">
+                  <ToggleRow
+                    checked={showStudentNames}
+                    title="Actual student names"
+                    description={showStudentNames
+                      ? 'Show live LMS roster names on answer cards.'
+                      : 'Keep moderation cards anonymous by default.'}
+                    onToggle={(checked) => {
+                      showStudentNames = checked;
+                    }}
+                  />
+                </div>
+
+                <label class="mt-3 block text-[11px] font-semibold uppercase tracking-wide text-text-muted">
+                  Size
+                  <input
+                    class="mt-2 w-full accent-interaction-selected"
+                    type="range"
+                    min="0"
+                    max="192"
+                    step="1"
+                    bind:value={cardSize}
+                    aria-label="Answer card size"
+                  />
+                </label>
+              </DesktopPopover>
+            </div>
           </div>
         </div>
 

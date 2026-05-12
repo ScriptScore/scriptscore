@@ -8,7 +8,7 @@ COVERAGE_FILE ?= /tmp/scriptscore-cli.coverage
 SONAR_HOST_URL ?= https://sonarcloud.io
 SONAR_BRANCH_NAME ?=
 
-.PHONY: cli-lint cli-quality cargo-fmt lint-rust lint-frontend coverage-frontend quality-frontend quality-metrics coverage-rust unsafe-report sonar-local quality review-quality license-compliance prepare-desktop-runtime prepare-desktop-portable-python smoke-desktop-runtime package-desktop-linux package-desktop-rpm
+.PHONY: cli-lint cli-quality cargo-fmt lint-rust lint-frontend build-frontend coverage-frontend quality-frontend quality-metrics coverage-rust unsafe-report sonar-local quality review-quality license-compliance prepare-desktop-runtime prepare-desktop-portable-python smoke-desktop-runtime package-desktop-linux package-desktop-rpm
 
 cli-lint:
 	UV_CACHE_DIR="$(UV_CACHE_DIR)" uv --directory cli run ruff check . --cache-dir "$(RUFF_CACHE_DIR)"
@@ -26,6 +26,9 @@ lint-rust:
 
 lint-frontend:
 	npm --prefix desktop/frontend run lint
+
+build-frontend:
+	npm --prefix desktop/frontend run build
 
 coverage-frontend:
 	npm --prefix desktop/frontend run coverage
@@ -76,7 +79,7 @@ package-desktop-linux:
 package-desktop-rpm:
 	./desktop/scripts/build-desktop-package.sh rpm
 
-license-compliance:
+license-compliance: build-frontend
 	python3 scripts/check_spdx_headers.py
 	python3 desktop/scripts/check_scriptscoreplus_boundary.py
 	python3 desktop/scripts/generate_legal_artifacts.py --check

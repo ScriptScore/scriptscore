@@ -11,6 +11,15 @@
       ]
     },
     {
+      "source_path": "desktop/frontend/static/moderation-question-selection-tips.png",
+      "license": "AGPL-3.0-only",
+      "provenance": "first_party",
+      "origin": "First-party ScriptScore UI guide image created for the moderation question-selection workflow.",
+      "evidence": [
+        "desktop/frontend/src/lib/components/desktop/ModerationWorkspace.svelte"
+      ]
+    },
+    {
       "source_path": "desktop/frontend/static/canvas-api-token-guide.png",
       "license": "AGPL-3.0-only",
       "provenance": "first_party",
@@ -44,6 +53,15 @@
       "origin": "First-party ScriptScore UI guide image created for the student intake workflow.",
       "evidence": [
         "desktop/frontend/src/lib/components/desktop/StudentWorkflowSidebar.svelte"
+      ]
+    },
+    {
+      "source_path": "desktop/frontend/static/template-pdf-question-id-guide.png",
+      "license": "AGPL-3.0-only",
+      "provenance": "first_party",
+      "origin": "First-party ScriptScore UI guide image created for the Create Project template PDF workflow.",
+      "evidence": [
+        "desktop/frontend/src/lib/components/desktop/CreateProjectPanel.svelte"
       ]
     },
     {

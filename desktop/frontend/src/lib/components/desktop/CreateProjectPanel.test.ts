@@ -57,4 +57,22 @@ describe('CreateProjectPanel', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Create Project' }));
     expect(onSubmitCreate).toHaveBeenCalledTimes(1);
   });
+
+  it('opens the template PDF guide from the template field', async () => {
+    render(CreateProjectPanel, {
+      hasDesktopHost: true,
+      busyAction: null,
+      createInput: createInput()
+    });
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Template guide' }));
+
+    expect(screen.getByRole('dialog', { name: 'Template PDF guide' })).toBeTruthy();
+    const guideImage = screen.getByRole('img', {
+      name: 'Synthetic guide showing supported template PDF question numbering and page margin examples'
+    }) as HTMLImageElement;
+    expect(guideImage.getAttribute('src')).toBe('/template-pdf-question-id-guide.png');
+    expect(screen.getByText(/Use one full-width column/)).toBeTruthy();
+    expect(screen.getByText(/avoid embedded parts/)).toBeTruthy();
+  });
 });
