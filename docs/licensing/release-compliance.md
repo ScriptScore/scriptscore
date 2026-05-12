@@ -30,5 +30,9 @@ Do not publish binary artifacts until third-party notices, SBOM/dependency inven
 
 Use `desktop/dist/legal/license-policy-report.json` to find release review
 items, and record decisions in `docs/licensing/dependency-review-register.md`.
+Public notice text in `THIRD_PARTY_NOTICES.md` is displayed in Settings / Legal
+and should not contain maintainer checklist instructions. Keep release-owner
+instructions in `dependency-review-register.md`, provenance metadata, or
+`license-policy-report.json` `releaseObligations`.
 
 Linux is the only verified desktop packaging target for the current public preview. Windows and macOS installers are in progress and should not be published until platform-specific testing and release review are complete.

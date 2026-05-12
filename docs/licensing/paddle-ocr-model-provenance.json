@@ -6,7 +6,8 @@
     "https://huggingface.co/PaddlePaddle/PP-OCRv5_mobile_rec",
     "https://raw.githubusercontent.com/PaddlePaddle/PaddleOCR/main/LICENSE"
   ],
-  "redistribution_terms": "Apache-2.0 permits redistribution in source or object form when recipients receive a copy of the license, copyright/patent/trademark/attribution notices from the source form are retained, and modified files carry prominent change notices. Preserve any upstream NOTICE text if PaddleOCR adds one for these model distributions.",
+  "redistribution_terms": "Apache-2.0 permits redistribution in source or object form when recipients receive a copy of the license, copyright/patent/trademark/attribution notices from the source form are retained, and modified files carry prominent change notices.",
+  "release_obligations": "Preserve any upstream NOTICE text if PaddleOCR adds one for these model distributions, and re-check model checksums before replacing bundled files.",
   "models": [
     {
       "model_name": "PP-OCRv5_mobile_det",

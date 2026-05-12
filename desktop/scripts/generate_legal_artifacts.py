@@ -25,9 +25,7 @@ FRONTEND_STATIC_ASSET_PROVENANCE = (
 PADDLE_OCR_MODEL_PROVENANCE = (
     PROJECT_ROOT / "docs" / "licensing" / "paddle-ocr-model-provenance.json"
 )
-NATIVE_RUNTIME_PROVENANCE = (
-    PROJECT_ROOT / "docs" / "licensing" / "native-runtime-provenance.json"
-)
+NATIVE_RUNTIME_PROVENANCE = PROJECT_ROOT / "docs" / "licensing" / "native-runtime-provenance.json"
 
 ALLOWED_LICENSE_TOKENS = {
     "0BSD",
@@ -121,42 +119,57 @@ LICENSE_NORMALIZATIONS = {
     "python software foundation license": "PSF-2.0",
     "python software foundation license (psfl)": "PSF-2.0",
 }
-PYTHON_LICENSE_REPLACEMENTS = {
-    "aistudio-sdk": (
-        "LicenseRef-REVIEW-aistudio-sdk",
-        "Upstream wheel metadata declares License: UNKNOWN; keep this runtime "
-        "dependency in release review until upstream publishes usable license "
-        "metadata or the dependency is removed.",
-    ),
-    "pandas": (
-        "BSD-3-Clause",
-        "Wheel metadata can embed full bundled dependency notices in the License "
-        "field; keep the inventory summary to the package license expression.",
-    ),
-    "scipy": (
-        "BSD-3-Clause AND BSD-3-Clause-Open-MPI AND GPL-3.0-or-later WITH GCC-exception-3.1",
-        "SciPy wheel metadata embeds full bundled-library notices. Classify the "
-        "effective license expressions so blocked-word scans do not match GPL "
-        "runtime exception prose.",
-    ),
-    "python-dateutil": (
-        "BSD-3-Clause OR Apache-2.0",
-        "Wheel metadata can declare only 'Dual License'; normalize to the "
-        "upstream-documented BSD-3-Clause or Apache-2.0 expression.",
-    ),
-    "pymupdf": (
-        "Dual Licensed - GNU AFFERO GPL 3.0 or Artifex Commercial License",
-        "Release-approved exception for ScriptScore's AGPL-3.0-only client posture. "
-        "Include PyMuPDF/MuPDF notices and source availability/source-offer evidence "
-        "for the released artifact, or use Artifex commercial licensing for any "
-        "non-AGPL distribution.",
-    ),
-    "python-bidi": (
-        "GNU Library or Lesser General Public License (LGPL)",
-        "Release-approved LGPL-family exception for the PaddleOCR/PaddleX OCR path. "
-        "Include LGPL license text, package notices, and source/relink compliance notes "
-        "for the released artifact.",
-    ),
+PYTHON_LICENSE_REPLACEMENTS: dict[str, dict[str, str]] = {
+    "aistudio-sdk": {
+        "license": "LicenseRef-REVIEW-aistudio-sdk",
+        "release_obligations": (
+            "Keep this runtime dependency in release review until upstream publishes "
+            "usable license metadata or the dependency is removed."
+        ),
+    },
+    "pandas": {
+        "license": "BSD-3-Clause",
+        "release_obligations": (
+            "Review long upstream wheel license metadata when pandas version or "
+            "license metadata changes."
+        ),
+    },
+    "scipy": {
+        "license": (
+            "BSD-3-Clause AND BSD-3-Clause-Open-MPI AND GPL-3.0-or-later WITH GCC-exception-3.1"
+        ),
+        "notice": "SciPy wheel metadata includes bundled-library license attributions.",
+        "release_obligations": (
+            "Include generated notices and bundled-library attributions from the "
+            "wheel metadata. Reopen review if SciPy version or license metadata changes."
+        ),
+    },
+    "python-dateutil": {
+        "license": "BSD-3-Clause OR Apache-2.0",
+        "release_obligations": (
+            "Recheck upstream license metadata if python-dateutil changes away from "
+            "the reviewed BSD-3-Clause or Apache-2.0 dual-license posture."
+        ),
+    },
+    "pymupdf": {
+        "license": "Dual Licensed - GNU AFFERO GPL 3.0 or Artifex Commercial License",
+        "notice": (
+            "PyMuPDF is included under ScriptScore's AGPL-3.0-only client distribution posture."
+        ),
+        "release_obligations": (
+            "Include PyMuPDF/MuPDF notices and source availability/source-offer "
+            "evidence for the released artifact, or use Artifex commercial licensing "
+            "for any non-AGPL distribution."
+        ),
+    },
+    "python-bidi": {
+        "license": "GNU Library or Lesser General Public License (LGPL)",
+        "notice": "python-bidi is included for OCR text handling.",
+        "release_obligations": (
+            "Include LGPL license text, package notices, and source/relink compliance "
+            "notes for the released artifact."
+        ),
+    },
 }
 NATIVE_SUFFIXES = {".so", ".dylib", ".dll", ".pyd"}
 ASSET_SUFFIXES = {
@@ -210,6 +223,7 @@ class InventoryItem:
     runtime: bool = False
     checksum_sha256: str | None = None
     notice: str | None = None
+    release_obligations: str | None = None
 
 
 @dataclass(frozen=True)
@@ -340,12 +354,17 @@ def license_expression_is_allowed(value: str | None) -> bool:
     return bool(tokens & ALLOWED_LICENSE_TOKENS) and not bool(tokens & REVIEW_LICENSE_TOKENS)
 
 
-def python_license_metadata(row: dict[str, Any]) -> tuple[str | None, str | None]:
+def python_license_metadata(
+    row: dict[str, Any],
+) -> tuple[str | None, str | None, str | None]:
     replacement = PYTHON_LICENSE_REPLACEMENTS.get(row["name"].lower())
     if replacement is not None:
-        license_value, notice = replacement
-        return normalize_license(license_value), notice
-    return normalize_license(row.get("license")), None
+        return (
+            normalize_license(replacement["license"]),
+            replacement.get("notice"),
+            replacement.get("release_obligations"),
+        )
+    return normalize_license(row.get("license")), None, None
 
 
 def approved_runtime_review_package(item: InventoryItem, license_value: str | None) -> bool:
@@ -472,7 +491,12 @@ def python_inventory(runtime_manifest_path: Path, python_root: Path | None) -> l
     portable_release = bool(manifest.get("portableRelease"))
     python_executable = manifest.get("pythonExecutable")
     if python_root is not None:
-        for candidate in ("bin/python3", "bin/python", "python.exe", "Scripts/python.exe"):
+        for candidate in (
+            "bin/python3",
+            "bin/python",
+            "python.exe",
+            "Scripts/python.exe",
+        ):
             if (python_root / candidate).exists():
                 python_executable = str(python_root / candidate)
                 portable_release = True
@@ -540,7 +564,7 @@ print(json.dumps(rows, sort_keys=True))
     scope = "python-runtime" if portable_release else "python-smoke-runtime"
     items: list[InventoryItem] = []
     for row in sorted(rows, key=lambda row: row["name"].lower()):
-        license_value, notice = python_license_metadata(row)
+        license_value, notice, release_obligations = python_license_metadata(row)
         items.append(
             InventoryItem(
                 name=row["name"],
@@ -550,6 +574,7 @@ print(json.dumps(rows, sort_keys=True))
                 scope=scope,
                 runtime=portable_release,
                 notice=notice,
+                release_obligations=release_obligations,
             )
         )
     return items
@@ -807,6 +832,9 @@ def paddle_ocr_model_provenance(provenance_path: Path) -> dict[str, dict[str, An
     redistribution_terms = data.get("redistribution_terms")
     if not isinstance(redistribution_terms, str) or not redistribution_terms:
         raise ValueError(f"{provenance_path} must include redistribution_terms")
+    release_obligations = data.get("release_obligations")
+    if release_obligations is not None and not isinstance(release_obligations, str):
+        raise ValueError(f"{provenance_path} release_obligations must be a string")
     license_evidence = data.get("license_evidence", [])
     if not isinstance(license_evidence, list) or not all(
         isinstance(item, str) and item for item in license_evidence
@@ -857,6 +885,7 @@ def paddle_ocr_model_provenance(provenance_path: Path) -> dict[str, dict[str, An
                 "license": license_value,
                 "license_evidence": license_evidence,
                 "model_name": model_name,
+                "release_obligations": release_obligations,
                 "redistribution_terms": redistribution_terms,
                 "upstream_commit": upstream_commit,
                 "upstream_model_id": upstream_model_id,
@@ -901,6 +930,7 @@ def paddle_ocr_model_item(
         runtime=True,
         checksum_sha256=checksum,
         notice=notice,
+        release_obligations=entry.get("release_obligations"),
     )
 
 
@@ -953,16 +983,20 @@ def native_runtime_provenance(
         obligations = entry.get("obligations")
         evidence = entry.get("evidence")
         license_value = normalize_license(entry.get("license"))
-        if not isinstance(path_patterns, list) or not path_patterns or not all(
-            isinstance(pattern, str) and pattern for pattern in path_patterns
+        if (
+            not isinstance(path_patterns, list)
+            or not path_patterns
+            or not all(isinstance(pattern, str) and pattern for pattern in path_patterns)
         ):
             raise ValueError(f"{provenance_path} entries must include path_patterns")
         if not all(isinstance(value, str) and value for value in (source_package, obligations)):
             raise ValueError(f"{provenance_path} entries must include source_package/obligations")
         if not license_value:
             raise ValueError(f"{source_package} must include usable license provenance")
-        if not isinstance(evidence, list) or not evidence or not all(
-            isinstance(item, str) and item for item in evidence
+        if (
+            not isinstance(evidence, list)
+            or not evidence
+            or not all(isinstance(item, str) and item for item in evidence)
         ):
             raise ValueError(f"{source_package} must include evidence strings")
         provenance.append(
@@ -1015,8 +1049,9 @@ def native_runtime_provenance_item(
             checksum_sha256=item.checksum_sha256,
             notice=(
                 f"Native runtime file reviewed as part of {entry.source_package}. "
-                f"Evidence: {evidence_note}. Obligations: {entry.obligations}"
+                f"Evidence: {evidence_note}."
             ),
+            release_obligations=entry.obligations,
         )
     return item
 
@@ -1102,6 +1137,23 @@ def write_sbom(path: Path, items: list[InventoryItem]) -> None:
     )
 
 
+def release_obligation_entries(
+    items: list[InventoryItem],
+) -> list[dict[str, str | None]]:
+    return [
+        {
+            "name": item.name,
+            "version": item.version,
+            "license": item.license,
+            "source": item.source,
+            "scope": item.scope,
+            "releaseObligations": item.release_obligations,
+        }
+        for item in items
+        if item.release_obligations
+    ]
+
+
 def generate(args: argparse.Namespace) -> int:
     output_dir = args.output_dir
     runtime_manifest = args.runtime_manifest
@@ -1143,10 +1195,7 @@ def generate(args: argparse.Namespace) -> int:
         for finding in findings
         if (finding.severity == "blocked" and finding.scope not in blocked_skip_scopes)
         or (finding.severity == "unknown" and finding.scope in unknown_failure_scopes)
-        or (
-            finding.severity == "review_required"
-            and finding.scope in unresolved_failure_scopes
-        )
+        or (finding.severity == "review_required" and finding.scope in unresolved_failure_scopes)
     ]
 
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -1173,6 +1222,7 @@ def generate(args: argparse.Namespace) -> int:
                 "url": args.source_url,
                 "localNoticesPath": "legal/THIRD_PARTY_NOTICES.md",
             },
+            "releaseObligations": release_obligation_entries(all_items),
             "findings": [asdict(finding) for finding in findings],
         },
     )

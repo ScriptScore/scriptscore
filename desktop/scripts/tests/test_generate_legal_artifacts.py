@@ -38,8 +38,7 @@ class GenerateLegalArtifactsTests(unittest.TestCase):
             )
             provenance = MODULE.native_runtime_provenance(provenance_path)
             native_path = (
-                "desktop/dist/bundled-runtime/python/lib/python3.12/"
-                "site-packages/demo/_fast.so"
+                "desktop/dist/bundled-runtime/python/lib/python3.12/site-packages/demo/_fast.so"
             )
             item = MODULE.InventoryItem(
                 name=native_path,
@@ -56,7 +55,44 @@ class GenerateLegalArtifactsTests(unittest.TestCase):
 
         self.assertEqual(mapped.license, "MIT")
         self.assertEqual(mapped.version, "demo 1.0 wheel")
+        self.assertEqual(
+            mapped.notice,
+            (
+                "Native runtime file reviewed as part of demo 1.0 wheel. "
+                "Evidence: `demo-1.0.dist-info/METADATA`."
+            ),
+        )
+        self.assertEqual(mapped.release_obligations, "Include generated notices.")
+        self.assertNotIn("Obligations:", mapped.notice or "")
         self.assertIsNone(MODULE.classify_item(mapped))
+
+    def test_release_obligation_entries_are_maintainer_facing(self) -> None:
+        item = MODULE.InventoryItem(
+            name="demo",
+            version="1.0",
+            license="MIT",
+            source="python",
+            scope="python-runtime",
+            runtime=True,
+            notice="Public downstream notice.",
+            release_obligations="Preserve any upstream NOTICE text if it appears.",
+        )
+
+        entries = MODULE.release_obligation_entries([item])
+
+        self.assertEqual(
+            entries,
+            [
+                {
+                    "name": "demo",
+                    "version": "1.0",
+                    "license": "MIT",
+                    "source": "python",
+                    "scope": "python-runtime",
+                    "releaseObligations": "Preserve any upstream NOTICE text if it appears.",
+                }
+            ],
+        )
 
     def test_unmatched_native_runtime_binary_still_requires_review(self) -> None:
         item = MODULE.InventoryItem(
@@ -83,8 +119,7 @@ class GenerateLegalArtifactsTests(unittest.TestCase):
             name="scipy",
             version="1.17.1",
             license=(
-                "BSD-3-Clause AND BSD-3-Clause-Open-MPI AND "
-                "GPL-3.0-or-later WITH GCC-exception-3.1"
+                "BSD-3-Clause AND BSD-3-Clause-Open-MPI AND GPL-3.0-or-later WITH GCC-exception-3.1"
             ),
             source="python",
             scope="python-runtime",
