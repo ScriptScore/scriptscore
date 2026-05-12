@@ -21,6 +21,9 @@ DESKTOP_ROOT = PROJECT_ROOT / "desktop"
 FRONTEND_STATIC_ASSET_PROVENANCE = (
     PROJECT_ROOT / "docs" / "licensing" / "frontend-static-asset-provenance.json"
 )
+PADDLE_OCR_MODEL_PROVENANCE = (
+    PROJECT_ROOT / "docs" / "licensing" / "paddle-ocr-model-provenance.json"
+)
 
 ALLOWED_LICENSE_TOKENS = {
     "0BSD",
@@ -182,6 +185,8 @@ FONTSOURCE_ASSET_MAPPINGS = (
 )
 FRONTEND_STATIC_ASSET_SOURCE = "first-party"
 FRONTEND_STATIC_ASSET_SCOPE = "frontend-static-asset"
+PADDLE_OCR_MODEL_SOURCE = "paddleocr-model"
+PADDLE_OCR_MODEL_SCOPE = "paddle-ocr-model-asset"
 
 
 @dataclass(frozen=True)
@@ -771,6 +776,143 @@ def frontend_build_inventory(
     return items
 
 
+def paddle_ocr_model_provenance(provenance_path: Path) -> dict[str, dict[str, Any]]:
+    if not provenance_path.exists():
+        return {}
+    data = read_json(provenance_path)
+    license_value = normalize_license(data.get("license"))
+    if not license_value:
+        raise ValueError(f"{provenance_path} must include usable license provenance")
+    redistribution_terms = data.get("redistribution_terms")
+    if not isinstance(redistribution_terms, str) or not redistribution_terms:
+        raise ValueError(f"{provenance_path} must include redistribution_terms")
+    license_evidence = data.get("license_evidence", [])
+    if not isinstance(license_evidence, list) or not all(
+        isinstance(item, str) and item for item in license_evidence
+    ):
+        raise ValueError(f"{provenance_path} must include license_evidence strings")
+
+    entries: dict[str, dict[str, Any]] = {}
+    models = data.get("models", [])
+    if not isinstance(models, list):
+        raise ValueError(f"{provenance_path} must contain a models list")
+    for model in models:
+        if not isinstance(model, dict):
+            raise ValueError(f"{provenance_path} contains a non-object model entry")
+        model_name = model.get("model_name")
+        upstream_model_id = model.get("upstream_model_id")
+        upstream_commit = model.get("upstream_commit")
+        upstream_repository = model.get("upstream_repository")
+        files = model.get("files", [])
+        if not all(
+            isinstance(value, str) and value
+            for value in (
+                model_name,
+                upstream_model_id,
+                upstream_commit,
+                upstream_repository,
+            )
+        ):
+            raise ValueError(f"{provenance_path} model entries must include upstream metadata")
+        if not isinstance(files, list):
+            raise ValueError(f"{provenance_path} model files must be a list")
+        for file_entry in files:
+            if not isinstance(file_entry, dict):
+                raise ValueError(f"{provenance_path} contains a non-object file entry")
+            path = file_entry.get("path")
+            sha256 = file_entry.get("sha256")
+            size_bytes = file_entry.get("size_bytes")
+            upstream_url = file_entry.get("upstream_url")
+            if not isinstance(path, str) or not path:
+                raise ValueError(f"{provenance_path} model file entries must include path")
+            if not isinstance(sha256, str) or not re.fullmatch(r"[0-9a-f]{64}", sha256):
+                raise ValueError(f"{path} must include a sha256 checksum")
+            if not isinstance(size_bytes, int) or size_bytes < 0:
+                raise ValueError(f"{path} must include size_bytes")
+            if not isinstance(upstream_url, str) or not upstream_url:
+                raise ValueError(f"{path} must include upstream_url")
+            entries[path] = {
+                **file_entry,
+                "license": license_value,
+                "license_evidence": license_evidence,
+                "model_name": model_name,
+                "redistribution_terms": redistribution_terms,
+                "upstream_commit": upstream_commit,
+                "upstream_model_id": upstream_model_id,
+                "upstream_repository": upstream_repository,
+            }
+    return entries
+
+
+def paddle_ocr_model_item(
+    path: Path, provenance: dict[str, dict[str, Any]]
+) -> InventoryItem | None:
+    rel_path = project_relative(path)
+    entry = provenance.get(rel_path)
+    if entry is None:
+        return None
+
+    checksum = digest_file(path)
+    if checksum != entry["sha256"]:
+        raise ValueError(
+            f"{rel_path} checksum {checksum} does not match provenance {entry['sha256']}"
+        )
+    size_bytes = path.stat().st_size
+    if size_bytes != entry["size_bytes"]:
+        raise ValueError(
+            f"{rel_path} size {size_bytes} does not match provenance {entry['size_bytes']}"
+        )
+
+    evidence_note = ", ".join(f"`{item}`" for item in entry["license_evidence"])
+    notice = (
+        f"{entry['model_name']} bundled PaddleOCR model file from "
+        f"`{entry['upstream_model_id']}` at commit `{entry['upstream_commit']}`. "
+        f"Source: `{entry['upstream_url']}`. License evidence: {evidence_note}. "
+        f"Redistribution terms: {entry['redistribution_terms']}"
+    )
+    return InventoryItem(
+        name=rel_path,
+        version=entry["upstream_commit"],
+        license=entry["license"],
+        source=PADDLE_OCR_MODEL_SOURCE,
+        scope=PADDLE_OCR_MODEL_SCOPE,
+        path=rel_path,
+        runtime=True,
+        checksum_sha256=checksum,
+        notice=notice,
+    )
+
+
+def paddle_model_inventory(
+    root: Path, model_provenance: dict[str, dict[str, Any]] | None = None
+) -> list[InventoryItem]:
+    if not root.exists():
+        return []
+    resolved_model_provenance = model_provenance or {}
+    items: list[InventoryItem] = []
+    for path in sorted(item for item in root.rglob("*") if item.is_file()):
+        suffix = path.suffix.lower()
+        if suffix not in ASSET_SUFFIXES and suffix not in NATIVE_SUFFIXES:
+            continue
+        if model_item := paddle_ocr_model_item(path, resolved_model_provenance):
+            items.append(model_item)
+            continue
+        item_scope = "native-library" if suffix in NATIVE_SUFFIXES else "model-asset"
+        items.append(
+            InventoryItem(
+                name=project_relative(path),
+                version=None,
+                license=None,
+                source="assets",
+                scope=item_scope,
+                path=project_relative(path),
+                runtime=True,
+                checksum_sha256=digest_file(path),
+            )
+        )
+    return items
+
+
 def runtime_native_inventory(runtime_root: Path) -> list[InventoryItem]:
     if not runtime_root.exists():
         return []
@@ -859,11 +1001,12 @@ def generate(args: argparse.Namespace) -> int:
         {mapping["package_name"] for mapping in FONTSOURCE_ASSET_MAPPINGS},
     )
     static_asset_provenance = frontend_static_asset_provenance(args.frontend_asset_provenance)
+    model_provenance = paddle_ocr_model_provenance(args.paddle_model_provenance)
     cargo_items = cargo_inventory(args.cargo_manifest, args.cargo_metadata_file)
     asset_items = frontend_build_inventory(
         args.frontend_build, fontsource_package_versions, static_asset_provenance
     )
-    asset_items.extend(file_inventory(args.paddle_models, "model-asset", "assets", runtime=True))
+    asset_items.extend(paddle_model_inventory(args.paddle_models, model_provenance))
     native_items = runtime_native_inventory(runtime_root)
 
     all_items = python_items + npm_items + cargo_items + asset_items + native_items
@@ -943,6 +1086,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument(
         "--paddle-models", type=Path, default=PROJECT_ROOT / "cli" / "models" / "paddle"
+    )
+    parser.add_argument(
+        "--paddle-model-provenance",
+        type=Path,
+        default=PADDLE_OCR_MODEL_PROVENANCE,
     )
     return parser.parse_args(argv)
 
