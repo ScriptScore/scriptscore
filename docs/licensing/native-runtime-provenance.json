@@ -1,0 +1,352 @@
+{
+  "format": "scriptscore-native-runtime-provenance-v1",
+  "entries": [
+    {
+      "path_patterns": [
+        "desktop/dist/bundled-runtime/python/lib/libpython*",
+        "desktop/dist/bundled-runtime/python/lib/python*/lib-dynload/*",
+        "desktop/dist/bundled-runtime/python/DLLs/*",
+        "desktop/dist/bundled-runtime/python/*.dll",
+        "desktop/dist/bundled-runtime/python/*.pyd"
+      ],
+      "source_package": "CPython portable runtime",
+      "license": "PSF-2.0",
+      "obligations": "Include Python license text, notices, and source availability for the distributed portable runtime.",
+      "evidence": [
+        "runtime-manifest.json",
+        "https://docs.python.org/3/license.html",
+        "https://github.com/indygreg/python-build-standalone"
+      ]
+    },
+    {
+      "path_patterns": [
+        "desktop/dist/bundled-runtime/python/lib/libtcl*",
+        "desktop/dist/bundled-runtime/python/lib/itcl*/*",
+        "desktop/dist/bundled-runtime/python/lib/thread*/*",
+        "desktop/dist/bundled-runtime/python/tcl*/*"
+      ],
+      "source_package": "Tcl/Tk portable runtime libraries",
+      "license": "TCL",
+      "obligations": "Include Tcl/Tk license text and notices when these libraries are bundled.",
+      "evidence": [
+        "runtime-manifest.json",
+        "https://www.tcl-lang.org/software/tcltk/license.html"
+      ]
+    },
+    {
+      "path_patterns": [
+        "desktop/dist/bundled-runtime/python/**/site-packages/scipy/**/*.so",
+        "desktop/dist/bundled-runtime/python/**/site-packages/scipy/**/*.pyd",
+        "desktop/dist/bundled-runtime/python/**/site-packages/scipy.libs/*"
+      ],
+      "source_package": "scipy 1.17.1 wheel",
+      "license": "BSD-3-Clause AND BSD-3-Clause-Open-MPI AND GPL-3.0-or-later WITH GCC-exception-3.1",
+      "obligations": "Include SciPy notices and bundled-library attributions from the wheel metadata.",
+      "evidence": [
+        "scipy-1.17.1.dist-info/METADATA",
+        "scipy-1.17.1.dist-info/RECORD",
+        "desktop/dist/legal/sbom-python.json"
+      ]
+    },
+    {
+      "path_patterns": [
+        "desktop/dist/bundled-runtime/python/**/site-packages/numpy/**/*.so",
+        "desktop/dist/bundled-runtime/python/**/site-packages/numpy/**/*.pyd",
+        "desktop/dist/bundled-runtime/python/**/site-packages/numpy.libs/*"
+      ],
+      "source_package": "numpy 2.4.3 wheel",
+      "license": "BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0",
+      "obligations": "Include NumPy notices and bundled OpenBLAS/library attributions from the wheel metadata.",
+      "evidence": [
+        "numpy-2.4.3.dist-info/METADATA",
+        "numpy-2.4.3.dist-info/RECORD",
+        "desktop/dist/legal/sbom-python.json"
+      ]
+    },
+    {
+      "path_patterns": [
+        "desktop/dist/bundled-runtime/python/**/site-packages/pandas/**/*.so",
+        "desktop/dist/bundled-runtime/python/**/site-packages/pandas/**/*.pyd"
+      ],
+      "source_package": "pandas 3.0.2 wheel",
+      "license": "BSD-3-Clause",
+      "obligations": "Include generated third-party notices when pandas native extensions are bundled.",
+      "evidence": [
+        "pandas-3.0.2.dist-info/METADATA",
+        "pandas-3.0.2.dist-info/RECORD",
+        "desktop/dist/legal/sbom-python.json"
+      ]
+    },
+    {
+      "path_patterns": [
+        "desktop/dist/bundled-runtime/python/**/site-packages/skimage/**/*.so",
+        "desktop/dist/bundled-runtime/python/**/site-packages/skimage/**/*.pyd"
+      ],
+      "source_package": "scikit-image 0.26.0 wheel",
+      "license": "BSD-3-Clause AND BSD-2-Clause AND MIT",
+      "obligations": "Include scikit-image notices and bundled source-file attributions from the wheel metadata.",
+      "evidence": [
+        "scikit_image-0.26.0.dist-info/METADATA",
+        "scikit_image-0.26.0.dist-info/RECORD",
+        "desktop/dist/legal/sbom-python.json"
+      ]
+    },
+    {
+      "path_patterns": [
+        "desktop/dist/bundled-runtime/python/**/site-packages/Crypto/**/*.so",
+        "desktop/dist/bundled-runtime/python/**/site-packages/Crypto/**/*.pyd"
+      ],
+      "source_package": "pycryptodome 3.23.0 wheel",
+      "license": "BSD, Public Domain",
+      "obligations": "Include PyCryptodome notices when native crypto extensions are bundled.",
+      "evidence": [
+        "pycryptodome-3.23.0.dist-info/METADATA",
+        "pycryptodome-3.23.0.dist-info/RECORD",
+        "desktop/dist/legal/sbom-python.json"
+      ]
+    },
+    {
+      "path_patterns": [
+        "desktop/dist/bundled-runtime/python/**/site-packages/torch/**/*.so",
+        "desktop/dist/bundled-runtime/python/**/site-packages/torch/**/*.pyd",
+        "desktop/dist/bundled-runtime/python/**/site-packages/torchvision/**/*.so",
+        "desktop/dist/bundled-runtime/python/**/site-packages/torchvision/**/*.pyd"
+      ],
+      "source_package": "torch 2.11.0+cpu and torchvision 0.26.0+cpu wheels",
+      "license": "BSD-3-Clause",
+      "obligations": "Include PyTorch/TorchVision notices and bundled native-library attributions from the wheel metadata.",
+      "evidence": [
+        "torch-2.11.0+cpu.dist-info/METADATA",
+        "torch-2.11.0+cpu.dist-info/RECORD",
+        "torchvision-0.26.0+cpu.dist-info/METADATA",
+        "torchvision-0.26.0+cpu.dist-info/RECORD"
+      ]
+    },
+    {
+      "path_patterns": [
+        "desktop/dist/bundled-runtime/python/**/site-packages/paddle/**/*.so",
+        "desktop/dist/bundled-runtime/python/**/site-packages/paddle/**/*.pyd",
+        "desktop/dist/bundled-runtime/python/**/site-packages/_foo.*"
+      ],
+      "source_package": "paddlepaddle 3.3.1 wheel",
+      "license": "Apache-2.0",
+      "obligations": "Include PaddlePaddle notices and bundled native-library attributions from the wheel metadata.",
+      "evidence": [
+        "paddlepaddle-3.3.1.dist-info/METADATA",
+        "paddlepaddle-3.3.1.dist-info/RECORD",
+        "desktop/dist/legal/sbom-python.json"
+      ]
+    },
+    {
+      "path_patterns": [
+        "desktop/dist/bundled-runtime/python/**/site-packages/cv2/*",
+        "desktop/dist/bundled-runtime/python/**/site-packages/opencv_python_headless.libs/*",
+        "desktop/dist/bundled-runtime/python/**/site-packages/opencv_contrib_python_headless.libs/*"
+      ],
+      "source_package": "opencv-python-headless/opencv-contrib-python-headless 4.13.0.92 wheels",
+      "license": "Apache-2.0",
+      "obligations": "Include OpenCV wheel notices and bundled third-party native-library attributions.",
+      "evidence": [
+        "opencv_python_headless-4.13.0.92.dist-info/METADATA",
+        "opencv_contrib_python_headless-4.13.0.92.dist-info/METADATA",
+        "desktop/dist/legal/sbom-python.json"
+      ]
+    },
+    {
+      "path_patterns": [
+        "desktop/dist/bundled-runtime/python/**/site-packages/PIL/**/*.so",
+        "desktop/dist/bundled-runtime/python/**/site-packages/PIL/**/*.pyd"
+      ],
+      "source_package": "pillow 11.3.0 wheel",
+      "license": "MIT-CMU",
+      "obligations": "Include Pillow notices and bundled-library attributions from the wheel metadata.",
+      "evidence": [
+        "pillow-11.3.0.dist-info/METADATA",
+        "pillow-11.3.0.dist-info/RECORD",
+        "desktop/dist/legal/sbom-python.json"
+      ]
+    },
+    {
+      "path_patterns": [
+        "desktop/dist/bundled-runtime/python/**/site-packages/shapely/**/*.so",
+        "desktop/dist/bundled-runtime/python/**/site-packages/shapely/**/*.pyd"
+      ],
+      "source_package": "shapely 2.1.2 wheel",
+      "license": "BSD-3-Clause",
+      "obligations": "Include Shapely notices and any bundled GEOS/native-library attributions from the wheel metadata.",
+      "evidence": [
+        "shapely-2.1.2.dist-info/METADATA",
+        "shapely-2.1.2.dist-info/RECORD",
+        "desktop/dist/legal/sbom-python.json"
+      ]
+    },
+    {
+      "path_patterns": [
+        "desktop/dist/bundled-runtime/python/**/site-packages/pypdfium2_raw/*"
+      ],
+      "source_package": "pypdfium2 5.8.0 wheel",
+      "license": "BSD-3-Clause AND Apache-2.0",
+      "obligations": "Include pypdfium2 and PDFium notices and dependency-license attributions from the wheel metadata.",
+      "evidence": [
+        "pypdfium2-5.8.0.dist-info/METADATA",
+        "pypdfium2-5.8.0.dist-info/RECORD",
+        "desktop/dist/legal/sbom-python.json"
+      ]
+    },
+    {
+      "path_patterns": [
+        "desktop/dist/bundled-runtime/python/**/site-packages/chardet/**/*.so",
+        "desktop/dist/bundled-runtime/python/**/site-packages/chardet/**/*.pyd",
+        "desktop/dist/bundled-runtime/python/**/site-packages/4ef79d6367bb14396397__mypyc.*"
+      ],
+      "source_package": "chardet 7.4.3 wheel",
+      "license": "0BSD",
+      "obligations": "Include generated third-party notices when bundled.",
+      "evidence": [
+        "chardet-7.4.3.dist-info/METADATA",
+        "chardet-7.4.3.dist-info/RECORD",
+        "desktop/dist/legal/sbom-python.json"
+      ]
+    },
+    {
+      "path_patterns": [
+        "desktop/dist/bundled-runtime/python/**/site-packages/charset_normalizer/**/*.so",
+        "desktop/dist/bundled-runtime/python/**/site-packages/charset_normalizer/**/*.pyd",
+        "desktop/dist/bundled-runtime/python/**/site-packages/81d243bd2c585b0f4821__mypyc.*"
+      ],
+      "source_package": "charset-normalizer 3.4.6 wheel",
+      "license": "MIT",
+      "obligations": "Include generated third-party notices when bundled.",
+      "evidence": [
+        "charset_normalizer-3.4.6.dist-info/METADATA",
+        "charset_normalizer-3.4.6.dist-info/RECORD",
+        "desktop/dist/legal/sbom-python.json"
+      ]
+    },
+    {
+      "path_patterns": [
+        "desktop/dist/bundled-runtime/python/**/site-packages/google/**/*.so",
+        "desktop/dist/bundled-runtime/python/**/site-packages/google/**/*.pyd"
+      ],
+      "source_package": "protobuf 7.34.1 wheel",
+      "license": "BSD-3-Clause",
+      "obligations": "Include protobuf notices when native extensions are bundled.",
+      "evidence": [
+        "protobuf-7.34.1.dist-info/METADATA",
+        "protobuf-7.34.1.dist-info/RECORD",
+        "desktop/dist/legal/sbom-python.json"
+      ]
+    },
+    {
+      "path_patterns": [
+        "desktop/dist/bundled-runtime/python/**/site-packages/hf_xet/**/*.so",
+        "desktop/dist/bundled-runtime/python/**/site-packages/hf_xet/**/*.pyd"
+      ],
+      "source_package": "hf-xet 1.5.0 wheel",
+      "license": "Apache-2.0",
+      "obligations": "Include generated third-party notices when bundled.",
+      "evidence": [
+        "hf_xet-1.5.0.dist-info/METADATA",
+        "hf_xet-1.5.0.dist-info/RECORD",
+        "desktop/dist/legal/sbom-python.json"
+      ]
+    },
+    {
+      "path_patterns": [
+        "desktop/dist/bundled-runtime/python/**/site-packages/markupsafe/**/*.so",
+        "desktop/dist/bundled-runtime/python/**/site-packages/markupsafe/**/*.pyd"
+      ],
+      "source_package": "markupsafe 3.0.3 wheel",
+      "license": "BSD-3-Clause",
+      "obligations": "Include generated third-party notices when bundled.",
+      "evidence": [
+        "markupsafe-3.0.3.dist-info/METADATA",
+        "markupsafe-3.0.3.dist-info/RECORD",
+        "desktop/dist/legal/sbom-python.json"
+      ]
+    },
+    {
+      "path_patterns": [
+        "desktop/dist/bundled-runtime/python/**/site-packages/psutil/**/*.so",
+        "desktop/dist/bundled-runtime/python/**/site-packages/psutil/**/*.pyd"
+      ],
+      "source_package": "psutil 7.2.2 wheel",
+      "license": "BSD-3-Clause",
+      "obligations": "Include generated third-party notices when bundled.",
+      "evidence": [
+        "psutil-7.2.2.dist-info/METADATA",
+        "psutil-7.2.2.dist-info/RECORD",
+        "desktop/dist/legal/sbom-python.json"
+      ]
+    },
+    {
+      "path_patterns": [
+        "desktop/dist/bundled-runtime/python/**/site-packages/pyclipper/**/*.so",
+        "desktop/dist/bundled-runtime/python/**/site-packages/pyclipper/**/*.pyd"
+      ],
+      "source_package": "pyclipper 1.4.0 wheel",
+      "license": "MIT",
+      "obligations": "Include generated third-party notices when bundled.",
+      "evidence": [
+        "pyclipper-1.4.0.dist-info/METADATA",
+        "pyclipper-1.4.0.dist-info/RECORD",
+        "desktop/dist/legal/sbom-python.json"
+      ]
+    },
+    {
+      "path_patterns": [
+        "desktop/dist/bundled-runtime/python/**/site-packages/pydantic_core/**/*.so",
+        "desktop/dist/bundled-runtime/python/**/site-packages/pydantic_core/**/*.pyd"
+      ],
+      "source_package": "pydantic-core 2.41.5 wheel",
+      "license": "MIT",
+      "obligations": "Include generated third-party notices when bundled.",
+      "evidence": [
+        "pydantic_core-2.41.5.dist-info/METADATA",
+        "pydantic_core-2.41.5.dist-info/RECORD",
+        "desktop/dist/legal/sbom-python.json"
+      ]
+    },
+    {
+      "path_patterns": [
+        "desktop/dist/bundled-runtime/python/**/site-packages/safetensors/**/*.so",
+        "desktop/dist/bundled-runtime/python/**/site-packages/safetensors/**/*.pyd"
+      ],
+      "source_package": "safetensors 0.7.0 wheel",
+      "license": "Apache-2.0",
+      "obligations": "Include generated third-party notices when bundled.",
+      "evidence": [
+        "safetensors-0.7.0.dist-info/METADATA",
+        "safetensors-0.7.0.dist-info/RECORD",
+        "desktop/dist/legal/sbom-python.json"
+      ]
+    },
+    {
+      "path_patterns": [
+        "desktop/dist/bundled-runtime/python/**/site-packages/ujson.*"
+      ],
+      "source_package": "ujson 5.12.1 wheel",
+      "license": "BSD-3-Clause AND TCL",
+      "obligations": "Include ujson and bundled UltraJSON/Tcl-compatible notices when bundled.",
+      "evidence": [
+        "ujson-5.12.1.dist-info/METADATA",
+        "ujson-5.12.1.dist-info/RECORD",
+        "desktop/dist/legal/sbom-python.json"
+      ]
+    },
+    {
+      "path_patterns": [
+        "desktop/dist/bundled-runtime/python/**/site-packages/yaml/**/*.so",
+        "desktop/dist/bundled-runtime/python/**/site-packages/yaml/**/*.pyd"
+      ],
+      "source_package": "PyYAML 6.0.2 wheel",
+      "license": "MIT",
+      "obligations": "Include generated third-party notices when bundled.",
+      "evidence": [
+        "PyYAML-6.0.2.dist-info/METADATA",
+        "PyYAML-6.0.2.dist-info/RECORD",
+        "desktop/dist/legal/sbom-python.json"
+      ]
+    }
+  ]
+}

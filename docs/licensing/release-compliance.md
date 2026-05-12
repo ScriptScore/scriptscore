@@ -12,6 +12,8 @@ This checklist applies before distributing ScriptScore source archives or binary
 - Keep lockfiles available for reproducibility.
 - Verify source availability for AGPL obligations.
 - Review PyMuPDF/MuPDF obligations while PyMuPDF remains in the runtime stack.
+- Confirm native runtime provenance for bundled `.so`, `.dll`, `.dylib`, and
+  `.pyd` files.
 - Confirm bundled desktop legal resources under `desktop/dist/legal/`.
 
 ## Recommended Commands

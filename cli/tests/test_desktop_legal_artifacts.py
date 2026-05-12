@@ -127,7 +127,7 @@ def test_license_policy_accepts_permissive_or_branch_without_accepting_lgpl_and(
     assert legal.classify_item(gpl_exception).severity == "review_required"
 
 
-def test_python_license_replacements_normalize_or_keep_release_review() -> None:
+def test_python_license_replacements_normalize_or_apply_release_decisions() -> None:
     dateutil_license, dateutil_notice = legal.python_license_metadata(
         {"name": "python-dateutil", "version": "2.9.0.post0", "license": "Dual License"}
     )
@@ -171,12 +171,9 @@ def test_python_license_replacements_normalize_or_keep_release_review() -> None:
         runtime=True,
         notice=scipy_notice,
     )
-    scipy_finding = legal.classify_item(scipy)
-
     assert scipy_notice
     assert "GCC-exception-3.1" in scipy_license
-    assert scipy_finding.severity == "review_required"
-    assert "GPL/LGPL" in scipy_finding.message
+    assert legal.classify_item(scipy) is None
 
     aistudio_license, aistudio_notice = legal.python_license_metadata(
         {"name": "aistudio-sdk", "version": "0.3.8", "license": "UNKNOWN"}
@@ -880,7 +877,7 @@ def test_npm_and_cargo_inventory_parse_fixture_metadata(tmp_path: Path) -> None:
     ]
 
 
-def test_check_mode_fails_only_blocked_or_unknown_runtime(tmp_path: Path) -> None:
+def test_check_mode_fails_unresolved_release_findings(tmp_path: Path) -> None:
     runtime = tmp_path / "runtime"
     runtime.mkdir()
     write_json(
@@ -917,6 +914,7 @@ def test_check_mode_fails_only_blocked_or_unknown_runtime(tmp_path: Path) -> Non
     assert legal.generate(args) == 1
     report = json.loads((tmp_path / "legal" / "license-policy-report.json").read_text())
     assert report["summary"]["blockedOrUnknownRuntimeCount"] == 1
+    assert report["summary"]["unresolvedReleaseFindingCount"] == 1
     notices = (tmp_path / "legal" / "THIRD_PARTY_NOTICES.md").read_text(encoding="utf-8")
     assert "## Review Findings" not in notices
     assert "missing-python" not in notices
