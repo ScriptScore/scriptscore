@@ -9,6 +9,18 @@ Do not edit generated legal artifacts to record review decisions. Update this
 register, then update generator policy or overrides when a decision should be
 enforced mechanically.
 
+## Public Notices And Release Obligations
+
+Generated public notices are user- and downstream-facing. Text emitted into
+`THIRD_PARTY_NOTICES.md` should describe bundled components, license
+expressions, provenance, source locations, required attributions, and
+redistribution terms for the distributed artifact.
+
+Maintainer-only release obligations belong in this register, provenance
+metadata, or `license-policy-report.json` under `releaseObligations`. Do not
+put checklist language, conditional future instructions, or review reopen
+instructions in public notice text rendered by Settings / Legal.
+
 ## Status Values
 
 - `approved`: acceptable for the stated release scope with listed obligations.

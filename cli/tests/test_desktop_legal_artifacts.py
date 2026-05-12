@@ -128,7 +128,7 @@ def test_license_policy_accepts_permissive_or_branch_without_accepting_lgpl_and(
 
 
 def test_python_license_replacements_normalize_or_apply_release_decisions() -> None:
-    dateutil_license, dateutil_notice = legal.python_license_metadata(
+    dateutil_license, dateutil_notice, dateutil_obligations = legal.python_license_metadata(
         {"name": "python-dateutil", "version": "2.9.0.post0", "license": "Dual License"}
     )
     dateutil = legal.InventoryItem(
@@ -139,23 +139,26 @@ def test_python_license_replacements_normalize_or_apply_release_decisions() -> N
         scope="python-runtime",
         runtime=True,
         notice=dateutil_notice,
+        release_obligations=dateutil_obligations,
     )
 
-    assert dateutil_notice
+    assert dateutil_notice is None
+    assert dateutil_obligations
     assert dateutil_license == "BSD-3-Clause OR Apache-2.0"
     assert legal.classify_item(dateutil) is None
 
-    pandas_license, pandas_notice = legal.python_license_metadata(
+    pandas_license, pandas_notice, pandas_obligations = legal.python_license_metadata(
         {
             "name": "pandas",
             "version": "3.0.2",
             "license": "BSD 3-Clause License Copyright text that continues with bundled notices.",
         }
     )
-    assert pandas_notice
+    assert pandas_notice is None
+    assert pandas_obligations
     assert pandas_license == "BSD-3-Clause"
 
-    scipy_license, scipy_notice = legal.python_license_metadata(
+    scipy_license, scipy_notice, scipy_obligations = legal.python_license_metadata(
         {
             "name": "scipy",
             "version": "1.17.1",
@@ -170,12 +173,14 @@ def test_python_license_replacements_normalize_or_apply_release_decisions() -> N
         scope="python-runtime",
         runtime=True,
         notice=scipy_notice,
+        release_obligations=scipy_obligations,
     )
     assert scipy_notice
+    assert scipy_obligations
     assert "GCC-exception-3.1" in scipy_license
     assert legal.classify_item(scipy) is None
 
-    aistudio_license, aistudio_notice = legal.python_license_metadata(
+    aistudio_license, aistudio_notice, aistudio_obligations = legal.python_license_metadata(
         {"name": "aistudio-sdk", "version": "0.3.8", "license": "UNKNOWN"}
     )
     aistudio = legal.InventoryItem(
@@ -186,10 +191,12 @@ def test_python_license_replacements_normalize_or_apply_release_decisions() -> N
         scope="python-runtime",
         runtime=True,
         notice=aistudio_notice,
+        release_obligations=aistudio_obligations,
     )
     aistudio_finding = legal.classify_item(aistudio)
 
-    assert aistudio_notice
+    assert aistudio_notice is None
+    assert aistudio_obligations
     assert aistudio_license == "LicenseRef-REVIEW-aistudio-sdk"
     assert aistudio_finding.severity == "blocked"
     assert "must not appear in distributed runtime" in aistudio_finding.message
@@ -254,19 +261,21 @@ def test_python_license_replacements_normalize_or_apply_release_decisions() -> N
 
 
 def test_license_policy_accepts_reviewed_pymupdf_and_python_bidi_exceptions() -> None:
-    pymupdf_license, pymupdf_notice = legal.python_license_metadata(
+    pymupdf_license, pymupdf_notice, pymupdf_obligations = legal.python_license_metadata(
         {
             "name": "PyMuPDF",
             "version": "1.27.2.2",
             "license": "Dual Licensed - GNU AFFERO GPL 3.0 or Artifex Commercial License",
         }
     )
-    python_bidi_license, python_bidi_notice = legal.python_license_metadata(
-        {
-            "name": "python-bidi",
-            "version": "0.6.7",
-            "license": "GNU Library or Lesser General Public License (LGPL)",
-        }
+    python_bidi_license, python_bidi_notice, python_bidi_obligations = (
+        legal.python_license_metadata(
+            {
+                "name": "python-bidi",
+                "version": "0.6.7",
+                "license": "GNU Library or Lesser General Public License (LGPL)",
+            }
+        )
     )
     pymupdf = legal.InventoryItem(
         name="PyMuPDF",
@@ -276,6 +285,7 @@ def test_license_policy_accepts_reviewed_pymupdf_and_python_bidi_exceptions() ->
         scope="python-runtime",
         runtime=True,
         notice=pymupdf_notice,
+        release_obligations=pymupdf_obligations,
     )
     python_bidi = legal.InventoryItem(
         name="python-bidi",
@@ -285,6 +295,7 @@ def test_license_policy_accepts_reviewed_pymupdf_and_python_bidi_exceptions() ->
         scope="python-runtime",
         runtime=True,
         notice=python_bidi_notice,
+        release_obligations=python_bidi_obligations,
     )
     changed_bidi = legal.InventoryItem(
         name="python-bidi",
@@ -294,10 +305,13 @@ def test_license_policy_accepts_reviewed_pymupdf_and_python_bidi_exceptions() ->
         scope="python-runtime",
         runtime=True,
         notice=python_bidi_notice,
+        release_obligations=python_bidi_obligations,
     )
 
     assert pymupdf_notice
     assert python_bidi_notice
+    assert pymupdf_obligations
+    assert python_bidi_obligations
     assert legal.classify_item(pymupdf) is None
     assert legal.classify_item(python_bidi) is None
     changed_bidi_finding = legal.classify_item(changed_bidi)
@@ -510,6 +524,7 @@ def test_paddle_model_inventory_uses_model_provenance(tmp_path: Path) -> None:
                 "https://raw.githubusercontent.com/PaddlePaddle/PaddleOCR/main/LICENSE",
             ],
             "redistribution_terms": "Include Apache-2.0 license text.",
+            "release_obligations": "Preserve future upstream NOTICE text.",
             "models": [
                 {
                     "model_name": "PP-OCRv5_mobile_det",
@@ -552,6 +567,7 @@ def test_paddle_model_inventory_uses_model_provenance(tmp_path: Path) -> None:
     assert {item.source for item in items} == {legal.PADDLE_OCR_MODEL_SOURCE}
     assert {item.license for item in items} == {"Apache-2.0"}
     assert all("Redistribution terms" in (item.notice or "") for item in items)
+    assert {item.release_obligations for item in items} == {"Preserve future upstream NOTICE text."}
     assert all(legal.classify_item(item) is None for item in items)
 
 
@@ -760,6 +776,7 @@ def test_generate_maps_paddle_model_provenance_without_model_asset_findings(
                 "https://raw.githubusercontent.com/PaddlePaddle/PaddleOCR/main/LICENSE",
             ],
             "redistribution_terms": "Include Apache-2.0 license text.",
+            "release_obligations": "Preserve future upstream NOTICE text.",
             "models": [
                 {
                     "model_name": f"PP-OCRv5_mobile_{leaf}",
@@ -815,9 +832,18 @@ def test_generate_maps_paddle_model_provenance_without_model_asset_findings(
     assert len(model_assets) == 4
     assert all(component["source"] == legal.PADDLE_OCR_MODEL_SOURCE for component in model_assets)
     assert all(component["license"] == "Apache-2.0" for component in model_assets)
+    assert all(
+        component["release_obligations"] == "Preserve future upstream NOTICE text."
+        for component in model_assets
+    )
+    assert report["releaseObligations"]
+    assert "Preserve future upstream NOTICE text." in {
+        obligation["releaseObligations"] for obligation in report["releaseObligations"]
+    }
     notices = (tmp_path / "legal" / "THIRD_PARTY_NOTICES.md").read_text(encoding="utf-8")
     assert "paddle-ocr-model-asset" in notices
     assert "Redistribution terms: Include Apache-2.0 license text." in notices
+    assert "Preserve future upstream NOTICE text." not in notices
     assert "Release review required,assets,model-asset" not in notices
 
 
