@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import fnmatch
 import hashlib
 import json
 import re
@@ -23,6 +24,9 @@ FRONTEND_STATIC_ASSET_PROVENANCE = (
 )
 PADDLE_OCR_MODEL_PROVENANCE = (
     PROJECT_ROOT / "docs" / "licensing" / "paddle-ocr-model-provenance.json"
+)
+NATIVE_RUNTIME_PROVENANCE = (
+    PROJECT_ROOT / "docs" / "licensing" / "native-runtime-provenance.json"
 )
 
 ALLOWED_LICENSE_TOKENS = {
@@ -44,6 +48,7 @@ ALLOWED_LICENSE_TOKENS = {
     "MPL-2.0",
     "OFL-1.1",
     "PSF-2.0",
+    "TCL",
     "Unicode-3.0",
     "Unicode-DFS-2016",
     "Zlib",
@@ -92,6 +97,11 @@ APPROVED_RUNTIME_REVIEW_PACKAGES: dict[str, tuple[set[str], set[str], str]] = {
     "python-bidi": (
         {"0.6.7"},
         {"GNU Library or Lesser General Public License (LGPL)"},
+        "python-runtime",
+    ),
+    "scipy": (
+        {"1.17.1"},
+        {"BSD-3-Clause AND BSD-3-Clause-Open-MPI AND GPL-3.0-or-later WITH GCC-exception-3.1"},
         "python-runtime",
     ),
 }
@@ -210,6 +220,15 @@ class PolicyFinding:
     scope: str
     license: str | None
     message: str
+
+
+@dataclass(frozen=True)
+class NativeRuntimeProvenanceEntry:
+    path_patterns: tuple[str, ...]
+    source_package: str
+    license: str
+    obligations: str
+    evidence: tuple[str, ...]
 
 
 def project_relative(path: Path) -> str:
@@ -344,6 +363,8 @@ def approved_runtime_review_package(item: InventoryItem, license_value: str | No
 def approved_native_library(item: InventoryItem) -> bool:
     if item.scope != "native-library" or not item.path:
         return False
+    if item.license and item.notice:
+        return True
     path = item.path.replace("\\", "/")
     return any(part in path for part in APPROVED_NATIVE_LIBRARY_PATH_PARTS)
 
@@ -913,14 +934,106 @@ def paddle_model_inventory(
     return items
 
 
-def runtime_native_inventory(runtime_root: Path) -> list[InventoryItem]:
+def native_runtime_provenance(
+    provenance_path: Path,
+) -> list[NativeRuntimeProvenanceEntry]:
+    if not provenance_path.exists():
+        return []
+    data = read_json(provenance_path)
+    entries = data.get("entries", [])
+    if not isinstance(entries, list):
+        raise ValueError(f"{provenance_path} must contain an entries list")
+
+    provenance: list[NativeRuntimeProvenanceEntry] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise ValueError(f"{provenance_path} contains a non-object entry")
+        path_patterns = entry.get("path_patterns")
+        source_package = entry.get("source_package")
+        obligations = entry.get("obligations")
+        evidence = entry.get("evidence")
+        license_value = normalize_license(entry.get("license"))
+        if not isinstance(path_patterns, list) or not path_patterns or not all(
+            isinstance(pattern, str) and pattern for pattern in path_patterns
+        ):
+            raise ValueError(f"{provenance_path} entries must include path_patterns")
+        if not all(isinstance(value, str) and value for value in (source_package, obligations)):
+            raise ValueError(f"{provenance_path} entries must include source_package/obligations")
+        if not license_value:
+            raise ValueError(f"{source_package} must include usable license provenance")
+        if not isinstance(evidence, list) or not evidence or not all(
+            isinstance(item, str) and item for item in evidence
+        ):
+            raise ValueError(f"{source_package} must include evidence strings")
+        provenance.append(
+            NativeRuntimeProvenanceEntry(
+                path_patterns=tuple(path_patterns),
+                source_package=source_package,
+                license=license_value,
+                obligations=obligations,
+                evidence=tuple(evidence),
+            )
+        )
+    return provenance
+
+
+def path_matches_pattern(path: str, pattern: str) -> bool:
+    patterns = {pattern}
+    queue = [pattern]
+    while queue:
+        candidate = queue.pop()
+        marker = "/**/"
+        start = candidate.find(marker)
+        while start != -1:
+            collapsed = candidate[:start] + "/" + candidate[start + len(marker) :]
+            if collapsed not in patterns:
+                patterns.add(collapsed)
+                queue.append(collapsed)
+            start = candidate.find(marker, start + 1)
+    return any(fnmatch.fnmatchcase(path, candidate) for candidate in patterns)
+
+
+def native_runtime_provenance_item(
+    item: InventoryItem,
+    provenance: list[NativeRuntimeProvenanceEntry],
+) -> InventoryItem:
+    if item.scope != "native-library" or not item.path:
+        return item
+    path = item.path.replace("\\", "/")
+    for entry in provenance:
+        if not any(path_matches_pattern(path, pattern) for pattern in entry.path_patterns):
+            continue
+        evidence_note = ", ".join(f"`{value}`" for value in entry.evidence)
+        return InventoryItem(
+            name=item.name,
+            version=entry.source_package,
+            license=entry.license,
+            source=item.source,
+            scope=item.scope,
+            path=item.path,
+            runtime=item.runtime,
+            checksum_sha256=item.checksum_sha256,
+            notice=(
+                f"Native runtime file reviewed as part of {entry.source_package}. "
+                f"Evidence: {evidence_note}. Obligations: {entry.obligations}"
+            ),
+        )
+    return item
+
+
+def runtime_native_inventory(
+    runtime_root: Path,
+    native_provenance: list[NativeRuntimeProvenanceEntry] | None = None,
+) -> list[InventoryItem]:
     if not runtime_root.exists():
         return []
-    return [
+    items = [
         item
         for item in file_inventory(runtime_root, "runtime-file", "runtime", runtime=True)
         if item.scope == "native-library"
     ]
+    resolved_provenance = native_provenance or []
+    return [native_runtime_provenance_item(item, resolved_provenance) for item in items]
 
 
 def notice_inventory_version(item: InventoryItem) -> str:
@@ -1002,22 +1115,38 @@ def generate(args: argparse.Namespace) -> int:
     )
     static_asset_provenance = frontend_static_asset_provenance(args.frontend_asset_provenance)
     model_provenance = paddle_ocr_model_provenance(args.paddle_model_provenance)
+    native_provenance = native_runtime_provenance(args.native_runtime_provenance)
     cargo_items = cargo_inventory(args.cargo_manifest, args.cargo_metadata_file)
     asset_items = frontend_build_inventory(
         args.frontend_build, fontsource_package_versions, static_asset_provenance
     )
     asset_items.extend(paddle_model_inventory(args.paddle_models, model_provenance))
-    native_items = runtime_native_inventory(runtime_root)
+    native_items = runtime_native_inventory(runtime_root, native_provenance)
 
     all_items = python_items + npm_items + cargo_items + asset_items + native_items
     findings = [finding for item in all_items if (finding := classify_item(item)) is not None]
     unknown_failure_scopes = {"python-runtime", "npm-runtime", "cargo-runtime"}
     blocked_skip_scopes = {"python-smoke-runtime", "npm-dev", "cargo-first-party"}
-    blocked_or_unknown_runtime = [
+    unresolved_failure_scopes = {
+        "cargo-runtime",
+        "frontend-asset",
+        "frontend-font-asset",
+        "frontend-static-asset",
+        "model-asset",
+        "native-library",
+        "npm-runtime",
+        "paddle-ocr-model-asset",
+        "python-runtime",
+    }
+    unresolved_release_findings = [
         finding
         for finding in findings
         if (finding.severity == "blocked" and finding.scope not in blocked_skip_scopes)
         or (finding.severity == "unknown" and finding.scope in unknown_failure_scopes)
+        or (
+            finding.severity == "review_required"
+            and finding.scope in unresolved_failure_scopes
+        )
     ]
 
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -1031,12 +1160,13 @@ def generate(args: argparse.Namespace) -> int:
         {
             "policy": {
                 "defaultLicense": "AGPL-3.0-only",
-                "checkModeFailure": "blocked or unknown runtime artifacts",
+                "checkModeFailure": "unresolved release-scope findings",
             },
             "summary": {
                 "componentCount": len(all_items),
                 "findingCount": len(findings),
-                "blockedOrUnknownRuntimeCount": len(blocked_or_unknown_runtime),
+                "blockedOrUnknownRuntimeCount": len(unresolved_release_findings),
+                "unresolvedReleaseFindingCount": len(unresolved_release_findings),
             },
             "sourceOffer": {
                 "label": "Corresponding Source",
@@ -1047,8 +1177,8 @@ def generate(args: argparse.Namespace) -> int:
         },
     )
 
-    if args.check and blocked_or_unknown_runtime:
-        for finding in blocked_or_unknown_runtime:
+    if args.check and unresolved_release_findings:
+        for finding in unresolved_release_findings:
             print(
                 f"{finding.severity}: {finding.item} "
                 f"({finding.source}, {finding.scope}): {finding.message}",
@@ -1091,6 +1221,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--paddle-model-provenance",
         type=Path,
         default=PADDLE_OCR_MODEL_PROVENANCE,
+    )
+    parser.add_argument(
+        "--native-runtime-provenance",
+        type=Path,
+        default=NATIVE_RUNTIME_PROVENANCE,
     )
     return parser.parse_args(argv)
 

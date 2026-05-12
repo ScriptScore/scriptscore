@@ -14,6 +14,9 @@ Permissive dependencies such as MIT, BSD, ISC, and Apache-2.0 are generally comp
 
 Review decisions live in `docs/licensing/dependency-review-register.md`.
 Generated legal artifacts are evidence, not the human record of approval.
+Native runtime file provenance is recorded in
+`docs/licensing/native-runtime-provenance.json` and enforced by the legal
+artifact generator.
 
 ## Adding Dependencies
 
