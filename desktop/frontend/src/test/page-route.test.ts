@@ -788,7 +788,7 @@ describe('desktop route shell', () => {
     });
   });
 
-  it('uses the in-app confirmation dialog before regenerating an approved rubric', async () => {
+  it('hides rubric generation after a rubric is approved', async () => {
     const state = analyzedWorkspaceState();
     state.questions[0]!.rubric = {
       status: 'approved',
@@ -811,27 +811,8 @@ describe('desktop route shell', () => {
     expect(await screen.findByText('Question review in progress')).toBeTruthy();
     await selectTemplateSetupSubstep('Review');
 
-    await fireEvent.click(screen.getByRole('button', { name: 'Generate rubric' }));
-    const cancelledDialog = await screen.findByRole('dialog', { name: 'Generate rubric' });
-    expect(
-      within(cancelledDialog).getByText(
-        'Generating rubric criteria for an approved rubric will require reapproval and may make existing grading stale. Continue?'
-      )
-    ).toBeTruthy();
-    await fireEvent.click(within(cancelledDialog).getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('button', { name: 'Generate rubric' })).toBeNull();
     expect(desktopMocks.generateQuestionRubric).not.toHaveBeenCalled();
-
-    await fireEvent.click(screen.getByRole('button', { name: 'Generate rubric' }));
-    const confirmedDialog = await screen.findByRole('dialog', { name: 'Generate rubric' });
-    await fireEvent.click(within(confirmedDialog).getByRole('button', { name: 'Confirm' }));
-
-    await waitFor(() => {
-      expect(desktopMocks.generateQuestionRubric).toHaveBeenCalledWith(
-        'question_1',
-        true,
-        expect.any(Object)
-      );
-    });
     expect(dialogMocks.confirm).not.toHaveBeenCalled();
   });
 
@@ -1350,6 +1331,7 @@ describe('desktop route shell', () => {
     });
 
     await fireEvent.click(screen.getByRole('button', { name: 'Remove criterion' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Delete criterion' }));
     expect(within(questionOneButton).getByLabelText('Rubric warning')).toBeTruthy();
     await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 

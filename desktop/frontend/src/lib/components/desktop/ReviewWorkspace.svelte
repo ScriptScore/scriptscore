@@ -5,7 +5,9 @@
   import { HugeiconsIcon } from '@hugeicons/svelte';
   import {
     AlertCircleIcon,
+    AiMagicIcon,
     Cancel01Icon,
+    Delete02Icon,
     InformationCircleIcon,
     ApproximatelyEqualIcon,
     Image01Icon,
@@ -35,11 +37,12 @@
     type WorkspaceWarning
   } from '$lib/types';
   import {
+    ConfirmDialog,
     DesktopButton,
+    DesktopPopover,
     IconButton,
     InlineMessage,
     PagePreviewFrame,
-    Surface,
     TextareaField,
     TextField,
     ToneIcon
@@ -77,8 +80,13 @@
   let imagePopoverOpen = false;
   let pointsMismatchFlash = false;
   let approvedSaveDecisionOpen = false;
+  let pendingDeleteCriterionIndex: number | null = null;
+  let questionContextHelpOpen = false;
+  let rubricHelpOpen = false;
 
   const editableCriteria = writable<RubricCriterion[]>([]);
+  let selectedCriterionQuestionId: string | null = null;
+  let selectedCriterionKey: string | null = null;
 
   /** `exam.generate-rubric` UI: queued vs running per question (host dedupes enqueue). */
   let rubricGenByQuestion: Record<string, RubricGenerationJobState> = {};
@@ -227,6 +235,80 @@
     }
     return null;
   })();
+  $: syncSelectedCriterionSelection(
+    $editableCriteria,
+    selectedQuestionDraft?.questionId ?? null
+  );
+  $: selectedCriterionIndex = $editableCriteria.findIndex(
+    (criterion, index) => criterionSelectionKey(criterion, index) === selectedCriterionKey
+  );
+  $: selectedCriterion =
+    selectedCriterionIndex >= 0 ? $editableCriteria[selectedCriterionIndex] : null;
+  $: selectedCriterionWarnings =
+    selectedCriterionIndex >= 0 ? warningsForCriterionIndex(selectedCriterionIndex) : [];
+  $: selectedCriterionPointOptions = selectedCriterion
+    ? pointOptionsForCriterion(selectedCriterion)
+    : [];
+  $: pendingDeleteCriterion =
+    pendingDeleteCriterionIndex != null
+      ? $editableCriteria[pendingDeleteCriterionIndex] ?? null
+      : null;
+
+  function criterionSelectionKey(criterion: RubricCriterion, index: number): string {
+    return criterion.criterionId ? `id:${criterion.criterionId}` : `index:${index}`;
+  }
+
+  function criterionDisplayLabel(criterion: RubricCriterion, index: number): string {
+    const label = criterion.label.trim();
+    return label.length > 0 ? label : `Criterion ${index + 1}`;
+  }
+
+  function criterionPointsLabel(points: number | null | undefined): string {
+    const value = points ?? 0;
+    return `${value} pt${value === 1 ? '' : 's'}`;
+  }
+
+  function criterionWarningTitle(warnings: WorkspaceWarning[]): string {
+    return warnings.map((warning) => warning.message).join('\n');
+  }
+
+  function pointOptionsForCriterion(criterion: RubricCriterion): number[] {
+    const currentPoints = Math.max(0, criterion.points ?? 0);
+    const maxPoints = Math.max(currentPoints, maxPointsForSelectedQuestion ?? 10, 1);
+    return Array.from({ length: maxPoints }, (_, index) => index + 1);
+  }
+
+  function syncSelectedCriterionSelection(criteria: RubricCriterion[], questionId: string | null) {
+    if (!questionId) {
+      selectedCriterionQuestionId = null;
+      selectedCriterionKey = null;
+      return;
+    }
+    if (criteria.length === 0) {
+      selectedCriterionQuestionId = questionId;
+      selectedCriterionKey = null;
+      return;
+    }
+    const keys = criteria.map((criterion, index) => criterionSelectionKey(criterion, index));
+    if (selectedCriterionQuestionId !== questionId || !selectedCriterionKey) {
+      selectedCriterionQuestionId = questionId;
+      selectedCriterionKey = keys[0] ?? null;
+      return;
+    }
+    if (!keys.includes(selectedCriterionKey)) {
+      selectedCriterionKey = keys[0] ?? null;
+    }
+  }
+
+  function selectCriterion(index: number) {
+    const criterion = $editableCriteria[index];
+    if (!criterion) {
+      selectedCriterionKey = null;
+      return;
+    }
+    selectedCriterionQuestionId = selectedQuestionDraft?.questionId ?? null;
+    selectedCriterionKey = criterionSelectionKey(criterion, index);
+  }
 
   function updateCriterion(index: number, patch: Partial<RubricCriterion>) {
     editableCriteria.update((criteria) =>
@@ -237,20 +319,51 @@
   }
 
   function addCriterion() {
-    editableCriteria.update((criteria) => [
-      ...criteria,
-      {
+    editableCriteria.update((criteria) => {
+      const newCriterion: RubricCriterion = {
         criterionId: '',
         label: '',
         points: 1,
         partialCreditGuidance: '',
         source: 'manual'
-      }
-    ]);
+      };
+      selectedCriterionQuestionId = selectedQuestionDraft?.questionId ?? null;
+      selectedCriterionKey = criterionSelectionKey(newCriterion, criteria.length);
+      return [...criteria, newCriterion];
+    });
   }
 
   function removeCriterion(index: number) {
-    editableCriteria.update((criteria) => criteria.filter((_, i) => i !== index));
+    editableCriteria.update((criteria) => {
+      const next = criteria.filter((_, i) => i !== index);
+      selectedCriterionQuestionId = selectedQuestionDraft?.questionId ?? null;
+      if (next.length === 0) {
+        selectedCriterionKey = null;
+        return next;
+      }
+      const nextIndex = Math.min(index, next.length - 1);
+      selectedCriterionKey = criterionSelectionKey(next[nextIndex]!, nextIndex);
+      return next;
+    });
+  }
+
+  function requestRemoveCriterion(index: number) {
+    if (!$editableCriteria[index]) {
+      return;
+    }
+    pendingDeleteCriterionIndex = index;
+  }
+
+  function cancelRemoveCriterion() {
+    pendingDeleteCriterionIndex = null;
+  }
+
+  function confirmRemoveCriterion() {
+    if (pendingDeleteCriterionIndex == null) {
+      return;
+    }
+    removeCriterion(pendingDeleteCriterionIndex);
+    pendingDeleteCriterionIndex = null;
   }
 
   function rubricApprovedForQuestion(questionId: string): boolean {
@@ -498,7 +611,7 @@
           <div class="flex flex-wrap items-start gap-3">
             <div class="min-w-[15rem] flex-1 basis-[15rem]">
               <div class="flex items-center gap-2">
-                <div id="review-question-text-heading" class="shell-body font-medium text-workspace-text-secondary">
+                <div id="review-question-text-heading" class="shell-body-lg font-semibold text-workspace-text-primary">
                   Question text
                 </div>
                 {#if selectedQuestionRecord.imagePath}
@@ -527,7 +640,34 @@
               />
             </div>
             <div class="min-w-[15rem] flex-1 basis-[15rem]">
-              <div id="review-question-context-heading" class="shell-body font-medium text-workspace-text-secondary" title="Natural-language context visible in the image but not already in the cleaned question text (e.g. follow-up dependence, referenced figures, table meaning, setup assumptions).">Question context</div>
+              <div class="flex items-center gap-2">
+                <div id="review-question-context-heading" class="shell-body-lg font-semibold text-workspace-text-primary">
+                  Question context
+                </div>
+                <DesktopPopover
+                  bind:open={questionContextHelpOpen}
+                  rootClass="relative inline-flex"
+                  triggerClass="inline-flex h-6 w-6 items-center justify-center rounded-full border border-transparent text-workspace-text-muted transition-colors hover:text-workspace-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                  triggerLabel="Question context guidance"
+                  triggerAriaHaspopup="dialog"
+                  panelRole="dialog"
+                  panelAriaLabel="Question context guidance"
+                  panelClass="w-72 p-3"
+                  aria-label="Question context guidance"
+                >
+                  <svelte:fragment slot="trigger">
+                    <HugeiconsIcon
+                      icon={InformationCircleIcon}
+                      size={16}
+                      strokeWidth={1.7}
+                      aria-hidden="true"
+                    />
+                  </svelte:fragment>
+                  <p class="text-sm leading-5 text-workspace-text-secondary">
+                    Natural-language context visible in the image but not already in the cleaned question text, such as follow-up dependence, referenced figures, table meaning, or setup assumptions.
+                  </p>
+                </DesktopPopover>
+              </div>
               {#if !selectedAnalysisComplete}
                 <div class="mt-3 shell-meta text-workspace-text-muted">
                   Editable after analysis completes.
@@ -560,115 +700,210 @@
         </div>
 
         <div class="mt-8">
-          <div class="flex flex-wrap items-start justify-between gap-4">
-            <div>
-              <div class="shell-body font-medium text-workspace-text-secondary">Rubric criteria</div>
-              <div class="mt-1 shell-meta text-workspace-text-muted">Edits stay in memory until you save; the project database stores approved and draft rubrics.</div>
-              {#if pointsMismatchMessage}
-                <InlineMessage
-                  class={`mt-2 inline-flex items-center gap-2 transition-opacity duration-300 ${pointsMismatchFlash ? 'animate-pulse opacity-100' : 'opacity-90'}`}
-                  tone="warning"
-                >
-                  <HugeiconsIcon icon={AlertCircleIcon} size={16} strokeWidth={1.7} aria-hidden="true" />
-                  {pointsMismatchMessage}
-                </InlineMessage>
-              {/if}
-            </div>
-            <div class="flex flex-wrap items-center gap-2">
-              <DesktopButton
-                size="large"
-                disabled={
-                  busyAction === 'generateRubric' ||
-                  selectedRubricGenerationActive ||
-                  !selectedAnalysisComplete
-                }
-                onclick={() => void onGenerateRubric?.(selectedQuestionDraft.questionId)}
-              >
-                {busyAction === 'generateRubric' ? 'Generating…' : 'Generate rubric'}
-              </DesktopButton>
-              <DesktopButton
-                size="large"
-                disabled={selectedRubricGenerationActive}
-                onclick={addCriterion}
-              >
-                + add criterion
-              </DesktopButton>
-            </div>
-          </div>
-          <div class="mt-4 space-y-2">
-            {#each $editableCriteria as criterion, index (criterion.criterionId || index)}
-              {@const criterionWarnings = warningsForCriterionIndex(index)}
-              <Surface
-                variant={index % 2 === 1 ? 'cardSubtle' : 'panel'}
-                bordered={criterionWarnings.length > 0}
-                radius="2xl"
-                class={criterionWarnings.length > 0 ? 'border-message-warning-border px-3 py-4' : 'px-3 py-4'}
-              >
-                <div class="flex flex-col gap-2">
-                  <div class="flex flex-wrap items-center gap-3">
-                    <TextField
-                      class="min-w-0 flex-1"
-                      controlClass="min-h-10 rounded-xl bg-surface-card-control"
-                      value={criterion.label}
-                      placeholder="Criterion label"
-                      oninput={(event: Event) => updateCriterion(index, { label: (event.currentTarget as HTMLInputElement).value })}
-                    />
-                    {#if criterionWarnings.length > 0}
-                      <span
-                        class="inline-flex shrink-0 text-message-warning-text"
-                        title={criterionWarnings.map(w => w.message).join('\n')}
-                      >
-                        <HugeiconsIcon icon={AlertCircleIcon} size={16} strokeWidth={1.7} aria-hidden="true" />
-                      </span>
-                    {/if}
-                    {#if criterion.source === 'minimum_credit'}
-                      <span class="inline-flex shrink-0" title="Minimum credit criterion">
-                        <HugeiconsIcon
-                          icon={PercentCircleIcon}
-                          size={20}
-                          strokeWidth={1.7}
-                          class="text-workspace-text-muted"
-                        />
-                      </span>
-                    {/if}
-                    <label class="flex items-center gap-2 shell-meta text-workspace-text-muted">
-                      <span>Pts</span>
-                      <TextField
-                        class="w-16"
-                        controlClass="h-10 rounded-xl bg-surface-card-control text-center [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                        type="number"
-                        min="0"
-                        title="Points"
-                        value={criterion.points}
-                        oninput={(event: Event) =>
-                          updateCriterion(index, { points: Number.parseInt((event.currentTarget as HTMLInputElement).value, 10) || 0 })}
-                      />
-                    </label>
-                    <DesktopButton
-                      variant="ghost"
-                      size="compact"
-                      class="shrink-0 text-workspace-text-muted hover:text-destructive"
-                      title="Remove criterion"
-                      aria-label="Remove criterion"
-                      onclick={() => removeCriterion(index)}
-                    >
-                      Remove
-                    </DesktopButton>
+          {#if pointsMismatchMessage}
+            <InlineMessage
+              class={`mb-2 inline-flex items-center gap-2 transition-opacity duration-300 ${pointsMismatchFlash ? 'animate-pulse opacity-100' : 'opacity-90'}`}
+              tone="warning"
+            >
+              <HugeiconsIcon icon={AlertCircleIcon} size={16} strokeWidth={1.7} aria-hidden="true" />
+              {pointsMismatchMessage}
+            </InlineMessage>
+          {/if}
+
+          <div class="grid min-h-[24rem] overflow-hidden rounded-2xl border border-workspace-border bg-surface-card shadow-[var(--surface-shadow-card)] lg:grid-cols-[22rem_minmax(0,1fr)]">
+            <aside
+              class="flex min-h-0 flex-col border-b border-workspace-border bg-surface-sidebar lg:border-r lg:border-b-0"
+              aria-label="Rubric criteria"
+            >
+              <div class="flex items-center justify-between gap-2 border-b border-workspace-border px-4 py-3">
+                <div class="flex min-w-0 items-center gap-2">
+                  <div class="truncate shell-body-lg font-semibold text-workspace-text-primary">
+                    Rubric Criteria
                   </div>
+                  <DesktopPopover
+                    bind:open={rubricHelpOpen}
+                    rootClass="relative inline-flex shrink-0"
+                    triggerClass="inline-flex h-6 w-6 items-center justify-center rounded-full border border-transparent text-workspace-text-muted transition-colors hover:text-workspace-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                    triggerLabel="Rubric criteria help"
+                    triggerAriaHaspopup="dialog"
+                    panelRole="dialog"
+                    panelAriaLabel="Rubric criteria help"
+                    panelClass="w-72 p-3"
+                    aria-label="Rubric criteria help"
+                  >
+                    <svelte:fragment slot="trigger">
+                      <HugeiconsIcon
+                        icon={InformationCircleIcon}
+                        size={16}
+                        strokeWidth={1.7}
+                        aria-hidden="true"
+                      />
+                    </svelte:fragment>
+                    <p class="text-sm leading-5 text-workspace-text-secondary">
+                      Edits stay in memory until you save; the project database stores approved and draft rubrics.
+                    </p>
+                  </DesktopPopover>
+                </div>
+                <DesktopButton
+                  class="shrink-0"
+                  size="compact"
+                  disabled={selectedRubricGenerationActive}
+                  onclick={addCriterion}
+                >
+                  + add criterion
+                </DesktopButton>
+              </div>
+              <nav class="min-h-0 flex-1 overflow-y-auto" aria-label="Criterion list">
+                {#each $editableCriteria as criterion, index (criterion.criterionId || index)}
+                  {@const isSelectedCriterion = index === selectedCriterionIndex}
+                  {@const criterionWarnings = warningsForCriterionIndex(index)}
+                  {@const displayLabel = criterionDisplayLabel(criterion, index)}
+                  <div
+                    class={[
+                      'group relative flex w-full items-start px-4 py-3 transition-colors',
+                      isSelectedCriterion
+                        ? 'bg-workspace-sidebar-active text-workspace-text-primary'
+                        : 'text-workspace-text-secondary hover:bg-workspace-sidebar-hover'
+                    ]}
+                  >
+                    <div
+                      class={[
+                        'absolute inset-y-0 left-0 w-[3px] rounded-r',
+                        isSelectedCriterion ? 'bg-primary' : 'bg-transparent'
+                      ]}
+                    ></div>
+
+                    <button
+                      type="button"
+                      class="min-w-0 flex-1 text-left"
+                      aria-pressed={isSelectedCriterion}
+                      title={displayLabel}
+                      onclick={() => selectCriterion(index)}
+                    >
+                      <div class="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-x-2 gap-y-1 pr-1">
+                        <span
+                          class={`line-clamp-2 min-h-10 text-sm font-medium leading-5 ${isSelectedCriterion ? 'text-workspace-text-primary' : 'text-workspace-text-secondary'}`}
+                        >
+                          {displayLabel}
+                        </span>
+                        <span class="flex min-h-5 items-start justify-end gap-1">
+                          {#if criterion.source === 'minimum_credit'}
+                            <span
+                              class="inline-flex shrink-0 text-workspace-text-muted"
+                              aria-label="Minimum credit criterion"
+                              title="Minimum credit criterion"
+                            >
+                              <HugeiconsIcon
+                                icon={PercentCircleIcon}
+                                size={17}
+                                strokeWidth={1.7}
+                                aria-hidden="true"
+                              />
+                            </span>
+                          {/if}
+                          {#if criterionWarnings.length > 0}
+                            <span
+                              class="inline-flex shrink-0 text-message-warning-text"
+                              title={criterionWarningTitle(criterionWarnings)}
+                            >
+                              <ToneIcon
+                                tone="warning"
+                                icon={ApproximatelyEqualIcon}
+                                label="Criterion warning"
+                                title={criterionWarningTitle(criterionWarnings)}
+                              />
+                            </span>
+                          {/if}
+                        </span>
+                        <span class="shell-meta tabular-nums text-workspace-text-muted">
+                          {criterionPointsLabel(criterion.points)}
+                        </span>
+                      </div>
+                    </button>
+                  </div>
+                  <div class="h-px bg-workspace-border"></div>
+                {:else}
+                  <div class="px-4 py-6 shell-body text-workspace-text-secondary">
+                    No criteria yet.
+                  </div>
+                {/each}
+              </nav>
+            </aside>
+
+            <div class="min-w-0 p-4 sm:p-5">
+              {#if selectedCriterion}
+                <div class="flex items-start justify-between gap-4">
+                  <div class="min-w-0 flex-1">
+                    <TextField
+                      label="Label"
+                      controlClass="min-h-12 rounded-xl bg-surface-card-control text-base font-medium"
+                      value={selectedCriterion.label}
+                      placeholder="Criterion label"
+                      oninput={(event: Event) =>
+                        updateCriterion(selectedCriterionIndex, {
+                          label: (event.currentTarget as HTMLInputElement).value
+                        })}
+                    />
+                  </div>
+                  <IconButton
+                    variant="danger"
+                    class="size-14 rounded-2xl"
+                    ariaLabel="Remove criterion"
+                    title="Remove criterion"
+                    onclick={() => requestRemoveCriterion(selectedCriterionIndex)}
+                  >
+                    <HugeiconsIcon icon={Delete02Icon} size={28} strokeWidth={1.8} aria-hidden="true" />
+                  </IconButton>
+                </div>
+
+                {#if selectedCriterionWarnings.length > 0}
+                  <div class="mt-4 space-y-2">
+                    {#each selectedCriterionWarnings as warning (`${warning.code ?? 'warn'}-${warning.message}`)}
+                      <InlineMessage tone="warning" message={warning.message} />
+                    {/each}
+                  </div>
+                {/if}
+
+                <div class="mt-5 grid gap-5">
                   <TextareaField
-                    controlClass="min-h-20 rounded-xl bg-surface-card-control px-4 py-3 text-sm"
+                    label="Partial Credit Guidance"
+                    controlClass="min-h-36 rounded-xl bg-surface-card-control px-4 py-3 text-sm"
                     placeholder="Partial credit guidance"
-                    value={criterion.partialCreditGuidance}
+                    value={selectedCriterion.partialCreditGuidance}
                     oninput={(event: Event) =>
-                      updateCriterion(index, {
+                      updateCriterion(selectedCriterionIndex, {
                         partialCreditGuidance: (event.currentTarget as HTMLTextAreaElement).value
                       })}
                   />
+
+                  <div>
+                    <div class="shell-meta font-medium text-workspace-text-muted">Points</div>
+                    <div class="mt-2 flex flex-wrap gap-1">
+                      {#each selectedCriterionPointOptions as pointValue (pointValue)}
+                        <button
+                          type="button"
+                          class={`inline-flex h-8 w-8 items-center justify-center rounded-md border text-sm tabular-nums transition-colors ${
+                            pointValue === selectedCriterion.points
+                              ? 'border-message-success-border bg-message-success-bg text-message-success-text'
+                              : 'border-border bg-surface-card-control text-workspace-text-muted hover:bg-muted/40'
+                          }`}
+                          aria-label={`${pointValue} point${pointValue !== 1 ? 's' : ''}`}
+                          title={`${pointValue} point${pointValue !== 1 ? 's' : ''}`}
+                          aria-pressed={pointValue === selectedCriterion.points}
+                          onclick={() => updateCriterion(selectedCriterionIndex, { points: pointValue })}
+                        >
+                          {pointValue}
+                        </button>
+                      {/each}
+                    </div>
+                  </div>
                 </div>
-              </Surface>
-            {:else}
-              <div class="py-6 text-sm text-workspace-text-secondary">No criteria yet.</div>
-            {/each}
+              {:else}
+                <div class="flex min-h-[18rem] items-center justify-center rounded-xl border border-dashed border-workspace-border bg-surface-panel px-6 text-center shell-body text-workspace-text-secondary">
+                  No criteria yet.
+                </div>
+              {/if}
+            </div>
           </div>
         </div>
       </div>
@@ -685,6 +920,18 @@
               onclick={() => void onReAnalyze?.(selectedQuestionDraft.questionId)}
             >
               {selectedAnalysisInProgress ? 'Re-analyzing…' : 'Re Analyze'}
+            </DesktopButton>
+            <DesktopButton
+              size="large"
+              disabled={
+                busyAction === 'generateRubric' ||
+                selectedRubricGenerationActive ||
+                !selectedAnalysisComplete
+              }
+              onclick={() => void onGenerateRubric?.(selectedQuestionDraft.questionId)}
+            >
+              <HugeiconsIcon icon={AiMagicIcon} size={18} strokeWidth={1.8} aria-hidden="true" />
+              {busyAction === 'generateRubric' ? 'Generating...' : 'Generate rubric'}
             </DesktopButton>
           {/if}
           {#if selectedRubricApproved}
@@ -734,6 +981,18 @@
       </div>
     {/if}
   </section>
+
+  <ConfirmDialog
+    open={pendingDeleteCriterionIndex !== null}
+    title="Delete criterion?"
+    description={pendingDeleteCriterion && pendingDeleteCriterionIndex != null
+      ? `This removes "${criterionDisplayLabel(pendingDeleteCriterion, pendingDeleteCriterionIndex)}" from the rubric draft.`
+      : 'This removes the selected criterion from the rubric draft.'}
+    confirmLabel="Delete criterion"
+    destructive
+    onCancel={cancelRemoveCriterion}
+    onConfirm={confirmRemoveCriterion}
+  />
 
   {#if approvedSaveDecisionOpen && selectedQuestionDraft}
     <div class="fixed inset-0 z-50 flex items-center justify-center bg-overlay-scrim px-4">

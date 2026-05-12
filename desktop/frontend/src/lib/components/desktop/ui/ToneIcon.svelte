@@ -6,6 +6,7 @@
   export let tone: FeedbackTone = 'muted';
   export let icon: IconSvgElement;
   export let label: string;
+  export let title: string | null = null;
   export let size = 14;
   export let strokeWidth = 1.7;
 
@@ -23,7 +24,7 @@
     className
   ]}
   aria-label={label}
-  title={label}
+  title={title ?? label}
 >
   <HugeiconsIcon {icon} {size} {strokeWidth} aria-hidden="true" />
 </span>
