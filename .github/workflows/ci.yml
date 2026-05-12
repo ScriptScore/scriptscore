@@ -17,15 +17,15 @@ jobs:
         working-directory: cli
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
 
@@ -49,15 +49,15 @@ jobs:
         working-directory: cli
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
 
@@ -81,7 +81,7 @@ jobs:
 
       - name: Upload coverage XML artifact
         if: ${{ steps.artifact-upload.outputs.enabled == 'true' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-xml
           path: cli/coverage.xml
@@ -94,15 +94,15 @@ jobs:
         working-directory: cli
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
 
@@ -129,10 +129,10 @@ jobs:
         working-directory: desktop/frontend
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: "20"
           cache: npm
@@ -162,10 +162,10 @@ jobs:
         working-directory: desktop/frontend
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: "20"
           cache: npm
@@ -189,7 +189,7 @@ jobs:
           PY
 
       - name: Upload frontend coverage artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: desktop-frontend-coverage
           path: |
@@ -201,15 +201,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: "20"
           cache: npm
@@ -236,7 +236,7 @@ jobs:
         run: ./desktop/scripts/check_scriptscoreplus_boundary.py
 
       - name: Upload license policy artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: license-policy-report
           path: desktop/dist/legal
@@ -248,15 +248,15 @@ jobs:
       SCRIPTSCORE_PYTHON: ${{ github.workspace }}/cli/.venv/bin/python
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
 
@@ -311,7 +311,7 @@ jobs:
     needs: desktop-host-quality
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@1.95.0
@@ -335,7 +335,7 @@ jobs:
 
       - name: Upload rust-code-analysis artifact
         if: ${{ steps.artifact-upload.outputs.enabled == 'true' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: desktop-rust-code-analysis
           path: |
@@ -350,15 +350,15 @@ jobs:
       SCRIPTSCORE_PYTHON: ${{ github.workspace }}/cli/.venv/bin/python
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
 
@@ -400,7 +400,7 @@ jobs:
         run: make coverage-rust
 
       - name: Upload Rust coverage artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: desktop-rust-coverage
           path: artifacts/coverage
@@ -411,7 +411,7 @@ jobs:
     needs: desktop-host-quality
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@1.95.0
@@ -435,7 +435,7 @@ jobs:
 
       - name: Upload cargo-geiger artifact
         if: ${{ steps.artifact-upload.outputs.enabled == 'true' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: desktop-rust-unsafe-report
           path: |
@@ -468,19 +468,19 @@ jobs:
 
       - name: Checkout
         if: ${{ steps.sonar-ready.outputs.enabled == 'true' }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
       - name: Set up Python
         if: ${{ steps.sonar-ready.outputs.enabled == 'true' }}
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
       - name: Set up Node
         if: ${{ steps.sonar-ready.outputs.enabled == 'true' }}
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: "20"
           cache: npm
@@ -498,21 +498,21 @@ jobs:
 
       - name: Download frontend coverage artifact
         if: ${{ steps.sonar-ready.outputs.enabled == 'true' }}
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: desktop-frontend-coverage
           path: desktop/frontend/coverage
 
       - name: Download Rust coverage artifact
         if: ${{ steps.sonar-ready.outputs.enabled == 'true' }}
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: desktop-rust-coverage
           path: artifacts/coverage
 
       - name: Cache SonarCloud packages
         if: ${{ steps.sonar-ready.outputs.enabled == 'true' }}
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.sonar/cache
           key: ${{ runner.os }}-sonar
@@ -571,15 +571,15 @@ jobs:
         working-directory: cli
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
 
@@ -606,7 +606,7 @@ jobs:
 
       - name: Upload desktop worker coverage artifacts
         if: ${{ steps.artifact-upload.outputs.enabled == 'true' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: desktop-worker-coverage
           path: |
@@ -626,10 +626,10 @@ jobs:
         working-directory: cli
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: "20"
           cache: npm
@@ -640,12 +640,12 @@ jobs:
         run: npm ci
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
 
@@ -704,10 +704,10 @@ jobs:
       SCRIPTSCORE_PYTHON: ${{ github.workspace }}/cli/.venv/bin/python
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: "20"
           cache: npm
@@ -718,12 +718,12 @@ jobs:
         run: npm ci
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
 
@@ -785,7 +785,7 @@ jobs:
 
       - name: Upload Linux package artifacts
         if: ${{ github.event_name == 'workflow_dispatch' && steps.artifact-upload.outputs.enabled == 'true' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: desktop-linux-package
           path: |
@@ -801,15 +801,15 @@ jobs:
       SCRIPTSCORE_PYTHON: ${{ github.workspace }}\cli\.venv\Scripts\python.exe
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
 
