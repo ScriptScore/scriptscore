@@ -365,6 +365,26 @@ describe('ModerationWorkspace', () => {
     expect(screen.getByRole('button', { name: 'Both' })).toBeTruthy();
   });
 
+  it('opens the moderation tips guide from the question header', async () => {
+    render(ModerationWorkspace, {
+      workspaceState: moderationWorkspaceState(),
+      busy: false,
+      onSaveModeratedScore: vi.fn(),
+      onSaveModeratedFeedback: vi.fn(),
+      onSetQuestionReviewed: vi.fn()
+    });
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Moderation tips' }));
+
+    expect(screen.getByRole('dialog', { name: 'Moderation tips' })).toBeTruthy();
+    const guideImage = screen.getByRole('img', {
+      name: 'Synthetic guide showing moderation question tabs, score lanes, outlier review, and accept action'
+    }) as HTMLImageElement;
+    expect(guideImage.getAttribute('src')).toBe('/moderation-question-selection-tips.png');
+    expect(screen.getByText(/vertical score lanes/)).toBeTruthy();
+    expect(screen.getByText(/Accept in the question tab/)).toBeTruthy();
+  });
+
   it('closes the settings popover on outside pointer and Escape and returns focus', async () => {
     render(ModerationWorkspace, {
       workspaceState: moderationWorkspaceState(),

@@ -1,5 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script lang="ts">
+  import { FileQuestionMarkIcon } from '@hugeicons/core-free-icons';
+  import { HugeiconsIcon } from '@hugeicons/svelte';
   import { onMount, tick } from 'svelte';
 
   import { listCanvasCourses } from '$lib/desktop';
@@ -7,7 +9,7 @@
   import { jobProgress } from '$lib/stores/shell';
   import type { BusyAction } from '$lib/stores/workspaceView';
   import type { CreateProjectInput, LmsCourseSummary } from '$lib/types';
-  import { DesktopButton, SelectField, TextField } from './ui';
+  import { DesktopButton, DesktopPopover, SelectField, TextField } from './ui';
 
   export let hasDesktopHost = false;
   export let busyAction: BusyAction = null;
@@ -21,6 +23,7 @@
   let lmsCoursesError: string | null = null;
   let lmsCoursesLoading = false;
   let createFormSection: HTMLElement | null = null;
+  let templatePdfGuideOpen = false;
 
   $: canvasLmsReady = isCanvasLmsReady($appSettings);
   $: courseOptions = lmsCourses.map((course) => ({
@@ -156,7 +159,33 @@
       </div>
     </div>
     <div class="grid gap-2.5">
-      <div class="text-lg font-semibold text-foreground">Template PDF</div>
+      <div class="flex flex-wrap items-center gap-2">
+        <div class="text-lg font-semibold text-foreground">Template PDF</div>
+        <DesktopPopover
+          bind:open={templatePdfGuideOpen}
+          rootClass="relative inline-block"
+          triggerClass="inline-flex items-center gap-1.5 text-sm font-medium text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+          triggerLabel="Template guide"
+          triggerAriaHaspopup="dialog"
+          aria-label="Template guide"
+          panelRole="dialog"
+          panelAriaLabel="Template PDF guide"
+          panelClass="left-0 w-[min(42rem,calc(100vw-4rem))] max-w-[calc(100vw-4rem)] space-y-3 p-3"
+        >
+          <svelte:fragment slot="trigger">
+            <HugeiconsIcon icon={FileQuestionMarkIcon} size={15} strokeWidth={1.8} aria-hidden="true" />
+            <span>Template guide</span>
+          </svelte:fragment>
+          <img
+            class="block h-auto w-full rounded-lg border border-border-subtle object-contain"
+            src="/template-pdf-question-id-guide.png"
+            alt="Synthetic guide showing supported template PDF question numbering and page margin examples"
+          />
+          <p class="text-sm leading-5 text-workspace-text-secondary">
+            Use one full-width column of clearly numbered questions, keep content inside page margins, and avoid embedded parts such as 1a, 1b, and 1c so automatic question identification can find the template structure.
+          </p>
+        </DesktopPopover>
+      </div>
       <div class="flex flex-col gap-3 sm:flex-row sm:items-center">
         <DesktopButton
           class="min-w-[9.5rem]"
