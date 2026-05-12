@@ -494,6 +494,99 @@ def test_frontend_build_inventory_uses_static_asset_provenance(tmp_path: Path) -
     assert all(legal.classify_item(item) is None for item in items)
 
 
+def test_paddle_model_inventory_uses_model_provenance(tmp_path: Path) -> None:
+    model_root = tmp_path / "cli" / "models" / "paddle"
+    det_model = model_root / "det" / "inference.yml"
+    rec_model = model_root / "rec" / "inference.yml"
+    det_model.parent.mkdir(parents=True, exist_ok=True)
+    rec_model.parent.mkdir(parents=True, exist_ok=True)
+    det_model.write_text("det fixture", encoding="utf-8")
+    rec_model.write_text("rec fixture", encoding="utf-8")
+
+    provenance_path = tmp_path / "paddle-ocr-model-provenance.json"
+    write_json(
+        provenance_path,
+        {
+            "license": "Apache-2.0",
+            "license_evidence": [
+                "https://huggingface.co/PaddlePaddle/PP-OCRv5_mobile_det",
+                "https://raw.githubusercontent.com/PaddlePaddle/PaddleOCR/main/LICENSE",
+            ],
+            "redistribution_terms": "Include Apache-2.0 license text.",
+            "models": [
+                {
+                    "model_name": "PP-OCRv5_mobile_det",
+                    "upstream_model_id": "PaddlePaddle/PP-OCRv5_mobile_det",
+                    "upstream_repository": "https://huggingface.co/PaddlePaddle/PP-OCRv5_mobile_det",
+                    "upstream_commit": "det-commit",
+                    "files": [
+                        {
+                            "path": legal.project_relative(det_model),
+                            "upstream_url": "https://example.test/det/inference.yml",
+                            "size_bytes": det_model.stat().st_size,
+                            "sha256": legal.digest_file(det_model),
+                        }
+                    ],
+                },
+                {
+                    "model_name": "PP-OCRv5_mobile_rec",
+                    "upstream_model_id": "PaddlePaddle/PP-OCRv5_mobile_rec",
+                    "upstream_repository": "https://huggingface.co/PaddlePaddle/PP-OCRv5_mobile_rec",
+                    "upstream_commit": "rec-commit",
+                    "files": [
+                        {
+                            "path": legal.project_relative(rec_model),
+                            "upstream_url": "https://example.test/rec/inference.yml",
+                            "size_bytes": rec_model.stat().st_size,
+                            "sha256": legal.digest_file(rec_model),
+                        }
+                    ],
+                },
+            ],
+        },
+    )
+
+    items = legal.paddle_model_inventory(
+        model_root,
+        legal.paddle_ocr_model_provenance(provenance_path),
+    )
+
+    assert {item.scope for item in items} == {legal.PADDLE_OCR_MODEL_SCOPE}
+    assert {item.source for item in items} == {legal.PADDLE_OCR_MODEL_SOURCE}
+    assert {item.license for item in items} == {"Apache-2.0"}
+    assert all("Redistribution terms" in (item.notice or "") for item in items)
+    assert all(legal.classify_item(item) is None for item in items)
+
+
+def test_paddle_model_inventory_rejects_checksum_mismatch(tmp_path: Path) -> None:
+    model_root = tmp_path / "cli" / "models" / "paddle"
+    model_file = model_root / "det" / "inference.yml"
+    model_file.parent.mkdir(parents=True, exist_ok=True)
+    model_file.write_text("det fixture", encoding="utf-8")
+
+    provenance = {
+        legal.project_relative(model_file): {
+            "license": "Apache-2.0",
+            "license_evidence": ["https://example.test/license"],
+            "model_name": "PP-OCRv5_mobile_det",
+            "redistribution_terms": "Include Apache-2.0 license text.",
+            "upstream_commit": "det-commit",
+            "upstream_model_id": "PaddlePaddle/PP-OCRv5_mobile_det",
+            "upstream_repository": "https://huggingface.co/PaddlePaddle/PP-OCRv5_mobile_det",
+            "upstream_url": "https://example.test/det/inference.yml",
+            "size_bytes": model_file.stat().st_size,
+            "sha256": "0" * 64,
+        }
+    }
+
+    try:
+        legal.paddle_model_inventory(model_root, provenance)
+    except ValueError as err:
+        assert "checksum" in str(err)
+    else:
+        raise AssertionError("expected checksum mismatch")
+
+
 def test_generate_maps_fontsource_woff2_assets_without_frontend_asset_findings(
     tmp_path: Path,
 ) -> None:
@@ -643,6 +736,92 @@ def test_generate_maps_static_asset_provenance_without_frontend_asset_findings(
     notices = (tmp_path / "legal" / "THIRD_PARTY_NOTICES.md").read_text(encoding="utf-8")
     assert "frontend-asset" not in notices
     assert "desktop/frontend/static/scriptscore-mark.svg" in notices
+
+
+def test_generate_maps_paddle_model_provenance_without_model_asset_findings(
+    tmp_path: Path,
+) -> None:
+    model_root = tmp_path / "cli" / "models" / "paddle"
+    for file_name in (
+        "det/inference.yml",
+        "det/inference.json",
+        "rec/inference.yml",
+        "rec/inference.json",
+    ):
+        path = model_root / file_name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"{file_name} fixture", encoding="utf-8")
+
+    provenance_path = tmp_path / "paddle-ocr-model-provenance.json"
+    write_json(
+        provenance_path,
+        {
+            "license": "Apache-2.0",
+            "license_evidence": [
+                "https://huggingface.co/PaddlePaddle/PP-OCRv5_mobile_det",
+                "https://huggingface.co/PaddlePaddle/PP-OCRv5_mobile_rec",
+                "https://raw.githubusercontent.com/PaddlePaddle/PaddleOCR/main/LICENSE",
+            ],
+            "redistribution_terms": "Include Apache-2.0 license text.",
+            "models": [
+                {
+                    "model_name": f"PP-OCRv5_mobile_{leaf}",
+                    "upstream_model_id": f"PaddlePaddle/PP-OCRv5_mobile_{leaf}",
+                    "upstream_repository": f"https://huggingface.co/PaddlePaddle/PP-OCRv5_mobile_{leaf}",
+                    "upstream_commit": f"{leaf}-commit",
+                    "files": [
+                        {
+                            "path": legal.project_relative(path),
+                            "upstream_url": f"https://example.test/{file_name}",
+                            "size_bytes": path.stat().st_size,
+                            "sha256": legal.digest_file(path),
+                        }
+                        for path in sorted((model_root / leaf).iterdir())
+                    ],
+                }
+                for leaf in ("det", "rec")
+            ],
+        },
+    )
+    cargo_path = tmp_path / "cargo.json"
+    write_json(cargo_path, {"workspace_members": [], "packages": []})
+
+    args = legal.parse_args(
+        [
+            "--check",
+            "--output-dir",
+            str(tmp_path / "legal"),
+            "--runtime-manifest",
+            str(tmp_path / "missing-runtime" / "runtime-manifest.json"),
+            "--npm-lock",
+            str(tmp_path / "missing-package-lock.json"),
+            "--cargo-metadata-file",
+            str(cargo_path),
+            "--frontend-build",
+            str(tmp_path / "frontend-build"),
+            "--paddle-models",
+            str(model_root),
+            "--paddle-model-provenance",
+            str(provenance_path),
+        ]
+    )
+
+    assert legal.generate(args) == 0
+    report = json.loads((tmp_path / "legal" / "license-policy-report.json").read_text())
+    assert report["summary"]["findingCount"] == 0
+    sbom = json.loads((tmp_path / "legal" / "sbom-assets.json").read_text())
+    model_assets = [
+        component
+        for component in sbom["components"]
+        if component["scope"] == legal.PADDLE_OCR_MODEL_SCOPE
+    ]
+    assert len(model_assets) == 4
+    assert all(component["source"] == legal.PADDLE_OCR_MODEL_SOURCE for component in model_assets)
+    assert all(component["license"] == "Apache-2.0" for component in model_assets)
+    notices = (tmp_path / "legal" / "THIRD_PARTY_NOTICES.md").read_text(encoding="utf-8")
+    assert "paddle-ocr-model-asset" in notices
+    assert "Redistribution terms: Include Apache-2.0 license text." in notices
+    assert "Release review required,assets,model-asset" not in notices
 
 
 def test_npm_and_cargo_inventory_parse_fixture_metadata(tmp_path: Path) -> None:

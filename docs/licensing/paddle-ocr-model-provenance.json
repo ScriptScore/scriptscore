@@ -1,0 +1,82 @@
+{
+  "format": "scriptscore-paddle-ocr-model-provenance-v1",
+  "license": "Apache-2.0",
+  "license_evidence": [
+    "https://huggingface.co/PaddlePaddle/PP-OCRv5_mobile_det",
+    "https://huggingface.co/PaddlePaddle/PP-OCRv5_mobile_rec",
+    "https://raw.githubusercontent.com/PaddlePaddle/PaddleOCR/main/LICENSE"
+  ],
+  "redistribution_terms": "Apache-2.0 permits redistribution in source or object form when recipients receive a copy of the license, copyright/patent/trademark/attribution notices from the source form are retained, and modified files carry prominent change notices. Preserve any upstream NOTICE text if PaddleOCR adds one for these model distributions.",
+  "models": [
+    {
+      "model_name": "PP-OCRv5_mobile_det",
+      "description": "PaddleOCR PP-OCRv5 mobile text detection model.",
+      "upstream_repository": "https://huggingface.co/PaddlePaddle/PP-OCRv5_mobile_det",
+      "upstream_commit": "0d63e78e2b680928f6b1747d76a08db6e645efb7",
+      "upstream_model_id": "PaddlePaddle/PP-OCRv5_mobile_det",
+      "upstream_last_modified": "2025-07-22T10:03:05.000Z",
+      "files": [
+        {
+          "path": "cli/models/paddle/det/inference.json",
+          "upstream_path": "inference.json",
+          "upstream_url": "https://huggingface.co/PaddlePaddle/PP-OCRv5_mobile_det/resolve/0d63e78e2b680928f6b1747d76a08db6e645efb7/inference.json",
+          "upstream_blob_id": "6cd678f39460a27372f8fe570e4e12e7a383418f",
+          "size_bytes": 229777,
+          "sha256": "05feef1acb00aa4cd7362b15f7f501fc4f99d7b1fa73c1c871e0c7b1504b0f5c"
+        },
+        {
+          "path": "cli/models/paddle/det/inference.pdiparams",
+          "upstream_path": "inference.pdiparams",
+          "upstream_url": "https://huggingface.co/PaddlePaddle/PP-OCRv5_mobile_det/resolve/0d63e78e2b680928f6b1747d76a08db6e645efb7/inference.pdiparams",
+          "upstream_blob_id": "5e6d602681aa10f3660406dd7ec0ba48268d56e4",
+          "upstream_lfs_sha256": "afa1820cb16c1fd0dad589d0f8b389139061c1ef6d68019685fd07be997dda5b",
+          "size_bytes": 4692937,
+          "sha256": "afa1820cb16c1fd0dad589d0f8b389139061c1ef6d68019685fd07be997dda5b"
+        },
+        {
+          "path": "cli/models/paddle/det/inference.yml",
+          "upstream_path": "inference.yml",
+          "upstream_url": "https://huggingface.co/PaddlePaddle/PP-OCRv5_mobile_det/resolve/0d63e78e2b680928f6b1747d76a08db6e645efb7/inference.yml",
+          "upstream_blob_id": "579d10695d2dd6e85c5ecba02d151ae5c077aa49",
+          "size_bytes": 903,
+          "sha256": "98069072e1b6b37d727fd9d9f11725faa46d6ea0de012f2ed26caea011c37699"
+        }
+      ]
+    },
+    {
+      "model_name": "PP-OCRv5_mobile_rec",
+      "description": "PaddleOCR PP-OCRv5 mobile text recognition model.",
+      "upstream_repository": "https://huggingface.co/PaddlePaddle/PP-OCRv5_mobile_rec",
+      "upstream_commit": "682f20538d8c086cb2128e5cfac775e6c4904e85",
+      "upstream_model_id": "PaddlePaddle/PP-OCRv5_mobile_rec",
+      "upstream_last_modified": "2025-07-22T10:04:13.000Z",
+      "files": [
+        {
+          "path": "cli/models/paddle/rec/inference.json",
+          "upstream_path": "inference.json",
+          "upstream_url": "https://huggingface.co/PaddlePaddle/PP-OCRv5_mobile_rec/resolve/682f20538d8c086cb2128e5cfac775e6c4904e85/inference.json",
+          "upstream_blob_id": "90f76a83768033cbd2bc9aa4d10aaa08e7bf25f7",
+          "size_bytes": 217724,
+          "sha256": "24587345250c7332d0fc6f9a44e794d078cdaeb64c302fef906f325619de2569"
+        },
+        {
+          "path": "cli/models/paddle/rec/inference.pdiparams",
+          "upstream_path": "inference.pdiparams",
+          "upstream_url": "https://huggingface.co/PaddlePaddle/PP-OCRv5_mobile_rec/resolve/682f20538d8c086cb2128e5cfac775e6c4904e85/inference.pdiparams",
+          "upstream_blob_id": "0f9c0adbb4a3c9de7854836509d0794a8fb27cf5",
+          "upstream_lfs_sha256": "2460da90875937c94db97eba74ae3d9e5d4c4c57c42f1f41531c09a26bcc771a",
+          "size_bytes": 16458665,
+          "sha256": "2460da90875937c94db97eba74ae3d9e5d4c4c57c42f1f41531c09a26bcc771a"
+        },
+        {
+          "path": "cli/models/paddle/rec/inference.yml",
+          "upstream_path": "inference.yml",
+          "upstream_url": "https://huggingface.co/PaddlePaddle/PP-OCRv5_mobile_rec/resolve/682f20538d8c086cb2128e5cfac775e6c4904e85/inference.yml",
+          "upstream_blob_id": "176f6d552a120e6fa0a812089fb36c1bb983ce28",
+          "size_bytes": 148345,
+          "sha256": "5dfeb2777f6d0db8177d8128a8acfcf6e6276dc4ac73ea3bf0dc06d6a5e85d8e"
+        }
+      ]
+    }
+  ]
+}
