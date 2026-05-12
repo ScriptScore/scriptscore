@@ -45,7 +45,7 @@ class EnforceReleaseLegalPolicyTests(unittest.TestCase):
             encoding="utf-8",
         )
 
-    def test_policy_passes_when_issue_28_findings_are_resolved(self) -> None:
+    def test_policy_passes_when_release_findings_are_resolved(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             legal_root = Path(tmp_dir) / "legal"
             self._write_legal_artifacts(
@@ -59,26 +59,26 @@ class EnforceReleaseLegalPolicyTests(unittest.TestCase):
                 findings=[
                     {
                         "severity": "review_required",
-                        "item": "scipy",
-                        "source": "python",
-                        "scope": "python-runtime",
-                        "message": "unrelated release review",
+                        "item": "dev-tool",
+                        "source": "npm",
+                        "scope": "npm-dev",
+                        "message": "non-release review",
                     }
                 ],
             )
 
             MODULE.enforce_release_legal_policy(legal_root)
 
-    def test_policy_rejects_issue_28_review_required_finding(self) -> None:
+    def test_policy_rejects_release_review_required_finding(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             legal_root = Path(tmp_dir) / "legal"
             self._write_legal_artifacts(
                 legal_root,
-                python_packages=["PyMuPDF"],
+                python_packages=["scipy"],
                 findings=[
                     {
                         "severity": "review_required",
-                        "item": "PyMuPDF",
+                        "item": "scipy",
                         "source": "python",
                         "scope": "python-runtime",
                         "message": "GPL/LGPL or custom copyleft terms require release review.",
@@ -86,7 +86,27 @@ class EnforceReleaseLegalPolicyTests(unittest.TestCase):
                 ],
             )
 
-            with self.assertRaisesRegex(MODULE.ReleaseLegalPolicyError, "PyMuPDF"):
+            with self.assertRaisesRegex(MODULE.ReleaseLegalPolicyError, "scipy"):
+                MODULE.enforce_release_legal_policy(legal_root)
+
+    def test_policy_rejects_native_library_review_required_finding(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            legal_root = Path(tmp_dir) / "legal"
+            self._write_legal_artifacts(
+                legal_root,
+                python_packages=[],
+                findings=[
+                    {
+                        "severity": "review_required",
+                        "item": "desktop/dist/bundled-runtime/python/lib/custom.so",
+                        "source": "runtime",
+                        "scope": "native-library",
+                        "message": "Asset or native binary terms require release review.",
+                    }
+                ],
+            )
+
+            with self.assertRaisesRegex(MODULE.ReleaseLegalPolicyError, "custom.so"):
                 MODULE.enforce_release_legal_policy(legal_root)
 
     def test_policy_rejects_non_headless_opencv_in_python_sbom(self) -> None:

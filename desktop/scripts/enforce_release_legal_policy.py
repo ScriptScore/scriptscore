@@ -14,23 +14,25 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SCRIPT_DIR.parents[1]
 DESKTOP_ROOT = PROJECT_ROOT / "desktop"
 
-ISSUE_28_PACKAGE_NAMES = frozenset(
-    {
-        "crc32c",
-        "bce-python-sdk",
-        "opencv-contrib-python",
-        "opencv-contrib-python-headless",
-        "paddlepaddle",
-        "pymupdf",
-        "python-bidi",
-    }
-)
 FORBIDDEN_RELEASE_PACKAGES = {
     "bce-python-sdk": "Baidu cloud SDK is not used by ScriptScore's offline OCR path.",
     "crc32c": "Transitive bce-python-sdk dependency is not used by ScriptScore's offline OCR path.",
     "opencv-contrib-python": "Use opencv-contrib-python-headless in release runtimes.",
 }
 UNRESOLVED_SEVERITIES = frozenset({"blocked", "review_required", "unknown"})
+RELEASE_SCOPES = frozenset(
+    {
+        "cargo-runtime",
+        "frontend-asset",
+        "frontend-font-asset",
+        "frontend-static-asset",
+        "model-asset",
+        "native-library",
+        "npm-runtime",
+        "paddle-ocr-model-asset",
+        "python-runtime",
+    }
+)
 
 
 class ReleaseLegalPolicyError(RuntimeError):
@@ -81,7 +83,7 @@ def validate_asset_sbom(legal_root: Path) -> None:
         raise ReleaseLegalPolicyError("sbom-assets.json components must be a list.")
 
 
-def unresolved_issue_28_findings(legal_root: Path) -> list[str]:
+def unresolved_release_findings(legal_root: Path) -> list[str]:
     report = read_json(report_path(legal_root))
     findings = report.get("findings", [])
     if not isinstance(findings, list):
@@ -93,15 +95,18 @@ def unresolved_issue_28_findings(legal_root: Path) -> list[str]:
             continue
         item = finding.get("item")
         severity = finding.get("severity")
-        if not isinstance(item, str) or not isinstance(severity, str):
-            continue
-        normalized_item = normalize_package_name(item)
-        if normalized_item not in ISSUE_28_PACKAGE_NAMES:
+        scope = finding.get("scope")
+        if (
+            not isinstance(item, str)
+            or not isinstance(severity, str)
+            or not isinstance(scope, str)
+        ):
             continue
         if severity not in UNRESOLVED_SEVERITIES:
             continue
+        if scope not in RELEASE_SCOPES:
+            continue
         source = finding.get("source") if isinstance(finding.get("source"), str) else "unknown"
-        scope = finding.get("scope") if isinstance(finding.get("scope"), str) else "unknown"
         message = finding.get("message") if isinstance(finding.get("message"), str) else ""
         unresolved.append(f"{severity}: {item} ({source}, {scope}): {message}".rstrip())
     return unresolved
@@ -115,7 +120,7 @@ def enforce_release_legal_policy(legal_root: Path) -> None:
         f"forbidden runtime package present: {name}: {FORBIDDEN_RELEASE_PACKAGES[name]}"
         for name in forbidden_found
     ]
-    errors.extend(unresolved_issue_28_findings(legal_root))
+    errors.extend(unresolved_release_findings(legal_root))
     if errors:
         raise ReleaseLegalPolicyError("\n".join(errors))
 
