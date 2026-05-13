@@ -339,6 +339,7 @@ describe('ReviewWorkspace', () => {
     expect(screen.getAllByRole('button', { name: 'Save' })).toHaveLength(1);
     expect(screen.getByRole('button', { name: 'Rescind approval' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Re Analyze' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Generate rubric' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Update approved rubric' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Approve rubric' })).toBeNull();
   });
@@ -687,6 +688,202 @@ describe('ReviewWorkspace', () => {
     expect(within(questionOneButton).queryByLabelText('Rubric warning')).toBeNull();
   });
 
+  it('switches the selected criterion detail from the nested criteria rail', async () => {
+    const workspaceState = buildWorkspaceState();
+    workspaceState.questions[0]!.rubric = {
+      status: 'draft',
+      criteria: [
+        {
+          criterionId: 'c1',
+          label: 'Correct setup',
+          points: 3,
+          partialCreditGuidance: 'Award setup credit.',
+          source: 'manual'
+        },
+        {
+          criterionId: 'c2',
+          label: 'Evidence and explanation',
+          points: 2,
+          partialCreditGuidance: 'Award explanation credit.',
+          source: 'manual'
+        }
+      ],
+      warnings: [],
+      approvedAt: null,
+      latestJobId: 'job_rubric_1'
+    };
+
+    render(ReviewWorkspace, {
+      workspaceState,
+      questionDrafts: buildQuestionDrafts(),
+      selectedQuestionId: 'question_1'
+    });
+
+    expect((screen.getByLabelText('Label') as HTMLInputElement).value).toBe('Correct setup');
+
+    const criterionList = screen.getByRole('navigation', { name: 'Criterion list' });
+    await fireEvent.click(within(criterionList).getByRole('button', { name: /Evidence and explanation/ }));
+
+    expect((screen.getByLabelText('Label') as HTMLInputElement).value).toBe('Evidence and explanation');
+    expect(screen.queryByRole('button', { name: '0 points' })).toBeNull();
+    expect(screen.getByRole('button', { name: '2 points' }).getAttribute('aria-pressed')).toBe('true');
+    const criterionPointsLabel = screen
+      .getAllByText('Points')
+      .find((element) => element.className.includes('shell-meta'));
+    expect(criterionPointsLabel).toBeTruthy();
+    expect(
+      screen.getByLabelText('Partial Credit Guidance').compareDocumentPosition(criterionPointsLabel!) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+  });
+
+  it('selects the new criterion after adding one', async () => {
+    const workspaceState = buildWorkspaceState();
+    workspaceState.questions[0]!.rubric = {
+      status: 'draft',
+      criteria: [criterion(5)],
+      warnings: [],
+      approvedAt: null,
+      latestJobId: 'job_rubric_1'
+    };
+
+    render(ReviewWorkspace, {
+      workspaceState,
+      questionDrafts: buildQuestionDrafts(),
+      selectedQuestionId: 'question_1'
+    });
+
+    expect((screen.getByLabelText('Label') as HTMLInputElement).value).toBe('Correctness');
+
+    await fireEvent.click(screen.getByRole('button', { name: '+ add criterion' }));
+
+    expect((screen.getByLabelText('Label') as HTMLInputElement).value).toBe('');
+    expect(screen.getAllByText('Criterion 2').length).toBeGreaterThan(0);
+  });
+
+  it('selects the next or previous criterion after removal', async () => {
+    const workspaceState = buildWorkspaceState();
+    workspaceState.questions[0]!.rubric = {
+      status: 'draft',
+      criteria: [
+        {
+          criterionId: 'c1',
+          label: 'First criterion',
+          points: 1,
+          partialCreditGuidance: '',
+          source: 'manual'
+        },
+        {
+          criterionId: 'c2',
+          label: 'Second criterion',
+          points: 2,
+          partialCreditGuidance: '',
+          source: 'manual'
+        },
+        {
+          criterionId: 'c3',
+          label: 'Third criterion',
+          points: 2,
+          partialCreditGuidance: '',
+          source: 'manual'
+        }
+      ],
+      warnings: [],
+      approvedAt: null,
+      latestJobId: 'job_rubric_1'
+    };
+
+    render(ReviewWorkspace, {
+      workspaceState,
+      questionDrafts: buildQuestionDrafts(),
+      selectedQuestionId: 'question_1'
+    });
+
+    const criterionList = screen.getByRole('navigation', { name: 'Criterion list' });
+    await fireEvent.click(within(criterionList).getByRole('button', { name: /Second criterion/ }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Remove criterion' }));
+    expect(screen.getByRole('dialog', { name: 'Delete criterion?' })).toBeTruthy();
+    expect(screen.getByText('This removes "Second criterion" from the rubric draft.')).toBeTruthy();
+    await fireEvent.click(screen.getByRole('button', { name: 'Delete criterion' }));
+
+    expect((screen.getByLabelText('Label') as HTMLInputElement).value).toBe('Third criterion');
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Remove criterion' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Delete criterion' }));
+
+    expect((screen.getByLabelText('Label') as HTMLInputElement).value).toBe('First criterion');
+  });
+
+  it('shows criterion rail points, warnings, minimum-credit status, and two-line label clamp', async () => {
+    const workspaceState = buildWorkspaceState();
+    workspaceState.questions[0]!.rubric = {
+      status: 'draft',
+      criteria: [
+        {
+          criterionId: 'c1',
+          label: 'A very long correctness criterion label that should fit inside two rail lines',
+          points: 3,
+          partialCreditGuidance: '',
+          source: 'manual'
+        },
+        {
+          criterionId: 'c2',
+          label: 'Minimum effort',
+          points: 2,
+          partialCreditGuidance: '',
+          source: 'minimum_credit'
+        }
+      ],
+      warnings: [
+        {
+          code: 'criterion_scope_warning',
+          message: 'Clarify this criterion.',
+          scope: '{"criteria":[2]}'
+        }
+      ],
+      approvedAt: null,
+      latestJobId: 'job_rubric_1'
+    };
+
+    render(ReviewWorkspace, {
+      workspaceState,
+      questionDrafts: buildQuestionDrafts(),
+      selectedQuestionId: 'question_1'
+    });
+
+    const criterionList = screen.getByRole('navigation', { name: 'Criterion list' });
+    expect(within(criterionList).getByText('3 pts')).toBeTruthy();
+    expect(within(criterionList).getByText('2 pts')).toBeTruthy();
+    expect(within(criterionList).getByLabelText('Criterion warning')).toBeTruthy();
+    expect(within(criterionList).getByLabelText('Minimum credit criterion')).toBeTruthy();
+    expect(
+      within(criterionList).getByText(
+        'A very long correctness criterion label that should fit inside two rail lines'
+      ).className
+    ).toContain('line-clamp-2');
+
+    await fireEvent.click(within(criterionList).getByRole('button', { name: /Minimum effort/ }));
+
+    expect(screen.getByText('Clarify this criterion.')).toBeTruthy();
+    expect(screen.queryByText('Minimum credit criterion')).toBeNull();
+  });
+
+  it('opens visible help popovers from rubric and question context info icons', async () => {
+    render(ReviewWorkspace, {
+      workspaceState: buildWorkspaceState(),
+      questionDrafts: buildQuestionDrafts(),
+      selectedQuestionId: 'question_1'
+    });
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Question context guidance' }));
+    expect(screen.getByRole('dialog', { name: 'Question context guidance' })).toBeTruthy();
+    expect(screen.getByText(/Natural-language context visible in the image/)).toBeTruthy();
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Rubric criteria help' }));
+    expect(screen.getByRole('dialog', { name: 'Rubric criteria help' })).toBeTruthy();
+    expect(screen.getByText(/Edits stay in memory until you save/)).toBeTruthy();
+  });
+
   it('shows queued analysis ahead of rubric warning and approved states in the question sidebar', () => {
     const workspaceState = buildWorkspaceState();
     workspaceState.questions[1]!.analysis = {
@@ -784,9 +981,7 @@ describe('ReviewWorkspace', () => {
     });
     expect(within(questionOneButton).queryByLabelText('Rubric warning')).toBeNull();
 
-    await fireEvent.input(screen.getByTitle('Points'), {
-      target: { value: '4' }
-    });
+    await fireEvent.click(screen.getByRole('button', { name: '4 points' }));
 
     expect(within(questionOneButton).getByLabelText('Rubric warning')).toBeTruthy();
   });
@@ -822,9 +1017,7 @@ describe('ReviewWorkspace', () => {
     });
     expect(within(questionOneButton).getByLabelText('Rubric warning')).toBeTruthy();
 
-    await fireEvent.input(screen.getByTitle('Points'), {
-      target: { value: '5' }
-    });
+    await fireEvent.click(screen.getByRole('button', { name: '5 points' }));
 
     expect(within(questionOneButton).queryByLabelText('Rubric warning')).toBeNull();
   });
@@ -853,6 +1046,7 @@ describe('ReviewWorkspace', () => {
     expect(within(questionOneButton).queryByLabelText('Rubric warning')).toBeNull();
 
     await fireEvent.click(screen.getByRole('button', { name: 'Remove criterion' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Delete criterion' }));
 
     expect(within(questionOneButton).getByLabelText('Rubric warning')).toBeTruthy();
   });
