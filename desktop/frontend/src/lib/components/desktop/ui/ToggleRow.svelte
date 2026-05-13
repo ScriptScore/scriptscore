@@ -4,6 +4,7 @@
   export let disabled = false;
   export let title: string;
   export let description: string | null = null;
+  export let align: 'start' | 'center' = 'start';
   export let onToggle: ((checked: boolean) => void | Promise<void>) | null = null;
 
   let className = '';
@@ -21,7 +22,8 @@
 <button
   {...$$restProps}
   class={[
-    'flex w-full items-start justify-between gap-4 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring disabled:cursor-not-allowed disabled:opacity-60',
+    'flex w-full justify-between gap-4 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring disabled:cursor-not-allowed disabled:opacity-60',
+    align === 'center' ? 'items-center' : 'items-start',
     className
   ]}
   type="button"

@@ -4,7 +4,7 @@
   import { HugeiconsIcon } from '@hugeicons/svelte';
 
   import type { AppSettings } from '$lib/types';
-  import { SelectField, TextareaField } from './ui';
+  import { SelectField, TextareaField, ToggleRow } from './ui';
 
   export let settings: AppSettings;
   export let onChange: (() => void | Promise<void>) | null = null;
@@ -24,6 +24,18 @@
     { value: 'balanced', label: 'balanced' },
     { value: 'detailed', label: 'detailed' }
   ];
+
+  function setProfileTagEnabled(
+    key: keyof AppSettings['instructorProfile']['enabledTags'],
+    enabled: boolean
+  ) {
+    settings.instructorProfile.enabledTags = {
+      ...settings.instructorProfile.enabledTags,
+      [key]: enabled
+    };
+    settings = settings;
+    void onChange?.();
+  }
 
   function setMinimumPointsEnabled(enabled: boolean) {
     settings.instructorProfile.includeMinimumCreditCriterion = enabled;
@@ -46,57 +58,126 @@
 
 <section class="py-1">
   <div class="shell-eyebrow text-workspace-text-muted">Instructor grading profile</div>
-  <div class="mt-4 grid gap-3 md:grid-cols-2">
-    <SelectField
-      label="Grading strictness"
-      value={settings.instructorProfile.gradingStrictness}
-      options={strictnessOptions}
-      onChange={(value) => {
-        settings.instructorProfile.gradingStrictness =
-          value as AppSettings['instructorProfile']['gradingStrictness'];
-        void onChange?.();
-      }}
-    />
-    <SelectField
-      label="Syntax leniency"
-      value={settings.instructorProfile.syntaxLeniency}
-      options={toleranceOptions}
-      onChange={(value) => {
-        settings.instructorProfile.syntaxLeniency =
-          value as AppSettings['instructorProfile']['syntaxLeniency'];
-        void onChange?.();
-      }}
-    />
-    <SelectField
-      label="OCR tolerance"
-      value={settings.instructorProfile.ocrTolerance}
-      options={toleranceOptions}
-      onChange={(value) => {
-        settings.instructorProfile.ocrTolerance = value as AppSettings['instructorProfile']['ocrTolerance'];
-        void onChange?.();
-      }}
-    />
-    <SelectField
-      label="Partial credit style"
-      value={settings.instructorProfile.partialCreditStyle}
-      options={strictnessOptions}
-      onChange={(value) => {
-        settings.instructorProfile.partialCreditStyle =
-          value as AppSettings['instructorProfile']['partialCreditStyle'];
-        void onChange?.();
-      }}
-    />
-    <SelectField
-      label="Feedback style"
-      value={settings.instructorProfile.feedbackStyle}
-      options={feedbackStyleOptions}
-      onChange={(value) => {
-        settings.instructorProfile.feedbackStyle = value as AppSettings['instructorProfile']['feedbackStyle'];
-        void onChange?.();
-      }}
-    />
+  <div class="mt-4 grid gap-5">
+    <div class="divide-y divide-workspace-border border-y border-workspace-border">
+      <div class="grid gap-3 py-4 md:grid-cols-[minmax(0,1fr)_16rem] md:items-center">
+        <ToggleRow
+          class="min-h-14 hover:bg-surface-card-hover"
+          align="center"
+          title="Grading strictness"
+          description="Include the overall strict, balanced, or generous grading posture."
+          checked={settings.instructorProfile.enabledTags.gradingStrictness}
+          onToggle={(checked) => setProfileTagEnabled('gradingStrictness', checked)}
+        />
+        {#if settings.instructorProfile.enabledTags.gradingStrictness}
+          <SelectField
+            label={null}
+            ariaLabel={`Grading strictness: ${settings.instructorProfile.gradingStrictness}`}
+            value={settings.instructorProfile.gradingStrictness}
+            options={strictnessOptions}
+            onChange={(value) => {
+              settings.instructorProfile.gradingStrictness =
+                value as AppSettings['instructorProfile']['gradingStrictness'];
+              void onChange?.();
+            }}
+          />
+        {/if}
+      </div>
+      <div class="grid gap-3 py-4 md:grid-cols-[minmax(0,1fr)_16rem] md:items-center">
+        <ToggleRow
+          class="min-h-14 hover:bg-surface-card-hover"
+          align="center"
+          title="Syntax leniency"
+          description="Tell the grader how much syntax variation to tolerate."
+          checked={settings.instructorProfile.enabledTags.syntaxLeniency}
+          onToggle={(checked) => setProfileTagEnabled('syntaxLeniency', checked)}
+        />
+        {#if settings.instructorProfile.enabledTags.syntaxLeniency}
+          <SelectField
+            label={null}
+            ariaLabel={`Syntax leniency: ${settings.instructorProfile.syntaxLeniency}`}
+            value={settings.instructorProfile.syntaxLeniency}
+            options={toleranceOptions}
+            onChange={(value) => {
+              settings.instructorProfile.syntaxLeniency =
+                value as AppSettings['instructorProfile']['syntaxLeniency'];
+              void onChange?.();
+            }}
+          />
+        {/if}
+      </div>
+      <div class="grid gap-3 py-4 md:grid-cols-[minmax(0,1fr)_16rem] md:items-center">
+        <ToggleRow
+          class="min-h-14 hover:bg-surface-card-hover"
+          align="center"
+          title="OCR tolerance"
+          description="Tell the grader how much transcription uncertainty to tolerate."
+          checked={settings.instructorProfile.enabledTags.ocrTolerance}
+          onToggle={(checked) => setProfileTagEnabled('ocrTolerance', checked)}
+        />
+        {#if settings.instructorProfile.enabledTags.ocrTolerance}
+          <SelectField
+            label={null}
+            ariaLabel={`OCR tolerance: ${settings.instructorProfile.ocrTolerance}`}
+            value={settings.instructorProfile.ocrTolerance}
+            options={toleranceOptions}
+            onChange={(value) => {
+              settings.instructorProfile.ocrTolerance =
+                value as AppSettings['instructorProfile']['ocrTolerance'];
+              void onChange?.();
+            }}
+          />
+        {/if}
+      </div>
+      <div class="grid gap-3 py-4 md:grid-cols-[minmax(0,1fr)_16rem] md:items-center">
+        <ToggleRow
+          class="min-h-14 hover:bg-surface-card-hover"
+          align="center"
+          title="Partial credit style"
+          description="Include guidance for strict, balanced, or generous partial credit."
+          checked={settings.instructorProfile.enabledTags.partialCreditStyle}
+          onToggle={(checked) => setProfileTagEnabled('partialCreditStyle', checked)}
+        />
+        {#if settings.instructorProfile.enabledTags.partialCreditStyle}
+          <SelectField
+            label={null}
+            ariaLabel={`Partial credit style: ${settings.instructorProfile.partialCreditStyle}`}
+            value={settings.instructorProfile.partialCreditStyle}
+            options={strictnessOptions}
+            onChange={(value) => {
+              settings.instructorProfile.partialCreditStyle =
+                value as AppSettings['instructorProfile']['partialCreditStyle'];
+              void onChange?.();
+            }}
+          />
+        {/if}
+      </div>
+      <div class="grid gap-3 py-4 md:grid-cols-[minmax(0,1fr)_16rem] md:items-center">
+        <ToggleRow
+          class="min-h-14 hover:bg-surface-card-hover"
+          align="center"
+          title="Feedback style"
+          description="Include the preferred level of feedback detail."
+          checked={settings.instructorProfile.enabledTags.feedbackStyle}
+          onToggle={(checked) => setProfileTagEnabled('feedbackStyle', checked)}
+        />
+        {#if settings.instructorProfile.enabledTags.feedbackStyle}
+          <SelectField
+            label={null}
+            ariaLabel={`Feedback style: ${settings.instructorProfile.feedbackStyle}`}
+            value={settings.instructorProfile.feedbackStyle}
+            options={feedbackStyleOptions}
+            onChange={(value) => {
+              settings.instructorProfile.feedbackStyle =
+                value as AppSettings['instructorProfile']['feedbackStyle'];
+              void onChange?.();
+            }}
+          />
+        {/if}
+      </div>
+    </div>
     <TextareaField
-      class="md:col-span-2"
+      class="col-start-1"
       label="Additional guidance"
       value={settings.instructorProfile.additionalGuidance}
       oninput={(event: Event) => {

@@ -174,12 +174,36 @@ pub struct AiAssistCategories {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct InstructorProfileEnabledTags {
+    pub grading_strictness: bool,
+    pub syntax_leniency: bool,
+    pub ocr_tolerance: bool,
+    pub partial_credit_style: bool,
+    pub feedback_style: bool,
+}
+
+impl Default for InstructorProfileEnabledTags {
+    fn default() -> Self {
+        Self {
+            grading_strictness: true,
+            syntax_leniency: false,
+            ocr_tolerance: false,
+            partial_credit_style: false,
+            feedback_style: true,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct InstructorProfile {
     pub grading_strictness: String,
     pub syntax_leniency: String,
     pub ocr_tolerance: String,
     pub partial_credit_style: String,
     pub feedback_style: String,
+    #[serde(default)]
+    pub enabled_tags: InstructorProfileEnabledTags,
     pub additional_guidance: String,
     pub include_minimum_credit_criterion: bool,
     /// Percent of question max points (1–100) used to compute the minimum-credit row when first applied.
@@ -194,6 +218,7 @@ impl Default for InstructorProfile {
             ocr_tolerance: "medium".into(),
             partial_credit_style: "balanced".into(),
             feedback_style: "brief".into(),
+            enabled_tags: InstructorProfileEnabledTags::default(),
             additional_guidance: String::new(),
             include_minimum_credit_criterion: false,
             minimum_credit_percent: 10,

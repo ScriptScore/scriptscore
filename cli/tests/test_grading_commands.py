@@ -246,6 +246,46 @@ def test_grading_score_preliminary_answer_scoped_scores_all_criteria(
     assert "<question_rubric>" in str(captured["rendered_text"])
 
 
+def test_grading_score_preliminary_omits_disabled_instructor_profile_tags(
+    tmp_path: Path,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def responder(request: LlmRequest) -> LlmResponse:
+        captured["rendered_text"] = request.rendered_text
+        return LlmResponse(
+            raw_text=(
+                '{"scores": ['
+                '{"criterion_index": 0, "points_awarded": 1, "rationale": "Shows the main idea."}'
+                "]}"
+            )
+        )
+
+    request = _answer_score_request()
+    request["instructor_profile"] = {
+        "grading_strictness": "balanced",
+        "feedback_style": "brief",
+        "additional_guidance": None,
+    }
+    result = _runner(provider_registry=_registry_with_llm(responder)).run(
+        "grading.score-preliminary",
+        {
+            "answer_score_requests": [request],
+            "output_artifacts_dir": str((tmp_path / "preliminary_profile_out").resolve()),
+            **llm_request_fields("ollama_native"),
+        },
+    )
+
+    assert result.exit_code == 0
+    rendered_text = str(captured["rendered_text"])
+    assert "<grading_strictness>balanced</grading_strictness>" in rendered_text
+    assert "<feedback_style>brief</feedback_style>" in rendered_text
+    assert "<additional_guidance></additional_guidance>" in rendered_text
+    assert "<syntax_leniency>" not in rendered_text
+    assert "<ocr_tolerance>" not in rendered_text
+    assert "<partial_credit_style>" not in rendered_text
+
+
 def test_grading_score_preliminary_answer_scoped_blank_scores_all_criteria_locally(
     tmp_path: Path,
 ) -> None:

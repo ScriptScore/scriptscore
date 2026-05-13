@@ -1,10 +1,26 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { writable } from 'svelte/store';
 
-import type { AppSettings } from '$lib/types';
+import type { AppSettings, InstructorProfile } from '$lib/types';
 import { theme } from './theme';
 
 const STORAGE_KEY = 'scriptscore-app-settings';
+
+export const simpleInstructorProfileEnabledTags: InstructorProfile['enabledTags'] = {
+  gradingStrictness: true,
+  syntaxLeniency: false,
+  ocrTolerance: false,
+  partialCreditStyle: false,
+  feedbackStyle: true
+};
+
+export const detailedInstructorProfileEnabledTags: InstructorProfile['enabledTags'] = {
+  gradingStrictness: true,
+  syntaxLeniency: true,
+  ocrTolerance: true,
+  partialCreditStyle: true,
+  feedbackStyle: true
+};
 
 export const defaultAppSettings: AppSettings = {
   llmProvider: 'ollama_native',
@@ -24,6 +40,7 @@ export const defaultAppSettings: AppSettings = {
     ocrTolerance: 'medium',
     partialCreditStyle: 'balanced',
     feedbackStyle: 'brief',
+    enabledTags: simpleInstructorProfileEnabledTags,
     additionalGuidance: '',
     includeMinimumCreditCriterion: false,
     minimumCreditPercent: 10
@@ -57,6 +74,25 @@ function createAppSettingsStore() {
       : defaultAppSettings.preliminaryGradingMaxWorkers;
   }
 
+  function normalizeInstructorProfile(ip: Partial<InstructorProfile> & { minimumCreditPoints?: number } | undefined) {
+    if (!ip) return defaultAppSettings.instructorProfile;
+    // Drop legacy minimumCreditPoints if present (migrated to minimumCreditPercent).
+    const rest = { ...ip };
+    delete rest.minimumCreditPoints;
+    return {
+      ...defaultAppSettings.instructorProfile,
+      ...rest,
+      enabledTags: {
+        ...simpleInstructorProfileEnabledTags,
+        ...(rest.enabledTags ?? {})
+      },
+      minimumCreditPercent:
+        typeof rest.minimumCreditPercent === 'number'
+          ? rest.minimumCreditPercent
+          : defaultAppSettings.instructorProfile.minimumCreditPercent
+    };
+  }
+
   function init() {
     if (typeof globalThis.window === 'undefined') return;
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -69,21 +105,7 @@ function createAppSettingsStore() {
         instructorProfile?: Partial<AppSettings['instructorProfile']> & { minimumCreditPoints?: number };
         aiAssistCategories?: Partial<AppSettings['aiAssistCategories']>;
       };
-      const ip = parsed.instructorProfile;
-      const instructorProfile = (() => {
-        if (!ip) return defaultAppSettings.instructorProfile;
-        // Drop legacy minimumCreditPoints if present (migrated to minimumCreditPercent).
-        const rest = { ...ip };
-        delete rest.minimumCreditPoints;
-        return {
-          ...defaultAppSettings.instructorProfile,
-          ...rest,
-          minimumCreditPercent:
-            typeof rest.minimumCreditPercent === 'number'
-              ? rest.minimumCreditPercent
-              : defaultAppSettings.instructorProfile.minimumCreditPercent
-        };
-      })();
+      const instructorProfile = normalizeInstructorProfile(parsed.instructorProfile);
       set({
         ...defaultAppSettings,
         ...parsed,

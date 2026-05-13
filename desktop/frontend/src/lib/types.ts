@@ -51,10 +51,19 @@ export interface InstructorProfile {
   ocrTolerance: string;
   partialCreditStyle: string;
   feedbackStyle: string;
+  enabledTags: InstructorProfileEnabledTags;
   additionalGuidance: string;
   includeMinimumCreditCriterion: boolean;
   /** Percent of question max points; host rounds to integer points when first applying minimum-credit row. */
   minimumCreditPercent: number;
+}
+
+export interface InstructorProfileEnabledTags {
+  gradingStrictness: boolean;
+  syntaxLeniency: boolean;
+  ocrTolerance: boolean;
+  partialCreditStyle: boolean;
+  feedbackStyle: boolean;
 }
 
 export type LmsProviderId = 'none' | 'canvas';

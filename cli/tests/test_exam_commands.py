@@ -550,6 +550,53 @@ def test_exam_generate_rubric_returns_semantic_warnings_and_trace(tmp_path: Path
     ]
 
 
+def test_exam_generate_rubric_omits_disabled_instructor_profile_tags(tmp_path: Path) -> None:
+    captured: dict[str, object] = {}
+
+    def responder(request: LlmRequest) -> LlmResponse:
+        captured["rendered_text"] = request.rendered_text
+        return LlmResponse(
+            raw_text=json.dumps(
+                {
+                    "criteria": [
+                        {
+                            "label": "States the main idea",
+                            "points": 1,
+                            "partial_credit_guidance": "Award 1 point for the main idea; award 0 otherwise.",
+                        }
+                    ]
+                }
+            )
+        )
+
+    result = _runner(provider_registry=_registry_with_llm(responder)).run(
+        "exam.generate-rubric",
+        {
+            "question_id": "q1",
+            "max_points": 1,
+            "subject": "python",
+            "question_text_clean": "Explain list slicing.",
+            "question_context": "No additional context.",
+            "instructor_profile": {
+                "grading_strictness": "balanced",
+                "feedback_style": "brief",
+                "additional_guidance": None,
+            },
+            "output_artifacts_dir": str((tmp_path / "rubric_profile_out").resolve()),
+            **llm_request_fields("ollama_native"),
+        },
+    )
+
+    assert result.exit_code == 0
+    rendered_text = str(captured["rendered_text"])
+    assert "<grading_strictness>balanced</grading_strictness>" in rendered_text
+    assert "<feedback_style>brief</feedback_style>" in rendered_text
+    assert "<additional_guidance></additional_guidance>" in rendered_text
+    assert "<syntax_leniency>" not in rendered_text
+    assert "<ocr_tolerance>" not in rendered_text
+    assert "<partial_credit_style>" not in rendered_text
+
+
 def test_exam_generate_rubric_typed_provider_failure_preserves_category(tmp_path: Path) -> None:
     def responder(_request: LlmRequest) -> LlmResponse:
         raise ScriptscoreError(

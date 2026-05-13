@@ -676,33 +676,43 @@
       <Surface variant="card" bordered radius="3xl" class="px-5 py-5">
         <div class="shell-eyebrow text-workspace-text-muted">Instructor profile</div>
         <div class="mt-4 grid gap-3 md:grid-cols-2">
-          <SelectField
-            label="Grading strictness"
-            bind:value={projectConfig.instructorProfile.gradingStrictness}
-            options={strictnessOptions}
-          />
-          <SelectField
-            label="Syntax leniency"
-            bind:value={projectConfig.instructorProfile.syntaxLeniency}
-            options={toleranceOptions}
-          />
-          <SelectField
-            label="OCR tolerance"
-            bind:value={projectConfig.instructorProfile.ocrTolerance}
-            options={toleranceOptions}
-          />
-          <SelectField
-            label="Partial credit style"
-            bind:value={projectConfig.instructorProfile.partialCreditStyle}
-            options={strictnessOptions}
-          />
-          <SelectField
-            label="Feedback style"
-            bind:value={projectConfig.instructorProfile.feedbackStyle}
-            options={feedbackStyleOptions}
-          />
+          {#if projectConfig.instructorProfile.enabledTags.gradingStrictness}
+            <SelectField
+              label="Grading strictness"
+              bind:value={projectConfig.instructorProfile.gradingStrictness}
+              options={strictnessOptions}
+            />
+          {/if}
+          {#if projectConfig.instructorProfile.enabledTags.syntaxLeniency}
+            <SelectField
+              label="Syntax leniency"
+              bind:value={projectConfig.instructorProfile.syntaxLeniency}
+              options={toleranceOptions}
+            />
+          {/if}
+          {#if projectConfig.instructorProfile.enabledTags.ocrTolerance}
+            <SelectField
+              label="OCR tolerance"
+              bind:value={projectConfig.instructorProfile.ocrTolerance}
+              options={toleranceOptions}
+            />
+          {/if}
+          {#if projectConfig.instructorProfile.enabledTags.partialCreditStyle}
+            <SelectField
+              label="Partial credit style"
+              bind:value={projectConfig.instructorProfile.partialCreditStyle}
+              options={strictnessOptions}
+            />
+          {/if}
+          {#if projectConfig.instructorProfile.enabledTags.feedbackStyle}
+            <SelectField
+              label="Feedback style"
+              bind:value={projectConfig.instructorProfile.feedbackStyle}
+              options={feedbackStyleOptions}
+            />
+          {/if}
           <TextareaField
-            class="md:col-span-2"
+            class="col-start-1 md:col-span-2"
             label="Additional guidance"
             bind:value={projectConfig.instructorProfile.additionalGuidance}
           />

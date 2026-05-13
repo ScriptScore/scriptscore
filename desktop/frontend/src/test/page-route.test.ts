@@ -149,6 +149,13 @@ function workspaceState(overrides: Partial<ExamWorkspaceState> = {}): ExamWorksp
         ocrTolerance: 'medium',
         partialCreditStyle: 'balanced',
         feedbackStyle: 'brief',
+        enabledTags: {
+          gradingStrictness: true,
+          syntaxLeniency: false,
+          ocrTolerance: false,
+          partialCreditStyle: false,
+          feedbackStyle: true
+        },
         additionalGuidance: '',
         includeMinimumCreditCriterion: false,
         minimumCreditPercent: 10
@@ -2214,6 +2221,13 @@ describe('desktop route shell', () => {
           ocrTolerance: 'medium',
           partialCreditStyle: 'balanced',
           feedbackStyle: 'brief',
+          enabledTags: {
+            gradingStrictness: true,
+            syntaxLeniency: false,
+            ocrTolerance: false,
+            partialCreditStyle: false,
+            feedbackStyle: true
+          },
           additionalGuidance: ''
         },
         aiAssistEnabled: true,

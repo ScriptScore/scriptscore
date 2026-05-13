@@ -20,6 +20,13 @@ describe('isCanvasLmsReady', () => {
     expect(defaultAppSettings.projectsDirectory).toBeNull();
     expect(defaultAppSettings.onboardingCompleted).toBe(false);
     expect(defaultAppSettings.preliminaryGradingMaxWorkers).toBe(1);
+    expect(defaultAppSettings.instructorProfile.enabledTags).toEqual({
+      gradingStrictness: true,
+      syntaxLeniency: false,
+      ocrTolerance: false,
+      partialCreditStyle: false,
+      feedbackStyle: true
+    });
     expect(defaultAppSettings.aiAssistCategories).toEqual({
       rubrics: false,
       questionAnalysis: false,
@@ -80,6 +87,13 @@ describe('isCanvasLmsReady', () => {
       ...defaultAppSettings.instructorProfile,
       gradingStrictness: 'strict',
       additionalGuidance: 'Use concise comments.'
+    });
+    expect(get(appSettings).instructorProfile.enabledTags).toEqual({
+      gradingStrictness: true,
+      syntaxLeniency: false,
+      ocrTolerance: false,
+      partialCreditStyle: false,
+      feedbackStyle: true
     });
     expect('minimumCreditPoints' in get(appSettings).instructorProfile).toBe(false);
   });

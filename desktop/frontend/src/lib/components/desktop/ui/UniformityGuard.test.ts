@@ -13,6 +13,7 @@ const guardedFiles = [
   'src/lib/components/desktop/FirstRunSetupWizard.svelte',
   'src/lib/components/desktop/ProjectModeStep.svelte',
   'src/lib/components/desktop/AiAssistanceStep.svelte',
+  'src/lib/components/desktop/GradingProfileStep.svelte',
   'src/lib/components/desktop/CreateProjectPanel.svelte',
   'src/lib/components/desktop/RecentProjectsList.svelte',
   'src/lib/components/desktop/SettingsWorkspace.svelte',

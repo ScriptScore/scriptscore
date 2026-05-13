@@ -30,6 +30,13 @@ function projectConfig(overrides: Partial<ProjectConfig> = {}): ProjectConfig {
       ocrTolerance: 'medium',
       partialCreditStyle: 'balanced',
       feedbackStyle: 'brief',
+      enabledTags: {
+        gradingStrictness: true,
+        syntaxLeniency: false,
+        ocrTolerance: false,
+        partialCreditStyle: false,
+        feedbackStyle: true
+      },
       additionalGuidance: '',
       includeMinimumCreditCriterion: false,
       minimumCreditPercent: 20
@@ -326,6 +333,22 @@ describe('SetupWorkspace', () => {
     expect(
       screen.queryByLabelText('Minimum percentage of question points for non-blank answers')
     ).toBeNull();
+  });
+
+  it('hides instructor profile controls disabled by settings', () => {
+    const config = projectConfig();
+
+    render(SetupWorkspace, {
+      workspaceState: workspaceState(config),
+      projectConfig: config
+    });
+
+    expect(screen.getByLabelText('Grading strictness')).toBeTruthy();
+    expect(screen.getByLabelText('Feedback style')).toBeTruthy();
+    expect(screen.queryByLabelText('Syntax leniency')).toBeNull();
+    expect(screen.queryByLabelText('OCR tolerance')).toBeNull();
+    expect(screen.queryByLabelText('Partial credit style')).toBeNull();
+    expect(screen.getByLabelText('Additional guidance')).toBeTruthy();
   });
 
   it('edits and validates the non-blank answer minimum percentage inline', async () => {

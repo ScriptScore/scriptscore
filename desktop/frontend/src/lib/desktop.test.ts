@@ -118,7 +118,7 @@ describe('desktop API wrapper', () => {
         piiPaddleModelDir: null,
         preliminaryGradingMaxWorkers: 1,
         projectsDirectory: null,
-        instructorProfile: { gradingStrictness: 'balanced', syntaxLeniency: 'medium', ocrTolerance: 'medium', partialCreditStyle: 'balanced', feedbackStyle: 'brief', additionalGuidance: '', includeMinimumCreditCriterion: false, minimumCreditPercent: 10 }, aiAssistEnabled: false, onboardingCompleted: false, aiAssistCategories: { rubrics: false, questionAnalysis: false, gradingFeedback: false, parsingReview: false }, theme: 'dark' })
+        instructorProfile: { gradingStrictness: 'balanced', syntaxLeniency: 'medium', ocrTolerance: 'medium', partialCreditStyle: 'balanced', feedbackStyle: 'brief', enabledTags: { gradingStrictness: true, syntaxLeniency: false, ocrTolerance: false, partialCreditStyle: false, feedbackStyle: true }, additionalGuidance: '', includeMinimumCreditCriterion: false, minimumCreditPercent: 10 }, aiAssistEnabled: false, onboardingCompleted: false, aiAssistCategories: { rubrics: false, questionAnalysis: false, gradingFeedback: false, parsingReview: false }, theme: 'dark' })
     ).toThrow(
       'Desktop commands require the Tauri host. The browser preview cannot run Rust or Python commands.'
     );

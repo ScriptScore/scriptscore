@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { get } from 'svelte/store';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { appSettings, defaultAppSettings } from '$lib/stores/appSettings';
@@ -306,6 +307,32 @@ describe('NoProjectScreen', () => {
         false
       );
     });
+  });
+
+  it('shows grading profile setup after AI assistance is enabled', async () => {
+    render(NoProjectScreen, {
+      ...baseProps(),
+      visionModels: [{ name: 'qwen3.5:9b', displayName: 'qwen3.5:9b' }]
+    });
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    await fireEvent.click(screen.getByRole('radio', { name: /Local Ollama/ }));
+    await waitFor(() => {
+      expect((screen.getByRole('button', { name: 'Continue' }) as HTMLButtonElement).disabled).toBe(
+        false
+      );
+    });
+    await fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+
+    expect(screen.getByRole('button', { name: /Grading profile/ }).getAttribute('disabled')).toBeNull();
+    expect((screen.getByRole('radio', { name: /Simple/ }) as HTMLInputElement).checked).toBe(true);
+
+    await fireEvent.click(screen.getByRole('radio', { name: /Detailed/ }));
+    expect(Object.values(get(appSettings).instructorProfile.enabledTags).every(Boolean)).toBe(true);
+    await fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+
+    const finishSetupButton = screen.getByRole('button', { name: 'Finish Setup' }) as HTMLButtonElement;
+    expect(finishSetupButton.disabled).toBe(false);
   });
 
   it('keeps AI setup blocked when the Cloud Ollama connectivity check fails', async () => {
