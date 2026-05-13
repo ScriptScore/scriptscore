@@ -71,17 +71,7 @@ jobs:
       - name: Coverage subsystem thresholds
         run: uv run python tests/support/check_coverage_thresholds.py coverage.json
 
-      - name: Detect artifact upload availability
-        id: artifact-upload
-        run: |
-          if [ -n "${ACTIONS_RUNTIME_TOKEN:-}" ]; then
-            echo "enabled=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "enabled=false" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Upload coverage XML artifact
-        if: ${{ steps.artifact-upload.outputs.enabled == 'true' }}
         uses: actions/upload-artifact@v7
         with:
           name: coverage-xml
@@ -444,9 +434,10 @@ jobs:
             artifacts/cargo-geiger.log
 
   desktop-sonarcloud:
-    name: Desktop SonarCloud
+    name: SonarCloud
     runs-on: ubuntu-latest
     needs:
+      - test-and-coverage
       - desktop-frontend-coverage
       - desktop-rust-coverage
     env:
@@ -496,6 +487,13 @@ jobs:
         if: ${{ steps.sonar-ready.outputs.enabled == 'true' }}
         working-directory: desktop/frontend
         run: npx svelte-kit sync
+
+      - name: Download CLI coverage artifact
+        if: ${{ steps.sonar-ready.outputs.enabled == 'true' }}
+        uses: actions/download-artifact@v7
+        with:
+          name: coverage-xml
+          path: cli
 
       - name: Download frontend coverage artifact
         if: ${{ steps.sonar-ready.outputs.enabled == 'true' }}

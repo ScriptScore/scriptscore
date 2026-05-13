@@ -8,7 +8,7 @@ COVERAGE_FILE ?= /tmp/scriptscore-cli.coverage
 SONAR_HOST_URL ?= https://sonarcloud.io
 SONAR_BRANCH_NAME ?=
 
-.PHONY: cli-lint cli-quality cargo-fmt lint-rust lint-frontend build-frontend coverage-frontend quality-frontend quality-metrics coverage-rust unsafe-report sonar-local quality review-quality license-compliance prepare-desktop-runtime prepare-desktop-portable-python smoke-desktop-runtime package-desktop-linux package-desktop-rpm
+.PHONY: cli-lint cli-quality coverage-cli cargo-fmt lint-rust lint-frontend build-frontend coverage-frontend quality-frontend quality-metrics coverage-rust unsafe-report sonar-local quality review-quality license-compliance prepare-desktop-runtime prepare-desktop-portable-python smoke-desktop-runtime package-desktop-linux package-desktop-rpm
 
 cli-lint:
 	UV_CACHE_DIR="$(UV_CACHE_DIR)" uv --directory cli run ruff check . --cache-dir "$(RUFF_CACHE_DIR)"
@@ -17,6 +17,9 @@ cli-lint:
 cli-quality:
 	UV_CACHE_DIR="$(UV_CACHE_DIR)" MYPY_CACHE_DIR="$(MYPY_CACHE_DIR)" uv --directory cli run mypy
 	UV_CACHE_DIR="$(UV_CACHE_DIR)" COVERAGE_FILE="$(COVERAGE_FILE)" PYTEST_ADDOPTS="-o cache_dir=$(PYTEST_CACHE_DIR) $$PYTEST_ADDOPTS" uv --directory cli run pytest -q --cov
+
+coverage-cli:
+	UV_CACHE_DIR="$(UV_CACHE_DIR)" COVERAGE_FILE="$(COVERAGE_FILE)" PYTEST_ADDOPTS="-o cache_dir=$(PYTEST_CACHE_DIR) $$PYTEST_ADDOPTS" uv --directory cli run pytest --cov=src/scriptscore --cov-report=term-missing --cov-report=xml --cov-report=json
 
 cargo-fmt:
 	cargo fmt --check --manifest-path desktop/src-tauri/Cargo.toml
@@ -50,6 +53,7 @@ sonar-local:
 	@test -n "$$SONAR_TOKEN" || { echo "SONAR_TOKEN is required"; exit 1; }
 	@test -n "$$SONAR_ORGANIZATION" || { echo "SONAR_ORGANIZATION is required"; exit 1; }
 	@test -n "$$SONAR_PROJECT_KEY" || { echo "SONAR_PROJECT_KEY is required"; exit 1; }
+	@test -f cli/coverage.xml || { echo "Missing cli/coverage.xml; run make coverage-cli first"; exit 1; }
 	@test -f desktop/frontend/coverage/lcov.info || { echo "Missing desktop/frontend/coverage/lcov.info; run make coverage-frontend first"; exit 1; }
 	@test -f artifacts/coverage/lcov.info || { echo "Missing artifacts/coverage/lcov.info; run make coverage-rust first"; exit 1; }
 	cd desktop/frontend && npm exec svelte-kit sync

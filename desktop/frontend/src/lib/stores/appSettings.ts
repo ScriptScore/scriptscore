@@ -84,7 +84,7 @@ function createAppSettingsStore() {
       ...rest,
       enabledTags: {
         ...simpleInstructorProfileEnabledTags,
-        ...(rest.enabledTags ?? {})
+        ...rest.enabledTags
       },
       minimumCreditPercent:
         typeof rest.minimumCreditPercent === 'number'
@@ -94,7 +94,7 @@ function createAppSettingsStore() {
   }
 
   function init() {
-    if (typeof globalThis.window === 'undefined') return;
+    if (globalThis.window === undefined) return;
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) {
       set(defaultAppSettings);
@@ -130,7 +130,7 @@ function createAppSettingsStore() {
   }
 
   function save(next: AppSettings) {
-    if (typeof globalThis.window !== 'undefined') {
+    if (globalThis.window !== undefined) {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
     }
     set(next);
@@ -146,7 +146,7 @@ function createAppSettingsStore() {
     updateField<K extends keyof AppSettings>(key: K, value: AppSettings[K]) {
       update((current) => {
         const next = { ...current, [key]: value };
-        if (typeof globalThis.window !== 'undefined') {
+        if (globalThis.window !== undefined) {
           localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
         }
         if (key === 'theme' && (value === 'dark' || value === 'light')) {
@@ -167,7 +167,7 @@ function createAppSettingsStore() {
             [key]: value
           }
         };
-        if (typeof globalThis.window !== 'undefined') {
+        if (globalThis.window !== undefined) {
           localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
         }
         return next;

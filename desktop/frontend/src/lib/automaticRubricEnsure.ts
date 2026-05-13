@@ -32,7 +32,7 @@ function afterNextMicrotask(): Promise<void> {
 export function scheduleAutomaticRubricEnsureAfterUiPaint(
   onlyWhenExamReviewVisible = false
 ): void {
-  if (typeof window === 'undefined' || !isDesktopHost()) {
+  if (globalThis.window === undefined || !isDesktopHost()) {
     return;
   }
   void tick()

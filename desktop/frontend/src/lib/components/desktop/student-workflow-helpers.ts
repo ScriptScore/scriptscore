@@ -394,7 +394,7 @@ export function labelForState(
 
 export function basename(path: string): string {
   const parts = path.split('/');
-  return parts[parts.length - 1] ?? path;
+  return parts.at(-1) ?? path;
 }
 
 export function studentRefSortKey(studentRef: string): string {
