@@ -25,7 +25,7 @@ _QUESTION_MARKER_RE = re.compile(
     r"^\s*(?:Question\s+)?(?P<number>\d+)(?:(?:\s*\(\d+\s*(?:pts?|points?)\))|\s*[\].:)])",
     re.IGNORECASE,
 )
-_QUESTION_PREFIX_RE = re.compile(r"^\s*(?:question\s*)?\d+\s*[\].:)\-]*\s*", re.IGNORECASE)
+_QUESTION_PREFIX_RE = re.compile(r"^\s*(?:question\s*)?\d+\s*[\].:)-]*\s*", re.IGNORECASE)
 _POINTS_RE = re.compile(r"(?<!\d)(?P<points>\d+)\s*(?:pts?|points?)\b", re.IGNORECASE)
 _PAREN_POINTS_RE = re.compile(r"\((?P<points>\d+)\)")
 _POINT_DISTRIBUTION_HEADER_RE = re.compile(r"^Point Distribution\b", re.IGNORECASE)
@@ -33,11 +33,11 @@ _RUBRIC_WORD_RE = re.compile(r"[a-z0-9]+")
 _INTEGER_LINE_RE = re.compile(r"^\d+$")
 _POINT_SUMMARY_PATTERNS = (
     re.compile(
-        r"^Q(?P<number>\d+)\s*[:\-\u2013\u2014]\s*(?P<points>\d+)\s*(?:pts?|points?)$",
+        r"^Q(?P<number>\d+)\s*[:\u2013\u2014-]\s*(?P<points>\d+)\s*(?:pts?|points?)$",
         re.IGNORECASE,
     ),
     re.compile(
-        r"^Question\s+(?P<number>\d+)\s*[:\-\u2013\u2014]\s*(?P<points>\d+)\s*(?:pts?|points?)$",
+        r"^Question\s+(?P<number>\d+)\s*[:\u2013\u2014-]\s*(?P<points>\d+)\s*(?:pts?|points?)$",
         re.IGNORECASE,
     ),
     re.compile(

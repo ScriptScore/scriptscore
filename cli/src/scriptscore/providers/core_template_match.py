@@ -41,6 +41,11 @@ _IDENTITY_SCORE_EPSILON = 0.005
 _IDENTITY_SNAP_MAX_ROTATION = 0.25
 _IDENTITY_SNAP_MAX_SCALE_DELTA = 0.01
 _IDENTITY_SNAP_MAX_TRANSLATION = 2.0
+_FLOAT_IDENTITY_ABS_TOL = 1e-12
+
+
+def _is_identity_float(value: float) -> bool:
+    return math.isclose(value, 1.0, rel_tol=0.0, abs_tol=_FLOAT_IDENTITY_ABS_TOL)
 
 
 def _scriptscore_error(
@@ -221,7 +226,7 @@ def _estimate_aruco_alignment(
 
 
 def _resize(image: Any, *, scale: float, cv2: Any) -> Any:
-    if scale == 1.0:
+    if _is_identity_float(scale):
         return image
     width = max(1, round(image.shape[1] * scale))
     height = max(1, round(image.shape[0] * scale))
@@ -536,7 +541,7 @@ def _refine_full_resolution_match(
 
 
 def _normalize_translation(state: _MatchState) -> _MatchState:
-    if state.translation_scale == 1.0:
+    if _is_identity_float(state.translation_scale):
         return state
     return _MatchState(
         score=state.score,
@@ -614,7 +619,7 @@ def _template_match_alignment(
         translation_scale=match_scale,
         cv2=cv2,
     )
-    if match_scale != 1.0:
+    if not _is_identity_float(match_scale):
         state = _refine_full_resolution_match(
             state, template=template, student_full=student_full, cv2=cv2
         )

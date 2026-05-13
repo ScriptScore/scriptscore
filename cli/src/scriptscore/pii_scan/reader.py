@@ -19,6 +19,9 @@ import yaml
 
 from scriptscore.pii_scan.types import ReadResult, VisionToken
 
+_AISTUDIO_PACKAGE = "aistudio_sdk"
+_AISTUDIO_SNAPSHOT_DOWNLOAD_MODULE = "aistudio_sdk.snapshot_download"
+
 
 def _major_version(version: str) -> int | None:
     try:
@@ -109,14 +112,14 @@ def _install_aistudio_download_stub() -> None:
     """Satisfy PaddleX's import-time AI Studio hook when local models are used."""
 
     if (
-        "aistudio_sdk.snapshot_download" in sys.modules
-        or importlib.util.find_spec("aistudio_sdk") is not None
+        _AISTUDIO_SNAPSHOT_DOWNLOAD_MODULE in sys.modules
+        or importlib.util.find_spec(_AISTUDIO_PACKAGE) is not None
     ):
         return
 
-    package = types.ModuleType("aistudio_sdk")
+    package = types.ModuleType(_AISTUDIO_PACKAGE)
     package.__path__ = []  # type: ignore[attr-defined]
-    snapshot_module = types.ModuleType("aistudio_sdk.snapshot_download")
+    snapshot_module = types.ModuleType(_AISTUDIO_SNAPSHOT_DOWNLOAD_MODULE)
 
     def snapshot_download(*_args: object, **_kwargs: object) -> None:
         raise RuntimeError(
@@ -126,8 +129,8 @@ def _install_aistudio_download_stub() -> None:
 
     snapshot_module.snapshot_download = snapshot_download  # type: ignore[attr-defined]
     package.snapshot_download = snapshot_module  # type: ignore[attr-defined]
-    sys.modules["aistudio_sdk"] = package
-    sys.modules["aistudio_sdk.snapshot_download"] = snapshot_module
+    sys.modules[_AISTUDIO_PACKAGE] = package
+    sys.modules[_AISTUDIO_SNAPSHOT_DOWNLOAD_MODULE] = snapshot_module
 
 
 def _allow_headless_opencv_for_paddlex_ocr_extra() -> None:
@@ -172,7 +175,7 @@ def _allow_headless_opencv_for_paddlex_ocr_extra() -> None:
     if callable(cache_clear):
         cache_clear()
 
-    for module_name, module in list(sys.modules.items()):
+    for module_name, module in sys.modules.items():
         if module_name.startswith("paddlex.") and not hasattr(module, "cv2"):
             module.cv2 = cv2  # type: ignore[attr-defined]
 

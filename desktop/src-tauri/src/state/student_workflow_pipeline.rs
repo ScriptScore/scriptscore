@@ -40,6 +40,8 @@ enum DetectStageOutcome {
     NeedsReview,
 }
 
+const SCANS_DETECT_COMMAND: &str = "scans.detect";
+
 pub(super) fn continue_after_alignment_review(
     state: &Arc<super::AppStateInner>,
     project_path: &Path,
@@ -708,7 +710,7 @@ fn run_detect_batch(
         exec.state,
         exec.event_sink,
         exec.project_path,
-        "scans.detect",
+        SCANS_DETECT_COMMAND,
         json!({ "detect_targets": targets }),
         json!({ "student_refs": detect_refs }),
     ) {
@@ -2227,7 +2229,7 @@ fn run_detect_stage(
         exec.state,
         exec.event_sink,
         exec.project_path,
-        "scans.detect",
+        SCANS_DETECT_COMMAND,
         json!({ "detect_targets": detect_targets }),
         json!({ "student_ref": student_ref }),
     )?;

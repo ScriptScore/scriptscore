@@ -27,7 +27,7 @@ from scriptscore.providers.interfaces import (
 )
 
 _TAG_RE = re.compile(r"<(?P<tag>[a-zA-Z0-9_]+)>(?P<value>.*?)</(?P=tag)>", re.DOTALL)
-_QUESTION_PREFIX_RE = re.compile(r"^\s*(?:question\s*)?\d+\s*[\].:)\-]*\s*", re.IGNORECASE)
+_QUESTION_PREFIX_RE = re.compile(r"^\s*(?:question\s*)?\d+\s*[\].:)-]*\s*", re.IGNORECASE)
 
 
 class _AssessmentAttrsParser(HTMLParser):
@@ -148,9 +148,9 @@ def _default_llm_response(request: LlmRequest) -> LlmResponse:
     if request.prompt_id == "preliminary_score":
         student_answer = _extract_tag(request.rendered_text, "student_answer")
         max_points = max(0, int(_extract_tag(request.rendered_text, "points") or "0"))
-        points_awarded = (
-            0 if not student_answer.strip() else min(max_points, 1 if max_points > 0 else 0)
-        )
+        visible_answer = bool(student_answer.strip())
+        minimum_positive_award = 1 if max_points > 0 else 0
+        points_awarded = min(max_points, minimum_positive_award) if visible_answer else 0
         return LlmResponse(
             raw_text=json.dumps(
                 {

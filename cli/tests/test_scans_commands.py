@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import math
 from collections.abc import Callable
 from pathlib import Path
 
@@ -11,6 +12,7 @@ import pytest
 from PIL import Image, ImageChops, ImageDraw
 from pydantic import ValidationError
 
+from scriptscore.artifacts import images as image_artifacts
 from scriptscore.artifacts.images import apply_manual_transform as base_apply_manual_transform
 from scriptscore.commands import build_command_registry
 from scriptscore.contracts import (
@@ -46,6 +48,29 @@ def _registry_with_llm(
     registry = ProviderRegistry.with_builtin_fakes()
     registry.register(FakeLlmProvider(provider_name=provider_name, responder=responder))
     return registry
+
+
+def test_transformed_image_treats_near_identity_scale_as_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    image = Image.new("RGB", (12, 10), (255, 255, 255))
+
+    def _unexpected_resize(*_args: object, **_kwargs: object) -> Image.Image:
+        raise AssertionError("near-identity scale should not resize the transformed image")
+
+    monkeypatch.setattr(Image.Image, "resize", _unexpected_resize)
+
+    transformed, _mode, _fill = image_artifacts._transformed_image(
+        image,
+        Transform(
+            rotation=0.0,
+            scale=math.nextafter(1.0, 2.0),
+            translate_x=0.0,
+            translate_y=0.0,
+        ),
+    )
+
+    assert transformed.size == image.size
 
 
 def test_scans_transform_request_rejects_duplicate_page_targets(tmp_path: Path) -> None:
