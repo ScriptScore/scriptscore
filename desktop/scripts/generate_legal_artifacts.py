@@ -45,6 +45,7 @@ ALLOWED_LICENSE_TOKENS = {
     "MIT-CMU",
     "MPL-2.0",
     "OFL-1.1",
+    "OLDAP-2.8",
     "PSF-2.0",
     "TCL",
     "Unicode-3.0",

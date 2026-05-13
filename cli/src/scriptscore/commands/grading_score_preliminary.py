@@ -891,6 +891,7 @@ def _run_answer_requests_concurrent(
             for future in futures:
                 future.cancel()
             executor.shutdown(wait=False, cancel_futures=True)
+            ctx.check_cancelled()
             raise
 
     return [item_run for item_run in item_runs if item_run is not None], completed

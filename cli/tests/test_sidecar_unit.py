@@ -94,6 +94,8 @@ def test_sidecar_conflict_response_uses_error_data_envelope() -> None:
     _server().serve(stdin=stdin, stdout=stdout)
     messages = _messages(stdout.getvalue())
     conflict = next(message for message in messages if message.get("id") == "req_2")
+    assert conflict["error"]["data"]["request_id"] == "req_2"
+    assert conflict["error"]["data"]["command"] == "smoke.ping"
     assert conflict["error"]["data"]["error"]["category"] == "conflict"
 
 

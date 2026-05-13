@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 from dataclasses import dataclass
 from difflib import SequenceMatcher
@@ -40,6 +41,12 @@ from scriptscore.paths import join_under_root
 from scriptscore.runtime import CommandContext, CommandOutcome, CommandSpec
 
 _NON_ALNUM_RE = re.compile(r"[^a-z0-9]+")
+_COMMAND_NAME = "scans.detect"
+_FLOAT_IDENTITY_ABS_TOL = 1e-12
+
+
+def _is_full_coverage(value: float) -> bool:
+    return math.isclose(value, 1.0, rel_tol=0.0, abs_tol=_FLOAT_IDENTITY_ABS_TOL)
 
 
 @dataclass(frozen=True)
@@ -138,7 +145,7 @@ def _is_header_fragment_match(match: _HeaderTextMatch, hint: QuestionDetectHint)
         match.hint_token_count <= 5
         and match.candidate_token_count == 1
         and match.overlap_count == 1
-        and match.candidate_coverage == 1.0
+        and _is_full_coverage(match.candidate_coverage)
     )
 
 
@@ -735,7 +742,7 @@ def handle_scans_detect(ctx: CommandContext, request: ScansDetectRequest) -> Com
     """Refine per-student question regions using OCR."""
 
     ensure_paths_exist(
-        [target.page.image_path for target in request.detect_targets], command="scans.detect"
+        [target.page.image_path for target in request.detect_targets], command=_COMMAND_NAME
     )
     ensure_paths_exist(
         [
@@ -743,7 +750,7 @@ def handle_scans_detect(ctx: CommandContext, request: ScansDetectRequest) -> Com
             for target in request.detect_targets
             if target.ocr_metadata_path is not None
         ],
-        command="scans.detect",
+        command=_COMMAND_NAME,
     )
     total = sum(len(target.question_hints) for target in request.detect_targets)
     results: list[DetectResult] = []
@@ -982,5 +989,5 @@ def handle_scans_detect(ctx: CommandContext, request: ScansDetectRequest) -> Com
 
 def scans_detect_spec() -> CommandSpec:
     return CommandSpec(
-        name="scans.detect", request_model=ScansDetectRequest, handler=handle_scans_detect
+        name=_COMMAND_NAME, request_model=ScansDetectRequest, handler=handle_scans_detect
     )

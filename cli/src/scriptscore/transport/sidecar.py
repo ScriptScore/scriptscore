@@ -18,6 +18,8 @@ from scriptscore.runtime import (
 )
 from scriptscore.runtime.context import utc_now_iso
 
+_INVALID_REQUEST_MESSAGE = "Invalid Request"
+
 
 @dataclass
 class ActiveRequest:
@@ -115,7 +117,7 @@ class SidecarServer:
         envelope = make_error_envelope(
             command=method,
             operation_id=new_operation_id(),
-            request_id=None if request_id is None else str(request_id),
+            request_id=str(request_id),
             error=conflict,
             started=datetime_from_iso(now),
             finished=datetime_from_iso(now),
@@ -160,7 +162,7 @@ class SidecarServer:
                     {
                         "jsonrpc": "2.0",
                         "id": None,
-                        "error": {"code": -32600, "message": "Invalid Request"},
+                        "error": {"code": -32600, "message": _INVALID_REQUEST_MESSAGE},
                     },
                     stdout=out_stream,
                 )
@@ -172,7 +174,7 @@ class SidecarServer:
                     {
                         "jsonrpc": "2.0",
                         "id": request_id,
-                        "error": {"code": -32600, "message": "Invalid Request"},
+                        "error": {"code": -32600, "message": _INVALID_REQUEST_MESSAGE},
                     },
                     stdout=out_stream,
                 )
@@ -185,7 +187,7 @@ class SidecarServer:
                     {
                         "jsonrpc": "2.0",
                         "id": request_id,
-                        "error": {"code": -32600, "message": "Invalid Request"},
+                        "error": {"code": -32600, "message": _INVALID_REQUEST_MESSAGE},
                     },
                     stdout=out_stream,
                 )

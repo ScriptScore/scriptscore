@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -13,6 +14,7 @@ from scriptscore.contracts.scans import Region, Transform
 NORMALIZED_PAGE_WIDTH_PX = 900
 VISIBLE_CONTENT_THRESHOLD = 250
 VISIBLE_CONTENT_CLIP_TOLERANCE_PX = 16
+_FLOAT_IDENTITY_ABS_TOL = 1e-12
 
 
 @dataclass(frozen=True)
@@ -100,7 +102,7 @@ def _transformed_image(
         resample=Image.Resampling.BICUBIC,
         fillcolor=fill,
     )
-    if transform.scale != 1.0:
+    if not math.isclose(transform.scale, 1.0, rel_tol=0.0, abs_tol=_FLOAT_IDENTITY_ABS_TOL):
         width = max(1, round(transformed.width * transform.scale))
         height = max(1, round(transformed.height * transform.scale))
         transformed = transformed.resize((width, height), resample=Image.Resampling.BICUBIC)

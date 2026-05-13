@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import math
 from collections.abc import Callable
 from pathlib import Path
 
@@ -27,7 +28,13 @@ from scriptscore.providers import (
     FakeAlignmentProvider,
     ProviderRegistry,
 )
-from scriptscore.providers.core_template_match import _detect_aruco_markers, _marker_centers
+from scriptscore.providers.core_template_match import (
+    _detect_aruco_markers,
+    _marker_centers,
+    _MatchState,
+    _normalize_translation,
+    _resize,
+)
 from scriptscore.runtime import CommandRunner
 from tests.support.images import make_rgb_page
 
@@ -106,6 +113,37 @@ def _make_aruco_alignment_template(path: Path) -> Path:
     draw.rectangle((130, 250, 410, 270), fill=(64, 64, 64))
     image.save(path, format="PNG")
     return path
+
+
+def test_core_template_match_resize_treats_near_identity_scale_as_identity() -> None:
+    class _Image:
+        shape = (10, 12)
+
+    class _Cv2:
+        INTER_AREA = object()
+
+        @staticmethod
+        def resize(*_args: object, **_kwargs: object) -> object:
+            raise AssertionError("near-identity scale should not resize")
+
+    image = _Image()
+
+    assert _resize(image, scale=math.nextafter(1.0, 2.0), cv2=_Cv2) is image
+
+
+def test_core_template_match_normalize_translation_treats_near_identity_scale_as_identity() -> None:
+    state = _MatchState(
+        score=0.9,
+        scale=1.0,
+        angle=0.0,
+        translate_x=4.0,
+        translate_y=-2.0,
+        translation_scale=math.nextafter(1.0, 2.0),
+        rank=(0.9, 0.9, -6.0, 0.0),
+        identity_score=0.8,
+    )
+
+    assert _normalize_translation(state) is state
 
 
 def test_scans_align_auto_request_rejects_duplicate_template_pages(tmp_path: Path) -> None:

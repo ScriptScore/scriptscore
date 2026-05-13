@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 from typing import Any
 
@@ -12,7 +13,13 @@ from pydantic import ValidationError
 
 from scriptscore.artifacts import file_sha256
 from scriptscore.commands import build_command_registry
-from scriptscore.contracts import CommandSuccessEnvelope, ScansDetectRequest
+from scriptscore.commands.scans_detect import _HeaderTextMatch, _is_header_fragment_match
+from scriptscore.contracts import (
+    CommandSuccessEnvelope,
+    QuestionDetectHint,
+    Region,
+    ScansDetectRequest,
+)
 from scriptscore.ocr import OcrTextBox
 from scriptscore.providers import ProviderRegistry
 from scriptscore.runtime import CommandRunner
@@ -66,6 +73,31 @@ def _detect_request(*, page: Path, output_dir: Path) -> dict[str, Any]:
         ],
         "output_artifacts_dir": str(output_dir),
     }
+
+
+def test_header_fragment_match_treats_near_full_coverage_as_full() -> None:
+    hint = QuestionDetectHint(
+        question_id="q1",
+        question_number=1,
+        template_region=Region(
+            x=10,
+            y=12,
+            width=60,
+            height=20,
+            units="rendered_page_pixels",
+        ),
+        question_text_hint="First question prompt",
+    )
+    match = _HeaderTextMatch(
+        overlap_count=1,
+        candidate_token_count=1,
+        hint_token_count=3,
+        candidate_coverage=math.nextafter(1.0, 0.0),
+        similarity=0.0,
+        ordered_similarity=0.0,
+    )
+
+    assert _is_header_fragment_match(match, hint) is True
 
 
 def test_scans_detect_request_rejects_duplicate_question_numbers(tmp_path: Path) -> None:
