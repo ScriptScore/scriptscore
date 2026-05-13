@@ -47,8 +47,7 @@ function criteriaMatchApprovalBasis(
   return current.every((criterion, index) => {
     const approved = basis[index];
     return (
-      approved != null &&
-      approved.criterionId === criterion.criterionId &&
+      approved?.criterionId === criterion.criterionId &&
       approved.label === criterion.label &&
       approved.points === criterion.points &&
       approved.partialCreditGuidance === criterion.partialCreditGuidance &&

@@ -444,9 +444,10 @@ jobs:
             artifacts/cargo-geiger.log
 
   desktop-sonarcloud:
-    name: Desktop SonarCloud
+    name: SonarCloud
     runs-on: ubuntu-latest
     needs:
+      - test-and-coverage
       - desktop-frontend-coverage
       - desktop-rust-coverage
     env:
@@ -496,6 +497,13 @@ jobs:
         if: ${{ steps.sonar-ready.outputs.enabled == 'true' }}
         working-directory: desktop/frontend
         run: npx svelte-kit sync
+
+      - name: Download CLI coverage artifact
+        if: ${{ steps.sonar-ready.outputs.enabled == 'true' }}
+        uses: actions/download-artifact@v7
+        with:
+          name: coverage-xml
+          path: cli
 
       - name: Download frontend coverage artifact
         if: ${{ steps.sonar-ready.outputs.enabled == 'true' }}

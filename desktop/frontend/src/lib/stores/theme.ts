@@ -5,7 +5,7 @@ function createThemeStore() {
   const { subscribe, set, update } = writable<'dark' | 'light'>('dark');
 
   function init() {
-    if (typeof globalThis.window === 'undefined') return;
+    if (globalThis.window === undefined) return;
     const saved = localStorage.getItem('scriptscore-theme');
     const theme: 'dark' | 'light' = saved === 'light' ? 'light' : 'dark';
     applyTheme(theme);
@@ -29,7 +29,7 @@ function createThemeStore() {
 }
 
 function applyTheme(theme: 'dark' | 'light') {
-  if (typeof globalThis.window === 'undefined') return;
+  if (globalThis.window === undefined) return;
   if (theme === 'light') {
     document.documentElement.classList.add('light');
   } else {

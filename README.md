@@ -1,5 +1,11 @@
 # ScriptScore
 
+[![CI](https://github.com/ScriptScore/scriptscore/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/ScriptScore/scriptscore/actions/workflows/ci.yml)
+[![License Compliance](https://github.com/ScriptScore/scriptscore/actions/workflows/license-compliance.yml/badge.svg?branch=main)](https://github.com/ScriptScore/scriptscore/actions/workflows/license-compliance.yml)
+[![RC Package Validation](https://github.com/ScriptScore/scriptscore/actions/workflows/release-packages.yml/badge.svg?branch=main)](https://github.com/ScriptScore/scriptscore/actions/workflows/release-packages.yml)
+[![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=ScriptScore_scriptscore&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=ScriptScore_scriptscore)
+[![License: AGPL-3.0-only](https://img.shields.io/badge/license-AGPL--3.0--only-blue.svg)](LICENSE)
+
 ScriptScore is an open-source desktop and CLI client for exam grading workflows. The public preview includes the Python CLI/runtime, JSON-RPC sidecar, Tauri desktop host, and Svelte/SvelteKit frontend.
 
 ScriptScore is designed so grading workflows can run without hosted AI. The client supports no-AI workflows and local Ollama workflows, and includes the client-side foundation for hosted Ollama and future ScriptScorePlus hosted API use.

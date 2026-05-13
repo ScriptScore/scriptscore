@@ -166,7 +166,7 @@ export interface TemplateArucoPageStatus {
 }
 
 export interface TemplateArucoStatus {
-  state: 'unknown' | 'detected' | 'not_detected' | string;
+  state: 'unknown' | 'detected' | 'not_detected' | (string & {});
   totalMarkerCount: number;
   pages: TemplateArucoPageStatus[];
 }
@@ -628,7 +628,7 @@ export interface StudentWorkflowDetectRegion {
   y: number;
   width: number;
   height: number;
-  units: 'rendered_page_pixels' | string;
+  units: 'rendered_page_pixels' | (string & {});
 }
 
 export interface StudentWorkflowDetectReviewRow {
