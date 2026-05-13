@@ -8,6 +8,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from html import unescape
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any, Literal
 
@@ -27,6 +28,22 @@ from scriptscore.providers.interfaces import (
 
 _TAG_RE = re.compile(r"<(?P<tag>[a-zA-Z0-9_]+)>(?P<value>.*?)</(?P=tag)>", re.DOTALL)
 _QUESTION_PREFIX_RE = re.compile(r"^\s*(?:question\s*)?\d+\s*[\].:)\-]*\s*", re.IGNORECASE)
+
+
+class _AssessmentAttrsParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.attrs: dict[str, str] = {}
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag == "assessment" and not self.attrs:
+            self.attrs = {name: value for name, value in attrs if value is not None}
+
+
+def _extract_assessment_attrs(text: str) -> dict[str, str]:
+    parser = _AssessmentAttrsParser()
+    parser.feed(text)
+    return parser.attrs
 
 
 def _extract_tag(text: str, tag: str) -> str:
@@ -149,11 +166,15 @@ def _default_llm_response(request: LlmRequest) -> LlmResponse:
         return LlmResponse(raw_text=json.dumps({"adjustments": []}))
 
     if request.prompt_id == "feedback_draft":
-        attrs_match = re.search(
-            r'<assessment[^>]*total_points_awarded="(?P<awarded>\d+)"[^>]*question_max_points="(?P<max>\d+)"',
-            request.rendered_text,
-        )
-        if attrs_match and attrs_match.group("awarded") == attrs_match.group("max"):
+        attrs = _extract_assessment_attrs(request.rendered_text)
+        points_awarded_attr = attrs.get("total_points_awarded")
+        max_points_attr = attrs.get("question_max_points")
+        if (
+            points_awarded_attr is not None
+            and max_points_attr is not None
+            and points_awarded_attr.isdigit()
+            and points_awarded_attr == max_points_attr
+        ):
             return LlmResponse(raw_text="Strong work overall.")
         return LlmResponse(raw_text="You showed some understanding but missed a key detail.")
 
