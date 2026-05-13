@@ -55,6 +55,7 @@ TEXT_SUFFIXES = {
     ".yaml",
     ".yml",
 }
+WINDOWS_PROJECT_ICON = Path("icons/icon.ico")
 
 
 class VerificationError(RuntimeError):
@@ -67,6 +68,10 @@ def repo_root() -> Path:
 
 def desktop_root() -> Path:
     return Path(__file__).resolve().parents[1]
+
+
+def tauri_config_path() -> Path:
+    return desktop_root() / "src-tauri" / "tauri.conf.json"
 
 
 def parse_bundles(value: str) -> list[str]:
@@ -301,6 +306,111 @@ def validate_legal(legal_root: Path) -> dict[str, object]:
     return {"legalRoot": str(legal_root), "fileCount": len(legal_files)}
 
 
+def validate_windows_installer_icon_config(
+    config_path: Path | None = None,
+) -> dict[str, object]:
+    config_path = config_path or tauri_config_path()
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    bundle = config.get("bundle")
+    if not isinstance(bundle, dict):
+        raise VerificationError("Tauri config is missing bundle settings.")
+    windows = bundle.get("windows")
+    if not isinstance(windows, dict):
+        raise VerificationError("Tauri config is missing bundle.windows settings.")
+    nsis = windows.get("nsis")
+    if not isinstance(nsis, dict):
+        raise VerificationError("Tauri config is missing bundle.windows.nsis settings.")
+    installer_icon = nsis.get("installerIcon")
+    expected_icon = WINDOWS_PROJECT_ICON.as_posix()
+    if installer_icon != expected_icon:
+        raise VerificationError(
+            "Tauri NSIS installer icon must be configured as "
+            f"{expected_icon}."
+        )
+
+    resolved_icon = config_path.parent / installer_icon
+    if not resolved_icon.is_file():
+        raise VerificationError(f"Tauri NSIS installer icon was not found: {resolved_icon}")
+    return {
+        "config": str(config_path),
+        "nsisInstallerIcon": installer_icon,
+        "resolvedIcon": str(resolved_icon),
+    }
+
+
+def ico_image_payloads(icon_path: Path) -> list[bytes]:
+    data = icon_path.read_bytes()
+    if len(data) < 6:
+        raise VerificationError(f"Icon file is too small: {icon_path}")
+    reserved = int.from_bytes(data[0:2], "little")
+    icon_type = int.from_bytes(data[2:4], "little")
+    image_count = int.from_bytes(data[4:6], "little")
+    if reserved != 0 or icon_type != 1 or image_count < 1:
+        raise VerificationError(f"Icon file is not a valid .ico file: {icon_path}")
+
+    payloads: list[bytes] = []
+    for index in range(image_count):
+        entry_offset = 6 + index * 16
+        if entry_offset + 16 > len(data):
+            raise VerificationError(f"Icon file has a truncated directory: {icon_path}")
+        image_size = int.from_bytes(data[entry_offset + 8 : entry_offset + 12], "little")
+        image_offset = int.from_bytes(data[entry_offset + 12 : entry_offset + 16], "little")
+        if image_size < 1 or image_offset + image_size > len(data):
+            raise VerificationError(f"Icon file has an invalid image entry: {icon_path}")
+        payloads.append(data[image_offset : image_offset + image_size])
+    return payloads
+
+
+def windows_app_executable_candidates(payload_root: Path) -> list[Path]:
+    candidates: list[Path] = []
+    for path in sorted(payload_root.rglob("*")):
+        if not path.is_file() or path.suffix.lower() != ".exe":
+            continue
+        name = path.name.lower()
+        path_parts = {part.lower() for part in path.parts}
+        if "scriptscore" not in name:
+            continue
+        if name.startswith("unins") or "setup" in name:
+            continue
+        if {"runtime", "python"} <= path_parts:
+            continue
+        candidates.append(path)
+    return candidates
+
+
+def validate_windows_payload_icon(
+    payload_root: Path,
+    reference_icon: Path | None = None,
+) -> dict[str, object]:
+    candidates = windows_app_executable_candidates(payload_root)
+    if not candidates:
+        return {"status": "not-applicable", "checked": []}
+
+    reference_icon = reference_icon or desktop_root() / "src-tauri" / WINDOWS_PROJECT_ICON
+    icon_payloads = ico_image_payloads(reference_icon)
+    matched: list[str] = []
+    for candidate in candidates:
+        try:
+            executable_bytes = candidate.read_bytes()
+        except OSError as error:
+            raise VerificationError(f"Could not read Windows app executable {candidate}: {error}")
+        if any(payload in executable_bytes for payload in icon_payloads):
+            matched.append(str(candidate))
+
+    if not matched:
+        checked = ", ".join(str(candidate) for candidate in candidates)
+        raise VerificationError(
+            "Windows package app executable(s) did not contain the ScriptScore icon resource: "
+            + checked
+        )
+    return {
+        "status": "verified",
+        "referenceIcon": str(reference_icon),
+        "checked": [str(candidate) for candidate in candidates],
+        "matched": matched,
+    }
+
+
 def find_payload_runtime_root(payload_root: Path) -> Path:
     candidates = sorted(
         path.parent for path in payload_root.rglob("runtime-manifest.json") if path.is_file()
@@ -356,6 +466,7 @@ def validate_payload_root(payload_root: Path) -> dict[str, object]:
         "models": validate_models(model_root),
         "ocrReaderSmoke": validate_packaged_ocr_reader(runtime_root, model_root),
         "legal": validate_legal(legal_root),
+        "windowsIcon": validate_windows_payload_icon(payload_root),
     }
 
 
@@ -500,6 +611,7 @@ def main() -> int:
         "label": args.label,
         "bundles": bundles,
         "bundleRoot": str(bundle_root),
+        "installerIconConfig": validate_windows_installer_icon_config(),
         "packages": [str(path) for path in package_files],
         "payloads": payload_summaries,
     }

@@ -19,6 +19,18 @@ SPEC.loader.exec_module(MODULE)
 
 
 class VerifyReleasePackageArtifactsTests(unittest.TestCase):
+    def _write_icon(self, icon_path: Path, image: bytes = b"scriptscore-icon-image") -> bytes:
+        header = (0).to_bytes(2, "little") + (1).to_bytes(2, "little") + (1).to_bytes(2, "little")
+        entry = (
+            bytes([16, 16, 0, 0])
+            + (1).to_bytes(2, "little")
+            + (32).to_bytes(2, "little")
+            + len(image).to_bytes(4, "little")
+            + (22).to_bytes(4, "little")
+        )
+        icon_path.write_bytes(header + entry + image)
+        return image
+
     def _write_payload_layout(self, payload_root: Path) -> None:
         resources = payload_root / "app" / "resources"
         runtime = resources / "runtime"
@@ -211,6 +223,70 @@ class VerifyReleasePackageArtifactsTests(unittest.TestCase):
 
             with self.assertRaisesRegex(MODULE.VerificationError, "Authorization: Bearer"):
                 MODULE.scan_for_secret_markers([Path(tmp_dir)])
+
+    def test_validate_windows_installer_icon_config_requires_project_icon(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config_root = Path(tmp_dir)
+            icon_path = config_root / "icons" / "icon.ico"
+            icon_path.parent.mkdir()
+            self._write_icon(icon_path)
+            config_path = config_root / "tauri.conf.json"
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "bundle": {
+                            "windows": {
+                                "nsis": {
+                                    "installerIcon": "icons/icon.ico",
+                                },
+                            },
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            summary = MODULE.validate_windows_installer_icon_config(config_path)
+
+            self.assertEqual(summary["nsisInstallerIcon"], "icons/icon.ico")
+            self.assertEqual(summary["resolvedIcon"], str(icon_path))
+
+    def test_validate_windows_installer_icon_config_rejects_missing_icon_setting(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config_path = Path(tmp_dir) / "tauri.conf.json"
+            config_path.write_text(
+                json.dumps({"bundle": {"windows": {"nsis": {}}}}),
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(MODULE.VerificationError, "installer icon"):
+                MODULE.validate_windows_installer_icon_config(config_path)
+
+    def test_validate_windows_payload_icon_matches_project_icon_resource(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            reference_icon = root / "icon.ico"
+            icon_image = self._write_icon(reference_icon)
+            app_exe = root / "app" / "ScriptScore Desktop.exe"
+            app_exe.parent.mkdir()
+            app_exe.write_bytes(b"MZ fake executable " + icon_image + b" suffix")
+
+            summary = MODULE.validate_windows_payload_icon(root, reference_icon)
+
+            self.assertEqual(summary["status"], "verified")
+            self.assertEqual(summary["matched"], [str(app_exe)])
+
+    def test_validate_windows_payload_icon_rejects_stock_icon_resource(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            reference_icon = root / "icon.ico"
+            self._write_icon(reference_icon)
+            app_exe = root / "app" / "ScriptScore Desktop.exe"
+            app_exe.parent.mkdir()
+            app_exe.write_bytes(b"MZ fake executable stock-icon")
+
+            with self.assertRaisesRegex(MODULE.VerificationError, "ScriptScore icon resource"):
+                MODULE.validate_windows_payload_icon(root, reference_icon)
 
 
 if __name__ == "__main__":
