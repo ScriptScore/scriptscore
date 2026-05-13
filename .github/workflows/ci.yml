@@ -71,17 +71,7 @@ jobs:
       - name: Coverage subsystem thresholds
         run: uv run python tests/support/check_coverage_thresholds.py coverage.json
 
-      - name: Detect artifact upload availability
-        id: artifact-upload
-        run: |
-          if [ -n "${ACTIONS_RUNTIME_TOKEN:-}" ]; then
-            echo "enabled=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "enabled=false" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Upload coverage XML artifact
-        if: ${{ steps.artifact-upload.outputs.enabled == 'true' }}
         uses: actions/upload-artifact@v7
         with:
           name: coverage-xml
