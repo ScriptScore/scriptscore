@@ -29,11 +29,13 @@ use std::os::windows::ffi::OsStrExt;
 #[cfg(windows)]
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle, RawHandle};
 #[cfg(windows)]
+use std::os::windows::process::CommandExt;
+#[cfg(windows)]
 use std::ptr;
 #[cfg(windows)]
 use windows_sys::Win32::Foundation::{
-    ERROR_BROKEN_PIPE, ERROR_IO_PENDING, ERROR_PIPE_CONNECTED, HANDLE, INVALID_HANDLE_VALUE,
-    WAIT_OBJECT_0, WAIT_TIMEOUT,
+    ERROR_BROKEN_PIPE, ERROR_IO_PENDING, ERROR_OPERATION_ABORTED, ERROR_PIPE_CONNECTED, HANDLE,
+    INVALID_HANDLE_VALUE, WAIT_OBJECT_0, WAIT_TIMEOUT,
 };
 #[cfg(windows)]
 use windows_sys::Win32::Storage::FileSystem::{
@@ -44,7 +46,7 @@ use windows_sys::Win32::System::Pipes::{
     ConnectNamedPipe, CreateNamedPipeW, PIPE_READMODE_BYTE, PIPE_TYPE_BYTE, PIPE_WAIT,
 };
 #[cfg(windows)]
-use windows_sys::Win32::System::Threading::{CreateEventW, WaitForSingleObject};
+use windows_sys::Win32::System::Threading::{CreateEventW, WaitForSingleObject, CREATE_NO_WINDOW};
 #[cfg(windows)]
 use windows_sys::Win32::System::IO::{CancelIoEx, GetOverlappedResult, OVERLAPPED};
 
@@ -209,21 +211,8 @@ impl WorkerClient {
                 .stdout(Stdio::null())
                 .stderr(Stdio::null());
             apply_worker_launch_environment(&mut command, &launch_spec);
-            let mut child = match command.spawn() {
-                Ok(child) => child,
-                Err(err) => {
-                    close_pipe_handle(request_handle);
-                    close_pipe_handle(response_handle);
-                    return Err(err.into());
-                }
-            };
-            let writer = match accept_worker_named_pipe(request_handle, &mut child) {
-                Ok(pipe) => pipe,
-                Err(err) => {
-                    close_pipe_handle(response_handle);
-                    return Err(err);
-                }
-            };
+            let mut child = command.spawn()?;
+            let writer = accept_worker_named_pipe(request_handle, &mut child)?;
             let reader = accept_worker_named_pipe(response_handle, &mut child)?;
             let stream = WorkerStream::Pipe(WindowsPipeStream::new(reader, writer));
             let marker_path = write_worker_marker(child.id());
@@ -428,6 +417,9 @@ impl WorkerClient {
 }
 
 fn apply_worker_launch_environment(command: &mut Command, launch_spec: &WorkerLaunchSpec) {
+    #[cfg(windows)]
+    command.creation_flags(CREATE_NO_WINDOW);
+
     if let Some(python_path) = &launch_spec.python_path {
         command.env("PYTHONPATH", python_path);
     }
@@ -529,14 +521,12 @@ impl Read for WindowsPipeStream {
             return Ok(0);
         }
 
-        let event_handle = unsafe { CreateEventW(ptr::null(), 1, 0, ptr::null()) };
-        if event_handle.is_null() {
-            return Err(std::io::Error::last_os_error());
-        }
-        let _event = unsafe { OwnedHandle::from_raw_handle(event_handle as RawHandle) };
-        let mut overlapped: OVERLAPPED = unsafe { mem::zeroed() };
-        overlapped.hEvent = event_handle;
+        let event = create_overlapped_event()?;
+        let mut overlapped = zeroed_overlapped();
+        overlapped.hEvent = event.as_raw_handle() as HANDLE;
 
+        // SAFETY: `buf` and `overlapped` stay alive until `GetOverlappedResult`
+        // completes below, and the pipe handle was opened with FILE_FLAG_OVERLAPPED.
         let read = unsafe {
             ReadFile(
                 self.read_handle(),
@@ -559,14 +549,12 @@ impl Write for WindowsPipeStream {
 
         let chunk_len = buf.len().min(WINDOWS_PIPE_WRITE_CHUNK_BYTES);
         let chunk = &buf[..chunk_len];
-        let event_handle = unsafe { CreateEventW(ptr::null(), 1, 0, ptr::null()) };
-        if event_handle.is_null() {
-            return Err(std::io::Error::last_os_error());
-        }
-        let _event = unsafe { OwnedHandle::from_raw_handle(event_handle as RawHandle) };
-        let mut overlapped: OVERLAPPED = unsafe { mem::zeroed() };
-        overlapped.hEvent = event_handle;
+        let event = create_overlapped_event()?;
+        let mut overlapped = zeroed_overlapped();
+        overlapped.hEvent = event.as_raw_handle() as HANDLE;
 
+        // SAFETY: `chunk` and `overlapped` stay alive until `GetOverlappedResult`
+        // completes below, and the pipe handle was opened with FILE_FLAG_OVERLAPPED.
         let written = unsafe {
             WriteFile(
                 self.write_handle(),
@@ -585,6 +573,26 @@ impl Write for WindowsPipeStream {
 }
 
 #[cfg(windows)]
+fn create_overlapped_event() -> std::io::Result<OwnedHandle> {
+    // SAFETY: Passing null security attributes and name is permitted. The returned
+    // handle is checked before being wrapped in `OwnedHandle`.
+    let event_handle = unsafe { CreateEventW(ptr::null(), 1, 0, ptr::null()) };
+    if event_handle.is_null() {
+        return Err(std::io::Error::last_os_error());
+    }
+    // SAFETY: `event_handle` is a newly-created, non-null event handle and this
+    // `OwnedHandle` becomes its sole owner.
+    Ok(unsafe { OwnedHandle::from_raw_handle(event_handle as RawHandle) })
+}
+
+#[cfg(windows)]
+fn zeroed_overlapped() -> OVERLAPPED {
+    // SAFETY: Win32 `OVERLAPPED` is initialized to zero before assigning the event
+    // handle, matching the documented initialization pattern for overlapped I/O.
+    unsafe { mem::zeroed() }
+}
+
+#[cfg(windows)]
 fn wait_for_overlapped_pipe_io(
     handle: HANDLE,
     overlapped: &mut OVERLAPPED,
@@ -600,6 +608,8 @@ fn wait_for_overlapped_pipe_io(
     }
 
     let mut transferred = 0;
+    // SAFETY: `overlapped` is the same structure passed to the pending operation,
+    // and its event and data buffer remain alive until this blocking wait returns.
     let completed = unsafe { GetOverlappedResult(handle, overlapped, &mut transferred, 1) };
     if completed == 0 {
         let error = std::io::Error::last_os_error();
@@ -655,27 +665,49 @@ fn pipe_name() -> String {
 }
 
 #[cfg(windows)]
-fn accept_worker_named_pipe(handle: HANDLE, child: &mut Child) -> HostResult<File> {
+struct NamedPipeServer {
+    handle: OwnedHandle,
+}
+
+#[cfg(windows)]
+impl NamedPipeServer {
+    fn from_handle(handle: HANDLE) -> Self {
+        // SAFETY: `handle` came from a successful `CreateNamedPipeW` call and this
+        // wrapper becomes the sole owner until it is consumed into `File`.
+        let handle = unsafe { OwnedHandle::from_raw_handle(handle as RawHandle) };
+        Self { handle }
+    }
+
+    fn as_handle(&self) -> HANDLE {
+        self.handle.as_raw_handle() as HANDLE
+    }
+
+    fn into_file(self) -> File {
+        File::from(self.handle)
+    }
+}
+
+#[cfg(windows)]
+fn accept_worker_named_pipe(pipe: NamedPipeServer, child: &mut Child) -> HostResult<File> {
+    let handle = pipe.as_handle();
     let connect_state = begin_named_pipe_connect(handle)?;
     if connect_state.connected {
-        return Ok(file_from_pipe_handle(handle));
+        return Ok(pipe.into_file());
     }
 
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         match wait_for_named_pipe_connect(handle, connect_state.overlapped.as_ref(), 20)? {
-            PipeConnectPoll::Connected => return Ok(file_from_pipe_handle(handle)),
+            PipeConnectPoll::Connected => return Ok(pipe.into_file()),
             PipeConnectPoll::Pending => {
                 if child.try_wait()?.is_some() {
-                    cancel_named_pipe_connect(handle, connect_state.overlapped.as_ref());
-                    close_pipe_handle(handle);
+                    cancel_named_pipe_connect(handle, connect_state.overlapped.as_ref())?;
                     return Err(HostError::Worker(
                         "Desktop worker exited before connecting to the named pipe.".into(),
                     ));
                 }
                 if Instant::now() >= deadline {
-                    cancel_named_pipe_connect(handle, connect_state.overlapped.as_ref());
-                    close_pipe_handle(handle);
+                    cancel_named_pipe_connect(handle, connect_state.overlapped.as_ref())?;
                     return Err(HostError::Worker(
                         "Timed out waiting for the desktop worker to connect.".into(),
                     ));
@@ -700,15 +732,12 @@ enum PipeConnectPoll {
 
 #[cfg(windows)]
 fn begin_named_pipe_connect(handle: HANDLE) -> HostResult<PendingNamedPipeConnect> {
-    let event_handle = unsafe { CreateEventW(ptr::null(), 1, 0, ptr::null()) };
-    if event_handle.is_null() {
-        return Err(std::io::Error::last_os_error().into());
-    }
+    let event = create_overlapped_event()?;
+    let mut overlapped = Box::new(zeroed_overlapped());
+    overlapped.hEvent = event.as_raw_handle() as HANDLE;
 
-    let event = unsafe { OwnedHandle::from_raw_handle(event_handle as RawHandle) };
-    let mut overlapped: Box<OVERLAPPED> = Box::new(unsafe { mem::zeroed() });
-    overlapped.hEvent = event_handle;
-
+    // SAFETY: `overlapped` and its event remain owned by `PendingNamedPipeConnect`
+    // until the connection completes or cancellation has been drained.
     let connected = unsafe { ConnectNamedPipe(handle, overlapped.as_mut()) };
     if connected != 0 {
         return Ok(PendingNamedPipeConnect {
@@ -740,17 +769,20 @@ fn wait_for_named_pipe_connect(
     overlapped: &OVERLAPPED,
     wait_ms: u32,
 ) -> HostResult<PipeConnectPoll> {
+    // SAFETY: `overlapped.hEvent` is the live event created for this pending
+    // connection and owned alongside the `OVERLAPPED` until completion.
     let wait_result = unsafe { WaitForSingleObject(overlapped.hEvent, wait_ms) };
     match wait_result {
         WAIT_OBJECT_0 => {
             let mut transferred = 0;
+            // SAFETY: The event is signaled for this connect operation, and
+            // `overlapped` is the same structure passed to `ConnectNamedPipe`.
             let connected = unsafe { GetOverlappedResult(handle, overlapped, &mut transferred, 0) };
             if connected == 0 {
                 let error = std::io::Error::last_os_error();
                 if error.raw_os_error() == Some(ERROR_PIPE_CONNECTED as i32) {
                     return Ok(PipeConnectPoll::Connected);
                 }
-                close_pipe_handle(handle);
                 return Err(error.into());
             }
             Ok(PipeConnectPoll::Connected)
@@ -761,12 +793,14 @@ fn wait_for_named_pipe_connect(
 }
 
 #[cfg(windows)]
-fn create_named_pipe_server(pipe_name: &str) -> HostResult<HANDLE> {
+fn create_named_pipe_server(pipe_name: &str) -> HostResult<NamedPipeServer> {
     let pipe_path = format!(r"\\.\pipe\{pipe_name}");
     let wide_name: Vec<u16> = OsStr::new(&pipe_path)
         .encode_wide()
         .chain(Some(0))
         .collect();
+    // SAFETY: `wide_name` is a null-terminated UTF-16 pipe path that stays alive
+    // for the duration of the call. Null security attributes are allowed.
     let handle = unsafe {
         CreateNamedPipeW(
             wide_name.as_ptr(),
@@ -782,26 +816,32 @@ fn create_named_pipe_server(pipe_name: &str) -> HostResult<HANDLE> {
     if handle == INVALID_HANDLE_VALUE {
         return Err(std::io::Error::last_os_error().into());
     }
-    Ok(handle)
+    Ok(NamedPipeServer::from_handle(handle))
 }
 
 #[cfg(windows)]
-fn cancel_named_pipe_connect(handle: HANDLE, overlapped: &OVERLAPPED) {
-    unsafe {
-        let _ = CancelIoEx(handle, overlapped);
+fn cancel_named_pipe_connect(handle: HANDLE, overlapped: &OVERLAPPED) -> HostResult<()> {
+    // SAFETY: `overlapped` identifies the pending connect operation for `handle`.
+    // Completion is drained below before the structure or event can be dropped.
+    let _ = unsafe { CancelIoEx(handle, overlapped) };
+
+    let mut transferred = 0;
+    // SAFETY: Waiting here is what makes cancellation sound: it guarantees the
+    // system is done with `overlapped` before its owner is dropped.
+    let completed = unsafe { GetOverlappedResult(handle, overlapped, &mut transferred, 1) };
+    if completed != 0 {
+        return Ok(());
     }
-}
-
-#[cfg(windows)]
-fn file_from_pipe_handle(handle: HANDLE) -> File {
-    let owned = unsafe { OwnedHandle::from_raw_handle(handle as RawHandle) };
-    File::from(owned)
-}
-
-#[cfg(windows)]
-fn close_pipe_handle(handle: HANDLE) {
-    unsafe {
-        drop(OwnedHandle::from_raw_handle(handle as RawHandle));
+    let error = std::io::Error::last_os_error();
+    match error.raw_os_error() {
+        Some(code)
+            if code == ERROR_OPERATION_ABORTED as i32
+                || code == ERROR_BROKEN_PIPE as i32
+                || code == ERROR_PIPE_CONNECTED as i32 =>
+        {
+            Ok(())
+        }
+        _ => Err(error.into()),
     }
 }
 
@@ -865,5 +905,45 @@ mod tests {
             command_env(&command, "SCRIPTSCORE_OCR_PADDLE_MODEL_DIR"),
             Some(Some(OsString::from("/resources/models/paddle")))
         );
+    }
+
+    #[cfg(windows)]
+    fn unique_test_pipe_name(prefix: &str) -> String {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or(Duration::from_secs(0))
+            .as_millis();
+        format!("{prefix}-{}-{nonce}", std::process::id())
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn named_pipe_connect_cancellation_drains_pending_operation() {
+        let pipe = create_named_pipe_server(&unique_test_pipe_name("scriptscore-test-cancel"))
+            .expect("pipe");
+        let pending = begin_named_pipe_connect(pipe.as_handle()).expect("connect pending");
+
+        assert!(!pending.connected);
+        cancel_named_pipe_connect(pipe.as_handle(), pending.overlapped.as_ref())
+            .expect("cancellation should complete");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn accept_named_pipe_cancels_when_child_exits_before_connecting() {
+        let pipe = create_named_pipe_server(&unique_test_pipe_name("scriptscore-test-exit"))
+            .expect("pipe");
+        let mut child = Command::new("cmd")
+            .args(["/C", "exit", "0"])
+            .spawn()
+            .expect("child");
+
+        let err = accept_worker_named_pipe(pipe, &mut child)
+            .expect_err("child exit should fail pipe accept");
+        let _ = child.wait();
+
+        assert!(err
+            .to_string()
+            .contains("Desktop worker exited before connecting to the named pipe"));
     }
 }

@@ -114,6 +114,9 @@ class GenerateLegalArtifactsTests(unittest.TestCase):
     def test_ujson_license_expression_is_allowed(self) -> None:
         self.assertTrue(MODULE.license_expression_is_allowed("BSD-3-Clause AND TCL"))
 
+    def test_lmdb_openldap_license_is_allowed(self) -> None:
+        self.assertTrue(MODULE.license_expression_is_allowed("OLDAP-2.8"))
+
     def test_current_scipy_expression_is_approved_for_runtime(self) -> None:
         item = MODULE.InventoryItem(
             name="scipy",

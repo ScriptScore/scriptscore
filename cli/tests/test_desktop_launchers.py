@@ -121,14 +121,18 @@ def _wait_for_output_marker(
     )
 
 
-def _launcher_process(script_name: str, *, port: int) -> subprocess.Popen[bytes]:
+def _bash_executable() -> str:
     bash = shutil.which("bash")
     if bash is None and Path("/bin/bash").is_file():
         bash = "/bin/bash"
     if bash is None:
         pytest.skip("bash is required for shell launcher smoke tests")
+    return bash
+
+
+def _launcher_process(script_name: str, *, port: int) -> subprocess.Popen[bytes]:
     return subprocess.Popen(
-        [bash, str(SCRIPTS_DIR / script_name)],
+        [_bash_executable(), str(SCRIPTS_DIR / script_name)],
         cwd=PROJECT_ROOT,
         env=_frontend_env(port=port),
         stdout=subprocess.PIPE,
@@ -197,7 +201,7 @@ def test_dev_desktop_launcher_override_keeps_frontend_dev_command(tmp_path: Path
     )
 
     subprocess.run(
-        ["/bin/bash", str(SCRIPTS_DIR / "dev-desktop.sh")],
+        [_bash_executable(), str(SCRIPTS_DIR / "dev-desktop.sh")],
         cwd=PROJECT_ROOT,
         env=env,
         check=True,
@@ -227,7 +231,7 @@ def test_dev_desktop_launcher_reaches_host_startup() -> None:
         pytest.skip("desktop frontend dependencies are not installed")
 
     proc = subprocess.Popen(
-        ["xvfb-run", "-a", "/bin/bash", str(SCRIPTS_DIR / "dev-desktop.sh")],
+        ["xvfb-run", "-a", _bash_executable(), str(SCRIPTS_DIR / "dev-desktop.sh")],
         cwd=PROJECT_ROOT,
         env=_frontend_env(
             port=4175,

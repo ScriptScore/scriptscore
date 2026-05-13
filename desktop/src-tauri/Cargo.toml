@@ -8,6 +8,9 @@ license = "AGPL-3.0-only"
 name = "scriptscore_desktop_host"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[lints.clippy]
+undocumented_unsafe_blocks = "deny"
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

@@ -137,13 +137,30 @@ function Stop-ProcessTree {
     taskkill.exe /PID $Process.Id /T /F | Out-Null
 }
 
+function Build-DesktopHost {
+    Push-Location $RepoRoot
+    try {
+        cargo build --manifest-path "desktop\src-tauri\Cargo.toml"
+        $buildExitCode = $LASTEXITCODE
+        if ($buildExitCode -ne 0) {
+            throw "cargo build failed with exit code $buildExitCode."
+        }
+    }
+    finally {
+        Pop-Location
+    }
+}
+
 function Start-DesktopHost {
     Write-Host "Launching ScriptScore Desktop..."
     $existing = Get-Process -Name "scriptscore-desktop-host" -ErrorAction SilentlyContinue
     foreach ($process in $existing) {
         Stop-Process -Id $process.Id -Force
     }
-    Start-Process -FilePath explorer.exe -ArgumentList @($HostExe) | Out-Null
+    if (!(Test-Path $HostExe)) {
+        throw "ScriptScore desktop host executable was not found at $HostExe."
+    }
+    Start-Process -FilePath $HostExe -WorkingDirectory $HostDir | Out-Null
     $deadline = (Get-Date).AddSeconds(20)
     while ((Get-Date) -lt $deadline) {
         $candidate = Get-Process -Name "scriptscore-desktop-host" -ErrorAction SilentlyContinue |
@@ -184,13 +201,7 @@ try {
     }
 
     Write-Host "Building ScriptScore desktop host..."
-    Push-Location $RepoRoot
-    try {
-        cargo build --manifest-path "desktop\src-tauri\Cargo.toml"
-    }
-    finally {
-        Pop-Location
-    }
+    Build-DesktopHost
 
     $HostProcess = Start-DesktopHost
     Write-Host "ScriptScore Desktop is running. Close the app window to stop this launcher."

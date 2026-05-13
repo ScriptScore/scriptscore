@@ -69,12 +69,16 @@ fn windows_long_path(path: &Path) -> std::io::Result<PathBuf> {
 
     let path = strip_verbatim_prefix(path);
     let wide_path: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+    // SAFETY: `wide_path` is null-terminated and lives for the duration of the
+    // call. A null output buffer with length 0 is the documented size query.
     let required_len = unsafe { GetLongPathNameW(wide_path.as_ptr(), std::ptr::null_mut(), 0) };
     if required_len == 0 {
         return Err(std::io::Error::last_os_error());
     }
 
     let mut buffer = vec![0; required_len as usize + 1];
+    // SAFETY: `wide_path` is null-terminated, and `buffer` is writable for the
+    // length passed to Win32 for this call.
     let written_len = unsafe {
         GetLongPathNameW(
             wide_path.as_ptr(),
@@ -87,6 +91,8 @@ fn windows_long_path(path: &Path) -> std::io::Result<PathBuf> {
     }
     if written_len as usize >= buffer.len() {
         buffer.resize(written_len as usize + 1, 0);
+        // SAFETY: The resized `buffer` is writable for the advertised length,
+        // and `wide_path` remains valid and null-terminated.
         let written_len = unsafe {
             GetLongPathNameW(
                 wide_path.as_ptr(),

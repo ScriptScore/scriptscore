@@ -34,7 +34,7 @@ On Linux, launch the desktop app with:
 On Windows, launch the desktop app with:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\desktop\scripts\dev-desktop.ps1
+.\rundev.cmd
 ```
 
 The Windows launcher does not require `cargo-tauri`; it starts the Vite frontend, builds the Rust host with Cargo, opens the desktop app, and cleans up the frontend server it started when the app exits.
