@@ -131,6 +131,32 @@ class GenerateLegalArtifactsTests(unittest.TestCase):
 
         self.assertIsNone(MODULE.classify_item(item))
 
+    def test_current_macos_native_runtime_libraries_have_review_provenance(self) -> None:
+        provenance = MODULE.native_runtime_provenance(MODULE.NATIVE_RUNTIME_PROVENANCE)
+        paths = [
+            "desktop/dist/bundled-runtime/python/lib/python3.12/site-packages/PIL/.dylibs/libjpeg.62.4.0.dylib",
+            "desktop/dist/bundled-runtime/python/lib/python3.12/site-packages/paddle/libs/libphi.dylib",
+            "desktop/dist/bundled-runtime/python/lib/python3.12/site-packages/shapely/.dylibs/libgeos.3.13.1.dylib",
+        ]
+
+        for path in paths:
+            with self.subTest(path=path):
+                item = MODULE.InventoryItem(
+                    name=path,
+                    version=None,
+                    license=None,
+                    source="runtime",
+                    scope="native-library",
+                    path=path,
+                    runtime=True,
+                    checksum_sha256="0" * 64,
+                )
+
+                mapped = MODULE.native_runtime_provenance_item(item, provenance)
+
+                self.assertIsNotNone(mapped.notice)
+                self.assertIsNone(MODULE.classify_item(mapped))
+
 
 if __name__ == "__main__":
     unittest.main()

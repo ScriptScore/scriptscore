@@ -126,6 +126,7 @@
       "path_patterns": [
         "desktop/dist/bundled-runtime/python/**/site-packages/paddle/**/*.so",
         "desktop/dist/bundled-runtime/python/**/site-packages/paddle/**/*.pyd",
+        "desktop/dist/bundled-runtime/python/**/site-packages/paddle/**/*.dylib",
         "desktop/dist/bundled-runtime/python/**/site-packages/_foo.*"
       ],
       "source_package": "paddlepaddle 3.3.1 wheel",
@@ -155,21 +156,23 @@
     {
       "path_patterns": [
         "desktop/dist/bundled-runtime/python/**/site-packages/PIL/**/*.so",
-        "desktop/dist/bundled-runtime/python/**/site-packages/PIL/**/*.pyd"
+        "desktop/dist/bundled-runtime/python/**/site-packages/PIL/**/*.pyd",
+        "desktop/dist/bundled-runtime/python/**/site-packages/PIL/**/*.dylib"
       ],
-      "source_package": "pillow 11.3.0 wheel",
+      "source_package": "pillow 12.2.0 wheel",
       "license": "MIT-CMU",
       "obligations": "Include Pillow notices and bundled-library attributions from the wheel metadata.",
       "evidence": [
-        "pillow-11.3.0.dist-info/METADATA",
-        "pillow-11.3.0.dist-info/RECORD",
+        "pillow-12.2.0.dist-info/METADATA",
+        "pillow-12.2.0.dist-info/RECORD",
         "desktop/dist/legal/sbom-python.json"
       ]
     },
     {
       "path_patterns": [
         "desktop/dist/bundled-runtime/python/**/site-packages/shapely/**/*.so",
-        "desktop/dist/bundled-runtime/python/**/site-packages/shapely/**/*.pyd"
+        "desktop/dist/bundled-runtime/python/**/site-packages/shapely/**/*.pyd",
+        "desktop/dist/bundled-runtime/python/**/site-packages/shapely/**/*.dylib"
       ],
       "source_package": "shapely 2.1.2 wheel",
       "license": "BSD-3-Clause",
