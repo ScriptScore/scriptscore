@@ -48,17 +48,19 @@ def question_context_xml(question_context: str) -> str:
 def instructor_profile_xml(profile: InstructorProfile) -> str:
     """Render the shared instructor-profile XML projection."""
 
-    return render_xml(
-        xml_node(
-            "instructor_profile",
-            xml_text("grading_strictness", profile.grading_strictness),
-            xml_text("syntax_leniency", profile.syntax_leniency),
-            xml_text("ocr_tolerance", profile.ocr_tolerance),
-            xml_text("partial_credit_style", profile.partial_credit_style),
-            xml_text("feedback_style", profile.feedback_style),
-            xml_text("additional_guidance", profile.additional_guidance or ""),
-        )
-    )
+    children = [
+        xml_text(tag, value)
+        for tag, value in [
+            ("grading_strictness", profile.grading_strictness),
+            ("syntax_leniency", profile.syntax_leniency),
+            ("ocr_tolerance", profile.ocr_tolerance),
+            ("partial_credit_style", profile.partial_credit_style),
+            ("feedback_style", profile.feedback_style),
+        ]
+        if value is not None
+    ]
+    children.append(xml_text("additional_guidance", profile.additional_guidance or ""))
+    return render_xml(xml_node("instructor_profile", *children))
 
 
 def rubric_criterion_xml(criterion: RubricCriterion) -> str:

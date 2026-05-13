@@ -262,6 +262,36 @@ describe('SettingsWorkspace', () => {
     ).toBeNull();
   });
 
+  it('toggles instructor profile dimensions while preserving saved values', async () => {
+    const settings: AppSettings = structuredClone(defaultAppSettings);
+    settings.instructorProfile.syntaxLeniency = 'high';
+    const onSettingsChange = vi.fn();
+
+    render(SettingsWorkspace, {
+      settings,
+      onSettingsChange
+    });
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Grading' }));
+
+    const syntaxToggle = screen.getByRole('button', { name: /Syntax leniency/ });
+    expect(syntaxToggle.getAttribute('aria-pressed')).toBe('false');
+    expect(screen.queryByLabelText('Syntax leniency')).toBeNull();
+
+    await fireEvent.click(syntaxToggle);
+
+    expect(settings.instructorProfile.enabledTags.syntaxLeniency).toBe(true);
+    expect(settings.instructorProfile.syntaxLeniency).toBe('high');
+    expect(screen.getByRole('combobox', { name: 'Syntax leniency: high' })).toBeTruthy();
+    expect(onSettingsChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        instructorProfile: expect.objectContaining({
+          enabledTags: expect.objectContaining({ syntaxLeniency: true })
+        })
+      })
+    );
+  });
+
   it('edits and validates the non-blank answer minimum percentage inline', async () => {
     const settings: AppSettings = {
       ...defaultAppSettings,

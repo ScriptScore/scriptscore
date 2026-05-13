@@ -145,11 +145,11 @@ class InstructorProfile(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    grading_strictness: Literal["strict", "balanced", "generous"]
-    syntax_leniency: Literal["low", "medium", "high"]
-    ocr_tolerance: Literal["low", "medium", "high"]
-    partial_credit_style: Literal["strict", "balanced", "generous"]
-    feedback_style: Literal["brief", "balanced", "detailed"]
+    grading_strictness: Literal["strict", "balanced", "generous"] | None = None
+    syntax_leniency: Literal["low", "medium", "high"] | None = None
+    ocr_tolerance: Literal["low", "medium", "high"] | None = None
+    partial_credit_style: Literal["strict", "balanced", "generous"] | None = None
+    feedback_style: Literal["brief", "balanced", "detailed"] | None = None
     additional_guidance: str | None = None
 
 

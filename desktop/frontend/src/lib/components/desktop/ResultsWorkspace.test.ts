@@ -62,6 +62,13 @@ function workspaceState(): ExamWorkspaceState {
         ocrTolerance: 'medium',
         partialCreditStyle: 'balanced',
         feedbackStyle: 'brief',
+        enabledTags: {
+          gradingStrictness: true,
+          syntaxLeniency: false,
+          ocrTolerance: false,
+          partialCreditStyle: false,
+          feedbackStyle: true
+        },
         additionalGuidance: '',
         includeMinimumCreditCriterion: false,
         minimumCreditPercent: 10,

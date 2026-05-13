@@ -3,8 +3,13 @@
   import { onDestroy } from 'svelte';
 
   import type { VisionCapableModel } from '$lib/types';
-  import { appSettings } from '$lib/stores/appSettings';
+  import {
+    appSettings,
+    detailedInstructorProfileEnabledTags,
+    simpleInstructorProfileEnabledTags
+  } from '$lib/stores/appSettings';
   import AiAssistanceStep from './AiAssistanceStep.svelte';
+  import GradingProfileStep from './GradingProfileStep.svelte';
   import {
     createCanvasOnboardingValidator,
     createOllamaOnboardingValidator
@@ -26,9 +31,10 @@
   const canvasValidation = createCanvasOnboardingValidator(() => hasDesktopHost);
   const ollamaValidation = createOllamaOnboardingValidator(() => hasDesktopHost);
 
-  let activeOnboardingTask: 'project' | 'ai' | null = 'project';
+  let activeOnboardingTask: 'project' | 'ai' | 'grading' | null = 'project';
   let projectTaskComplete = false;
   let aiTaskComplete = false;
+  let gradingTaskComplete = false;
 
   $: canvasBaseUrl = $appSettings.lmsCanvasBaseUrl.trim();
   $: canvasApiKey = ($appSettings.lmsCanvasApiKey ?? '').trim();
@@ -54,7 +60,8 @@
     $appSettings.aiAssistEnabled &&
     ($appSettings.llmProvider === 'ollama_cloud' ||
       ($appSettings.llmProvider === 'ollama_native' && !visionModelsBusy));
-  $: finishSetupReady = projectTaskComplete && aiTaskComplete;
+  $: gradingTaskRequired = $appSettings.aiAssistEnabled;
+  $: finishSetupReady = projectTaskComplete && aiTaskComplete && (!gradingTaskRequired || gradingTaskComplete);
   $: finishSetupButtonClass = finishSetupReady
     ? '!border-message-success-border !bg-message-success-bg !text-message-success-text hover:!bg-message-success-bg hover:!text-message-success-text'
     : '';
@@ -105,6 +112,7 @@
 
   function disableAiAssist() {
     aiTaskComplete = false;
+    gradingTaskComplete = false;
     updateSettings({
       aiAssistEnabled: false,
       aiAssistCategories: {
@@ -118,6 +126,7 @@
 
   function enableAiAssist(provider: 'ollama_native' | 'ollama_cloud') {
     aiTaskComplete = false;
+    gradingTaskComplete = false;
     const providerDefaults =
       provider === 'ollama_cloud'
         ? {
@@ -161,6 +170,33 @@
       return;
     }
     aiTaskComplete = true;
+    activeOnboardingTask = $appSettings.aiAssistEnabled ? 'grading' : null;
+  }
+
+  function chooseSimpleGradingProfile() {
+    gradingTaskComplete = false;
+    updateSettings({
+      instructorProfile: {
+        ...$appSettings.instructorProfile,
+        gradingStrictness: 'balanced',
+        feedbackStyle: 'brief',
+        enabledTags: simpleInstructorProfileEnabledTags
+      }
+    });
+  }
+
+  function chooseDetailedGradingProfile() {
+    gradingTaskComplete = false;
+    updateSettings({
+      instructorProfile: {
+        ...$appSettings.instructorProfile,
+        enabledTags: detailedInstructorProfileEnabledTags
+      }
+    });
+  }
+
+  function completeGradingTask() {
+    gradingTaskComplete = true;
     activeOnboardingTask = null;
   }
 
@@ -287,6 +323,44 @@
           />
         {/if}
       </section>
+
+      {#if gradingTaskRequired || gradingTaskComplete}
+        <section class="grid gap-2 border-t border-border/40 pt-4">
+          <button
+            class={onboardingTaskHeaderClass(activeOnboardingTask === 'grading', gradingTaskComplete)}
+            type="button"
+            onclick={() => {
+              if (projectTaskComplete && aiTaskComplete && gradingTaskRequired) {
+                activeOnboardingTask = 'grading';
+              }
+            }}
+            disabled={!projectTaskComplete || !aiTaskComplete || !gradingTaskRequired}
+          >
+            <span class="flex min-w-0 items-center gap-3">
+              <span class={taskCheckClass(gradingTaskComplete)}>{gradingTaskComplete ? '✓' : '3'}</span>
+              <span class="min-w-0">
+                <span class="block text-base font-semibold text-foreground">Grading profile</span>
+                <span class="block truncate text-sm text-muted-foreground">
+                  {Object.values($appSettings.instructorProfile.enabledTags).every(Boolean) ? 'Detailed profile' : 'Simple profile'}
+                </span>
+              </span>
+            </span>
+            {#if gradingTaskComplete}
+              <span class="shrink-0 text-sm font-medium text-message-success-text">Complete</span>
+            {:else if !aiTaskComplete}
+              <span class="shrink-0 text-sm text-muted-foreground">Locked</span>
+            {/if}
+          </button>
+
+          {#if activeOnboardingTask === 'grading' && aiTaskComplete && gradingTaskRequired}
+            <GradingProfileStep
+              onChooseSimple={chooseSimpleGradingProfile}
+              onChooseDetailed={chooseDetailedGradingProfile}
+              onContinue={completeGradingTask}
+            />
+          {/if}
+        </section>
+      {/if}
     </div>
 
     <div class="flex flex-wrap justify-end gap-3">

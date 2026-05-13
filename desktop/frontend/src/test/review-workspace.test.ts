@@ -113,6 +113,13 @@ function buildWorkspaceState(): ExamWorkspaceState {
         ocrTolerance: '',
         partialCreditStyle: '',
         feedbackStyle: '',
+        enabledTags: {
+          gradingStrictness: true,
+          syntaxLeniency: false,
+          ocrTolerance: false,
+          partialCreditStyle: false,
+          feedbackStyle: true
+        },
         additionalGuidance: '',
         includeMinimumCreditCriterion: false,
         minimumCreditPercent: 0

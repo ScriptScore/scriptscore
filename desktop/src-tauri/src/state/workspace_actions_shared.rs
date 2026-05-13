@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 
 use crate::errors::{HostError, HostResult};
 use crate::models::{AppSettings, InstructorProfile, WorkspaceWarning};
@@ -81,16 +81,89 @@ pub(super) fn llm_config_trace_json(settings: &AppSettings) -> Value {
 
 pub(crate) fn cli_instructor_profile_json(profile: &InstructorProfile) -> Value {
     let additional = profile.additional_guidance.trim();
-    json!({
-        "grading_strictness": profile.grading_strictness,
-        "syntax_leniency": profile.syntax_leniency,
-        "ocr_tolerance": profile.ocr_tolerance,
-        "partial_credit_style": profile.partial_credit_style,
-        "feedback_style": profile.feedback_style,
-        "additional_guidance": if additional.is_empty() {
+    let mut profile_json = Map::new();
+    if profile.enabled_tags.grading_strictness {
+        profile_json.insert(
+            "grading_strictness".into(),
+            Value::String(profile.grading_strictness.clone()),
+        );
+    }
+    if profile.enabled_tags.syntax_leniency {
+        profile_json.insert(
+            "syntax_leniency".into(),
+            Value::String(profile.syntax_leniency.clone()),
+        );
+    }
+    if profile.enabled_tags.ocr_tolerance {
+        profile_json.insert(
+            "ocr_tolerance".into(),
+            Value::String(profile.ocr_tolerance.clone()),
+        );
+    }
+    if profile.enabled_tags.partial_credit_style {
+        profile_json.insert(
+            "partial_credit_style".into(),
+            Value::String(profile.partial_credit_style.clone()),
+        );
+    }
+    if profile.enabled_tags.feedback_style {
+        profile_json.insert(
+            "feedback_style".into(),
+            Value::String(profile.feedback_style.clone()),
+        );
+    }
+    profile_json.insert(
+        "additional_guidance".into(),
+        if additional.is_empty() {
             Value::Null
         } else {
             Value::String(additional.to_string())
         },
-    })
+    );
+    Value::Object(profile_json)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::InstructorProfileEnabledTags;
+
+    #[test]
+    fn cli_instructor_profile_json_omits_disabled_dimensions() {
+        let profile = InstructorProfile {
+            syntax_leniency: "high".into(),
+            ocr_tolerance: "high".into(),
+            partial_credit_style: "generous".into(),
+            additional_guidance: "Use terse notes.".into(),
+            ..Default::default()
+        };
+
+        let rendered = cli_instructor_profile_json(&profile);
+
+        assert_eq!(rendered["grading_strictness"], "balanced");
+        assert_eq!(rendered["feedback_style"], "brief");
+        assert_eq!(rendered["additional_guidance"], "Use terse notes.");
+        assert!(rendered.get("syntax_leniency").is_none());
+        assert!(rendered.get("ocr_tolerance").is_none());
+        assert!(rendered.get("partial_credit_style").is_none());
+    }
+
+    #[test]
+    fn cli_instructor_profile_json_includes_enabled_dimensions() {
+        let profile = InstructorProfile {
+            enabled_tags: InstructorProfileEnabledTags {
+                syntax_leniency: true,
+                ocr_tolerance: true,
+                partial_credit_style: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let rendered = cli_instructor_profile_json(&profile);
+
+        assert_eq!(rendered["syntax_leniency"], "medium");
+        assert_eq!(rendered["ocr_tolerance"], "medium");
+        assert_eq!(rendered["partial_credit_style"], "balanced");
+    }
 }
