@@ -373,11 +373,24 @@ jobs:
           mount_dir=$(mktemp -d)
           payload_root="$(pwd)/desktop/dist/package-payload/${{ matrix.label }}"
           mkdir -p "${payload_root}"
-          hdiutil attach "${dmg}" -mountpoint "${mount_dir}" -nobrowse -readonly
+          attach_status=1
+          for attempt in 1 2 3 4; do
+            if hdiutil attach "${dmg}" -mountpoint "${mount_dir}" -nobrowse -readonly; then
+              attach_status=0
+              break
+            fi
+            attach_status=$?
+            echo "warning: hdiutil attach failed with status ${attach_status}; retrying (${attempt}/4)." >&2
+            hdiutil info || true
+            sleep $((attempt * 5))
+          done
+          if [[ ${attach_status} -ne 0 ]]; then
+            exit "${attach_status}"
+          fi
           app_dir=$(find "${mount_dir}" -maxdepth 2 -type d -name '*.app' -print -quit)
           test -n "${app_dir}"
           ditto "${app_dir}" "${payload_root}/dmg-app"
-          hdiutil detach "${mount_dir}"
+          hdiutil detach "${mount_dir}" || hdiutil detach -force "${mount_dir}"
 
       - name: Extract Windows package payloads
         if: ${{ runner.os == 'Windows' }}

@@ -44,6 +44,29 @@ bundle_selection_requires_portable_runtime() {
   return 1
 }
 
+detach_macos_dmg_interstitials() {
+  local release_dir=$1
+  local device
+  while IFS= read -r device; do
+    [[ -n "${device}" ]] || continue
+    echo "Detaching stale macOS DMG interstitial device: ${device}"
+    hdiutil detach -force "${device}" >/dev/null 2>&1 || true
+  done < <(
+    hdiutil info | awk -v prefix="${release_dir}/bundle/macos/rw." '
+      /^image-path[[:space:]]*:/ {
+        path = $0
+        sub(/^image-path[[:space:]]*:[[:space:]]*/, "", path)
+        in_target_image = index(path, prefix) == 1 && path ~ /\.dmg$/
+        next
+      }
+      in_target_image && /^\/dev\/disk[0-9]+[[:space:]]/ {
+        print $1
+        in_target_image = 0
+      }
+    '
+  )
+}
+
 create_plain_macos_dmg_fallback() {
   if [[ "${SCRIPTSCORE_DESKTOP_MACOS_PLAIN_DMG_FALLBACK:-0}" != "1" ]]; then
     return 1
@@ -109,6 +132,7 @@ create_plain_macos_dmg_fallback() {
   rm -f "${tmp_dmg}" "${dmg_path}"
 
   echo "warning: Tauri DMG bundling failed after producing ${app_bundle}; creating plain unsigned preview DMG." >&2
+  detach_macos_dmg_interstitials "${release_dir}"
   if ! hdiutil create -volname "${product_name}" -srcfolder "${app_bundle}" -ov -format UDZO "${tmp_dmg}"; then
     rm -f "${tmp_dmg}"
     return 1
@@ -118,6 +142,7 @@ create_plain_macos_dmg_fallback() {
     return 1
   fi
   echo "Created fallback macOS DMG: ${dmg_path}"
+  detach_macos_dmg_interstitials "${release_dir}"
 }
 
 if ! command -v cargo >/dev/null 2>&1; then
