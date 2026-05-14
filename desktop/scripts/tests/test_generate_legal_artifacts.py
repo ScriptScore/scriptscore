@@ -137,6 +137,22 @@ class GenerateLegalArtifactsTests(unittest.TestCase):
             "desktop/dist/bundled-runtime/python/lib/python3.12/site-packages/PIL/.dylibs/libjpeg.62.4.0.dylib",
             "desktop/dist/bundled-runtime/python/lib/python3.12/site-packages/paddle/libs/libphi.dylib",
             "desktop/dist/bundled-runtime/python/lib/python3.12/site-packages/shapely/.dylibs/libgeos.3.13.1.dylib",
+            "desktop/dist/bundled-runtime/python/lib/python3.12/site-packages/scipy/.dylibs/libgcc_s.1.1.dylib",
+            "desktop/dist/bundled-runtime/python/lib/python3.12/site-packages/scipy/.dylibs/libgfortran.5.dylib",
+            "desktop/dist/bundled-runtime/python/lib/python3.12/site-packages/scipy/.dylibs/libquadmath.0.dylib",
+            "desktop/dist/bundled-runtime/python/lib/python3.12/site-packages/torch/lib/libc10.dylib",
+            "desktop/dist/bundled-runtime/python/lib/python3.12/site-packages/torch/lib/libomp.dylib",
+            "desktop/dist/bundled-runtime/python/lib/python3.12/site-packages/torch/lib/libshm.dylib",
+            "desktop/dist/bundled-runtime/python/lib/python3.12/site-packages/torch/lib/libtorch.dylib",
+            "desktop/dist/bundled-runtime/python/lib/python3.12/site-packages/torch/lib/libtorch_cpu.dylib",
+            "desktop/dist/bundled-runtime/python/lib/python3.12/site-packages/torch/lib/libtorch_global_deps.dylib",
+            "desktop/dist/bundled-runtime/python/lib/python3.12/site-packages/torch/lib/libtorch_python.dylib",
+            "desktop/dist/bundled-runtime/python/lib/python3.12/site-packages/torchvision/.dylibs/libc++.1.0.dylib",
+            "desktop/dist/bundled-runtime/python/lib/python3.12/site-packages/torchvision/.dylibs/libjpeg.8.2.2.dylib",
+            "desktop/dist/bundled-runtime/python/lib/python3.12/site-packages/torchvision/.dylibs/libpng16.16.dylib",
+            "desktop/dist/bundled-runtime/python/lib/python3.12/site-packages/torchvision/.dylibs/libsharpyuv.0.1.2.dylib",
+            "desktop/dist/bundled-runtime/python/lib/python3.12/site-packages/torchvision/.dylibs/libwebp.7.2.0.dylib",
+            "desktop/dist/bundled-runtime/python/lib/python3.12/site-packages/torchvision/.dylibs/libz.1.3.1.dylib",
         ]
 
         for path in paths:
