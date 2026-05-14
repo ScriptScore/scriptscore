@@ -169,6 +169,8 @@ jobs:
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@v2
         with:
+          prefix-key: scriptscore-v1-rust
+          cache-bin: "false"
           workspaces: desktop/src-tauri -> target
 
       - name: Install Linux package dependencies
