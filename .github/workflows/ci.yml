@@ -279,6 +279,8 @@ jobs:
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@v2
         with:
+          prefix-key: scriptscore-v1-rust
+          cache-bin: "false"
           workspaces: desktop/src-tauri -> target
 
       - name: Prepare bundled runtime
@@ -310,6 +312,8 @@ jobs:
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@v2
         with:
+          prefix-key: scriptscore-v1-rust
+          cache-bin: "false"
           workspaces: desktop/src-tauri -> target
 
       - name: Generate rust-code-analysis report
@@ -379,6 +383,8 @@ jobs:
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@v2
         with:
+          prefix-key: scriptscore-v1-rust
+          cache-bin: "false"
           workspaces: desktop/src-tauri -> target
 
       - name: Prepare bundled runtime
@@ -410,6 +416,8 @@ jobs:
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@v2
         with:
+          prefix-key: scriptscore-v1-rust
+          cache-bin: "false"
           workspaces: desktop/src-tauri -> target
 
       - name: Generate cargo-geiger report
@@ -669,6 +677,8 @@ jobs:
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@v2
         with:
+          prefix-key: scriptscore-v1-rust
+          cache-bin: "false"
           workspaces: desktop/src-tauri -> target
 
       - name: Install cargo-tauri
@@ -756,6 +766,8 @@ jobs:
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@v2
         with:
+          prefix-key: scriptscore-v1-rust
+          cache-bin: "false"
           workspaces: desktop/src-tauri -> target
 
       - name: Install cargo-tauri
