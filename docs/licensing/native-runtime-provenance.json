@@ -37,6 +37,7 @@
       "path_patterns": [
         "desktop/dist/bundled-runtime/python/**/site-packages/scipy/**/*.so",
         "desktop/dist/bundled-runtime/python/**/site-packages/scipy/**/*.pyd",
+        "desktop/dist/bundled-runtime/python/**/site-packages/scipy/**/*.dylib",
         "desktop/dist/bundled-runtime/python/**/site-packages/scipy.libs/*"
       ],
       "source_package": "scipy 1.17.1 wheel",
@@ -109,15 +110,21 @@
       "path_patterns": [
         "desktop/dist/bundled-runtime/python/**/site-packages/torch/**/*.so",
         "desktop/dist/bundled-runtime/python/**/site-packages/torch/**/*.pyd",
+        "desktop/dist/bundled-runtime/python/**/site-packages/torch/**/*.dylib",
         "desktop/dist/bundled-runtime/python/**/site-packages/torchvision/**/*.so",
-        "desktop/dist/bundled-runtime/python/**/site-packages/torchvision/**/*.pyd"
+        "desktop/dist/bundled-runtime/python/**/site-packages/torchvision/**/*.pyd",
+        "desktop/dist/bundled-runtime/python/**/site-packages/torchvision/**/*.dylib"
       ],
-      "source_package": "torch 2.11.0+cpu and torchvision 0.26.0+cpu wheels",
+      "source_package": "torch 2.11.0 and torchvision 0.26.0 wheels",
       "license": "BSD-3-Clause",
       "obligations": "Include PyTorch/TorchVision notices and bundled native-library attributions from the wheel metadata.",
       "evidence": [
+        "torch-2.11.0.dist-info/METADATA",
+        "torch-2.11.0.dist-info/RECORD",
         "torch-2.11.0+cpu.dist-info/METADATA",
         "torch-2.11.0+cpu.dist-info/RECORD",
+        "torchvision-0.26.0.dist-info/METADATA",
+        "torchvision-0.26.0.dist-info/RECORD",
         "torchvision-0.26.0+cpu.dist-info/METADATA",
         "torchvision-0.26.0+cpu.dist-info/RECORD"
       ]
