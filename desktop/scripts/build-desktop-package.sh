@@ -44,6 +44,82 @@ bundle_selection_requires_portable_runtime() {
   return 1
 }
 
+create_plain_macos_dmg_fallback() {
+  if [[ "${SCRIPTSCORE_DESKTOP_MACOS_PLAIN_DMG_FALLBACK:-0}" != "1" ]]; then
+    return 1
+  fi
+  if [[ "$(uname -s)" != "Darwin" ]] || ! bundle_selection_includes "${BUNDLES}" "dmg"; then
+    return 1
+  fi
+
+  local release_dir bundle_macos_dir dmg_dir app_bundle candidate
+  if [[ -n "${TARGET}" ]]; then
+    release_dir="${DESKTOP_ROOT}/src-tauri/target/${TARGET}/release"
+  else
+    release_dir="${DESKTOP_ROOT}/src-tauri/target/release"
+  fi
+  bundle_macos_dir="${release_dir}/bundle/macos"
+  dmg_dir="${release_dir}/bundle/dmg"
+
+  if [[ ! -d "${bundle_macos_dir}" ]]; then
+    echo "warning: cannot create macOS DMG fallback; app bundle directory is missing: ${bundle_macos_dir}" >&2
+    return 1
+  fi
+
+  app_bundle=""
+  for candidate in "${bundle_macos_dir}"/*.app; do
+    if [[ -d "${candidate}" ]]; then
+      app_bundle="${candidate}"
+      break
+    fi
+  done
+  if [[ -z "${app_bundle}" ]]; then
+    echo "warning: cannot create macOS DMG fallback; no .app bundle found in ${bundle_macos_dir}" >&2
+    return 1
+  fi
+
+  local app_name product_name version arch_suffix dmg_name dmg_path tmp_dmg plist
+  app_name=$(basename "${app_bundle}" .app)
+  product_name="${app_name}"
+  version=""
+  plist="${app_bundle}/Contents/Info.plist"
+  if [[ -f "${plist}" ]]; then
+    product_name=$(/usr/libexec/PlistBuddy -c "Print :CFBundleName" "${plist}" 2>/dev/null || true)
+    version=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "${plist}" 2>/dev/null || true)
+  fi
+  product_name="${product_name:-${app_name}}"
+  version="${version:-0.0.0}"
+
+  case "${TARGET:-$(uname -m)}" in
+    x86_64-apple-darwin | x86_64)
+      arch_suffix="x64"
+      ;;
+    aarch64-apple-darwin | arm64)
+      arch_suffix="aarch64"
+      ;;
+    *)
+      arch_suffix="$(uname -m)"
+      ;;
+  esac
+
+  mkdir -p "${dmg_dir}"
+  dmg_name="${app_name}_${version}_${arch_suffix}.dmg"
+  dmg_path="${dmg_dir}/${dmg_name}"
+  tmp_dmg="${dmg_dir}/.${dmg_name}.tmp.dmg"
+  rm -f "${tmp_dmg}" "${dmg_path}"
+
+  echo "warning: Tauri DMG bundling failed after producing ${app_bundle}; creating plain unsigned preview DMG." >&2
+  if ! hdiutil create -volname "${product_name}" -srcfolder "${app_bundle}" -ov -format UDZO "${tmp_dmg}"; then
+    rm -f "${tmp_dmg}"
+    return 1
+  fi
+  if ! mv "${tmp_dmg}" "${dmg_path}"; then
+    rm -f "${tmp_dmg}"
+    return 1
+  fi
+  echo "Created fallback macOS DMG: ${dmg_path}"
+}
+
 if ! command -v cargo >/dev/null 2>&1; then
   echo "error: cargo is required to package the desktop app." >&2
   exit 1
@@ -118,7 +194,20 @@ if [[ "${SCRIPTSCORE_DESKTOP_VERBOSE_TAURI:-0}" == "1" ]]; then
   build_cmd+=(--verbose)
 fi
 
+set +e
 "${build_cmd[@]}"
+build_status=$?
+set -e
+
+if [[ ${build_status} -ne 0 ]]; then
+  if create_plain_macos_dmg_fallback; then
+    build_status=0
+  fi
+fi
+
+if [[ ${build_status} -ne 0 ]]; then
+  exit "${build_status}"
+fi
 
 echo "Desktop package build finished"
 echo "Artifacts root: ${DESKTOP_ROOT}/src-tauri/target"

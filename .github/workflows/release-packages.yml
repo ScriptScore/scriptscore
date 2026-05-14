@@ -314,6 +314,9 @@ jobs:
             export NO_STRIP=true
             export SCRIPTSCORE_DESKTOP_VERBOSE_TAURI=1
           fi
+          if [[ "${RUNNER_OS}" == "macOS" ]]; then
+            export SCRIPTSCORE_DESKTOP_MACOS_PLAIN_DMG_FALLBACK=1
+          fi
           ./desktop/scripts/build-desktop-package.sh "${SCRIPTSCORE_DESKTOP_BUNDLES}"
 
       - name: Smoke AppImage extraction
