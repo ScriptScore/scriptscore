@@ -9,9 +9,22 @@ BUNDLES="${SCRIPTSCORE_DESKTOP_BUNDLES:-appimage}"
 TARGET="${SCRIPTSCORE_DESKTOP_TARGET:-}"
 AUTO_PORTABLE_PYTHON="${SCRIPTSCORE_DESKTOP_AUTO_PORTABLE_PYTHON:-1}"
 PORTABLE_PYTHON_DIR="${SCRIPTSCORE_DESKTOP_PORTABLE_PYTHON_DIR:-${DESKTOP_ROOT}/dist/portable-python}"
+TAURI_CONFIG="${DESKTOP_ROOT}/src-tauri/tauri.conf.json"
+PYTHON_BIN="${SCRIPTSCORE_DESKTOP_PYTHON:-}"
 
 if [[ $# -gt 0 ]]; then
   BUNDLES=$1
+fi
+
+if [[ -z "${PYTHON_BIN}" ]]; then
+  if command -v python3 >/dev/null 2>&1; then
+    PYTHON_BIN=python3
+  elif command -v python >/dev/null 2>&1; then
+    PYTHON_BIN=python
+  else
+    echo "error: python is required to prepare desktop release versions." >&2
+    exit 1
+  fi
 fi
 
 bundle_selection_includes() {
@@ -42,6 +55,34 @@ bundle_selection_requires_portable_runtime() {
     fi
   done
   return 1
+}
+
+bundle_selection_without() {
+  local selected=$1
+  local excluded=$2
+  local bundle
+  local -a selected_bundles
+  local kept=()
+
+  if [[ -z "${selected}" || "${selected}" == "${excluded}" ]]; then
+    return 0
+  fi
+
+  if [[ "${selected}" == "all" ]]; then
+    selected="app,appimage,deb,dmg,msi,nsis,rpm"
+  fi
+
+  selected="${selected// /}"
+  IFS=',' read -r -a selected_bundles <<<"${selected}"
+  for bundle in "${selected_bundles[@]}"; do
+    [[ -n "${bundle}" && "${bundle}" != "${excluded}" ]] || continue
+    kept+=("${bundle}")
+  done
+
+  local old_ifs=${IFS}
+  IFS=,
+  echo "${kept[*]}"
+  IFS=${old_ifs}
 }
 
 detach_macos_dmg_interstitials() {
@@ -199,39 +240,73 @@ if [[ "$(uname -s)" == "Linux" ]] && bundle_selection_includes "${BUNDLES}" "app
   fi
 fi
 
-build_cmd=(
-  cargo
-  tauri
-  build
-  --config
-  "${DESKTOP_ROOT}/src-tauri/tauri.conf.json"
-)
+build_desktop_packages() {
+  local config=$1
+  local bundles=$2
+  local -a build_cmd=(
+    cargo
+    tauri
+    build
+    --config
+    "${config}"
+  )
 
-if [[ -n "${BUNDLES}" ]]; then
-  build_cmd+=(--bundles "${BUNDLES}")
-fi
-
-if [[ -n "${TARGET}" ]]; then
-  build_cmd+=(--target "${TARGET}")
-fi
-
-if [[ "${SCRIPTSCORE_DESKTOP_VERBOSE_TAURI:-0}" == "1" ]]; then
-  build_cmd+=(--verbose)
-fi
-
-set +e
-"${build_cmd[@]}"
-build_status=$?
-set -e
-
-if [[ ${build_status} -ne 0 ]]; then
-  if create_plain_macos_dmg_fallback; then
-    build_status=0
+  if [[ -n "${bundles}" ]]; then
+    build_cmd+=(--bundles "${bundles}")
   fi
-fi
 
-if [[ ${build_status} -ne 0 ]]; then
-  exit "${build_status}"
+  if [[ -n "${TARGET}" ]]; then
+    build_cmd+=(--target "${TARGET}")
+  fi
+
+  if [[ "${SCRIPTSCORE_DESKTOP_VERBOSE_TAURI:-0}" == "1" ]]; then
+    build_cmd+=(--verbose)
+  fi
+
+  set +e
+  "${build_cmd[@]}"
+  build_status=$?
+  set -e
+
+  if [[ ${build_status} -ne 0 ]]; then
+    if create_plain_macos_dmg_fallback; then
+      build_status=0
+    fi
+  fi
+
+  if [[ ${build_status} -ne 0 ]]; then
+    exit "${build_status}"
+  fi
+}
+
+if bundle_selection_includes "${BUNDLES}" "msi"; then
+  public_version=$(
+    "${PYTHON_BIN}" "${SCRIPT_DIR}/project_release_version.py" tauri-version "${TAURI_CONFIG}"
+  )
+  msi_version=$(
+    "${PYTHON_BIN}" "${SCRIPT_DIR}/project_release_version.py" msi-version "${public_version}"
+  )
+  non_msi_bundles=$(bundle_selection_without "${BUNDLES}" "msi")
+
+  if [[ "${msi_version}" != "${public_version}" ]]; then
+    if [[ -n "${non_msi_bundles}" ]]; then
+      echo "Building non-MSI desktop packages with public version ${public_version}:"
+      echo "  ${non_msi_bundles}"
+      build_desktop_packages "${TAURI_CONFIG}" "${non_msi_bundles}"
+    fi
+
+    projected_config="${DESKTOP_ROOT}/src-tauri/.tauri.msi.conf.json"
+    "${PYTHON_BIN}" "${SCRIPT_DIR}/project_release_version.py" write-tauri-config \
+      --source "${TAURI_CONFIG}" \
+      --output "${projected_config}" \
+      --version "${msi_version}"
+    echo "Building MSI with native version projection ${public_version} -> ${msi_version}"
+    build_desktop_packages "${projected_config}" "msi"
+  else
+    build_desktop_packages "${TAURI_CONFIG}" "${BUNDLES}"
+  fi
+else
+  build_desktop_packages "${TAURI_CONFIG}" "${BUNDLES}"
 fi
 
 echo "Desktop package build finished"
