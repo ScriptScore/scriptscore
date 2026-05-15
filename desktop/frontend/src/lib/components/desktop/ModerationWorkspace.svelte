@@ -56,6 +56,16 @@
     | { kind: 'page'; cardKey: string; card: ModerationCard }
     | { kind: 'rubric'; cardKey: string; card: ModerationCard };
 
+  type CardPointerDragState = {
+    cardKey: string;
+    pointerId: number;
+    startX: number;
+    startY: number;
+    latestX: number;
+    latestY: number;
+    dragging: boolean;
+  };
+
   export let workspaceState: ExamWorkspaceState;
   export let studentDisplayNamesByRef: Record<string, string> = {};
   export let busy = false;
@@ -96,6 +106,7 @@
   let selectedQuestion: ModerationQuestionGroup | null = null;
   let selectedQuestionCards: ModerationCard[] = [];
   let scoreLanes: number[] = [];
+  let pointerDragState: CardPointerDragState | null = null;
   let lanesRenderKey = 0;
   let cardColumnWidthStyle = '15.2rem';
   let cardMinHeightStyle = '11rem';
@@ -117,6 +128,10 @@
   }
 
   function laneKey(questionId: string, score: number): string {
+    return `${questionId}:${score}`;
+  }
+
+  function scoreLaneDatasetValue(questionId: string, score: number): string {
     return `${questionId}:${score}`;
   }
 
@@ -616,6 +631,123 @@
     }
   }
 
+  function isInteractiveCardTarget(target: EventTarget | null): boolean {
+    return (
+      target instanceof Element &&
+      target.closest(
+        'button, a, input, textarea, select, [role="button"], [contenteditable="true"], [data-moderation-selectable-text]'
+      ) !== null
+    );
+  }
+
+  function scoreLaneAtPoint(clientX: number, clientY: number): { questionId: string; score: number } | null {
+    const element = document.elementFromPoint(clientX, clientY);
+    const laneElement = element?.closest<HTMLElement>('[data-moderation-score-lane]');
+    const value = laneElement?.dataset.moderationScoreLane ?? '';
+    const separatorIndex = value.lastIndexOf(':');
+    if (separatorIndex < 1) {
+      return null;
+    }
+    const questionId = value.slice(0, separatorIndex);
+    const score = Number(value.slice(separatorIndex + 1));
+    if (!questionId || !Number.isFinite(score)) {
+      return null;
+    }
+    return { questionId, score };
+  }
+
+  function updatePointerHoverLane(state: CardPointerDragState): void {
+    const lane = scoreLaneAtPoint(state.latestX, state.latestY);
+    hoverLaneKey = lane ? laneKey(lane.questionId, lane.score) : null;
+  }
+
+  function releaseCardPointerCapture(element: HTMLElement, pointerId: number): void {
+    if (typeof element.releasePointerCapture !== 'function') {
+      return;
+    }
+    if (typeof element.hasPointerCapture === 'function' && !element.hasPointerCapture(pointerId)) {
+      return;
+    }
+    element.releasePointerCapture(pointerId);
+  }
+
+  function handleCardPointerDown(event: PointerEvent, card: ModerationCard) {
+    if (busy || event.button !== 0 || isInteractiveCardTarget(event.target)) {
+      return;
+    }
+    pointerDragState = {
+      cardKey: cardKey(card.studentRef, card.answer.questionId),
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      latestX: event.clientX,
+      latestY: event.clientY,
+      dragging: false
+    };
+    const cardElement = event.currentTarget as HTMLElement;
+    if (typeof cardElement.setPointerCapture === 'function') {
+      cardElement.setPointerCapture(event.pointerId);
+    }
+  }
+
+  function handleCardPointerMove(event: PointerEvent) {
+    if (!pointerDragState || event.pointerId !== pointerDragState.pointerId) {
+      return;
+    }
+    pointerDragState = {
+      ...pointerDragState,
+      latestX: event.clientX,
+      latestY: event.clientY
+    };
+    const moved =
+      Math.abs(pointerDragState.latestX - pointerDragState.startX) > 4 ||
+      Math.abs(pointerDragState.latestY - pointerDragState.startY) > 4;
+    if (!pointerDragState.dragging && moved) {
+      pointerDragState = {
+        ...pointerDragState,
+        dragging: true
+      };
+      draggingCardKey = pointerDragState.cardKey;
+    }
+    if (pointerDragState.dragging) {
+      event.preventDefault();
+      updatePointerHoverLane(pointerDragState);
+    }
+  }
+
+  async function handleCardPointerUp(event: PointerEvent) {
+    if (!pointerDragState || event.pointerId !== pointerDragState.pointerId) {
+      return;
+    }
+    const completedDrag = pointerDragState.dragging;
+    const draggedKey = pointerDragState.cardKey;
+    const lane = scoreLaneAtPoint(event.clientX, event.clientY);
+    releaseCardPointerCapture(event.currentTarget as HTMLElement, event.pointerId);
+    pointerDragState = null;
+    hoverLaneKey = null;
+    draggingCardKey = null;
+    if (!completedDrag || !lane || !selectedQuestion || lane.questionId !== selectedQuestion.questionId) {
+      return;
+    }
+    const card = selectedQuestion.cards.find(
+      (item) => cardKey(item.studentRef, item.answer.questionId) === draggedKey
+    );
+    if (!card) {
+      return;
+    }
+    await handleSaveScore(card, lane.score);
+  }
+
+  function handleCardPointerCancel(event: PointerEvent) {
+    if (!pointerDragState || event.pointerId !== pointerDragState.pointerId) {
+      return;
+    }
+    releaseCardPointerCapture(event.currentTarget as HTMLElement, event.pointerId);
+    pointerDragState = null;
+    hoverLaneKey = null;
+    draggingCardKey = null;
+  }
+
   function handleDragStart(event: DragEvent, card: ModerationCard) {
     draggingCardKey = cardKey(card.studentRef, card.answer.questionId);
     event.dataTransfer?.setData('text/plain', draggingCardKey);
@@ -886,6 +1018,7 @@
                 role="group"
                 aria-label={`Score lane ${score}`}
                 data-testid={`score-lane-${score}`}
+                data-moderation-score-lane={scoreLaneDatasetValue(selectedQuestion.questionId, score)}
                 class={`space-y-2 rounded-lg px-0 py-0 ${
                   hoverLaneKey === laneKey(selectedQuestion.questionId, score) ? 'bg-surface-card-subtle' : ''
                 }`}
@@ -908,17 +1041,23 @@
                     {@const compactCard = isCompactCard(card, compactCardsByKey)}
                     <article
                       data-testid={`moderation-card-${card.studentRef}-${card.answer.questionId}`}
-                      draggable={!busy}
-                      class={`flex flex-col rounded-lg border border-border-default bg-surface-card-subtle text-xs ${
+                      draggable={false}
+                      class={`flex select-none flex-col rounded-lg border border-border-default bg-surface-card-subtle text-xs ${
                         compactCard ? 'gap-1 p-1.5' : 'gap-2 p-2'
                       } ${
                         compactCard ? 'w-fit max-w-full self-start justify-self-start' : 'w-full'
                       } ${
                         draggingCardKey === cardKey(card.studentRef, card.answer.questionId)
                           ? 'opacity-70'
-                          : ''
+                          : busy
+                            ? ''
+                            : 'cursor-grab active:cursor-grabbing'
                       }`}
                       style:min-height={compactCard ? '0' : cardMinHeightStyle}
+                      onpointerdown={(event) => handleCardPointerDown(event, card)}
+                      onpointermove={handleCardPointerMove}
+                      onpointerup={handleCardPointerUp}
+                      onpointercancel={handleCardPointerCancel}
                       ondragstart={(event) => handleDragStart(event, card)}
                       ondragend={handleDragEnd}
                     >
@@ -993,7 +1132,8 @@
                       {#if !compactCard}
                         {#if evidenceView === 'text' || evidenceView === 'both'}
                           <div
-                            class="overflow-auto rounded-md bg-surface-canvas px-2 py-1.5 text-[11px] leading-4 text-text-primary"
+                            data-moderation-selectable-text="true"
+                            class="select-text overflow-auto rounded-md bg-surface-canvas px-2 py-1.5 text-[11px] leading-4 text-text-primary"
                             style:max-height={textBlockMaxHeightStyle}
                             style:font-size={evidenceFontSizeStyle}
                             style:line-height={evidenceLineHeightStyle}
@@ -1016,12 +1156,13 @@
                               class="w-full object-contain"
                               style:max-height={imageBlockMaxHeightStyle}
                               loading="lazy"
+                              draggable="false"
                             />
                           </div>
                         {/if}
 
                         <textarea
-                          class="min-h-14 w-full resize-none overflow-auto rounded-md border border-border-default bg-surface-canvas px-2 py-1.5 text-[11px] leading-4 text-text-primary outline-none transition-colors focus:border-border-strong focus:ring-2 focus:ring-focus-ring"
+                          class="min-h-14 w-full select-text resize-none overflow-auto rounded-md border border-border-default bg-surface-canvas px-2 py-1.5 text-[11px] leading-4 text-text-primary outline-none transition-colors focus:border-border-strong focus:ring-2 focus:ring-focus-ring"
                           placeholder="Feedback"
                           rows="3"
                           style:max-height={feedbackBlockMaxHeightStyle}

@@ -306,6 +306,76 @@ describe('ModerationWorkspace', () => {
     expect(onSaveModeratedScore).toHaveBeenCalledWith('student_1', 'question_1', 5);
   });
 
+  it('moves a card with pointer events without native data transfer support', async () => {
+    const onSaveModeratedScore = vi.fn().mockResolvedValue(undefined);
+    render(ModerationWorkspace, {
+      workspaceState: moderationWorkspaceState(),
+      busy: false,
+      onSaveModeratedScore,
+      onSaveModeratedFeedback: vi.fn(),
+      onSetQuestionReviewed: vi.fn()
+    });
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Add lane' }));
+    await fireEvent.click(screen.getByRole('button', { name: '5 pt' }));
+    await tick();
+
+    const card = await screen.findByTestId('moderation-card-student_1-question_1');
+    const lane = screen.getByTestId('score-lane-5');
+    Object.defineProperty(card, 'setPointerCapture', { value: vi.fn(), configurable: true });
+    Object.defineProperty(card, 'releasePointerCapture', { value: vi.fn(), configurable: true });
+    const originalElementFromPoint = document.elementFromPoint;
+    Object.defineProperty(document, 'elementFromPoint', {
+      value: vi.fn().mockReturnValue(lane),
+      configurable: true
+    });
+
+    await fireEvent.pointerDown(card, { button: 0, pointerId: 7, clientX: 10, clientY: 10 });
+    await fireEvent.pointerMove(card, { pointerId: 7, clientX: 30, clientY: 10 });
+    await fireEvent.pointerUp(card, { pointerId: 7, clientX: 30, clientY: 10 });
+
+    expect(onSaveModeratedScore).toHaveBeenCalledWith('student_1', 'question_1', 5);
+    Object.defineProperty(document, 'elementFromPoint', {
+      value: originalElementFromPoint,
+      configurable: true
+    });
+  });
+
+  it('does not start a card move when selecting parsed answer text', async () => {
+    const onSaveModeratedScore = vi.fn().mockResolvedValue(undefined);
+    render(ModerationWorkspace, {
+      workspaceState: moderationWorkspaceState(),
+      busy: false,
+      onSaveModeratedScore,
+      onSaveModeratedFeedback: vi.fn(),
+      onSetQuestionReviewed: vi.fn()
+    });
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Add lane' }));
+    await fireEvent.click(screen.getByRole('button', { name: '5 pt' }));
+    await tick();
+
+    const parsedText = screen
+      .getByText('accurate')
+      .closest('[data-moderation-selectable-text]') as HTMLElement;
+    const lane = screen.getByTestId('score-lane-5');
+    const originalElementFromPoint = document.elementFromPoint;
+    Object.defineProperty(document, 'elementFromPoint', {
+      value: vi.fn().mockReturnValue(lane),
+      configurable: true
+    });
+
+    await fireEvent.pointerDown(parsedText, { button: 0, pointerId: 8, clientX: 10, clientY: 10 });
+    await fireEvent.pointerMove(parsedText, { pointerId: 8, clientX: 30, clientY: 10 });
+    await fireEvent.pointerUp(parsedText, { pointerId: 8, clientX: 30, clientY: 10 });
+
+    expect(onSaveModeratedScore).not.toHaveBeenCalled();
+    Object.defineProperty(document, 'elementFromPoint', {
+      value: originalElementFromPoint,
+      configurable: true
+    });
+  });
+
   it('renders a global size slider and size-driven card sizing', async () => {
     render(ModerationWorkspace, {
       workspaceState: moderationWorkspaceState(),
@@ -330,6 +400,9 @@ describe('ModerationWorkspace', () => {
       'grid-template-columns: repeat(auto-fill, minmax(min(100%, 15.2rem), 15.2rem));'
     );
     expect(cardGrid?.getAttribute('style')).not.toContain('1fr');
+    expect(card.className).toContain('select-none');
+    expect(textEvidence?.className).toContain('select-text');
+    expect(feedback.className).toContain('select-text');
     expect(card.getAttribute('style')).toContain('min-height: 11rem;');
     expect(card.getAttribute('style')).not.toMatch(/(^|;)\s*height:/);
     expect(textEvidence?.getAttribute('style')).toContain('max-height: 5.777777777777778rem;');
@@ -679,7 +752,7 @@ describe('ModerationWorkspace', () => {
     ).toBeTruthy();
   });
 
-  it('toggles an answer card into mini format without losing identity, status, or drag', async () => {
+  it('toggles an answer card into mini format without losing identity, status, or pointer movement', async () => {
     const state = moderationWorkspaceState();
     state.studentWorkflow!.submissions[0]!.answers[0]!.reviewRequired = true;
 
@@ -692,7 +765,7 @@ describe('ModerationWorkspace', () => {
     });
 
     const card = await screen.findByTestId('moderation-card-student_1-question_1');
-    expect(card.getAttribute('draggable')).toBe('true');
+    expect(card.getAttribute('draggable')).toBe('false');
     expect(screen.getByText('student_1')).toBeTruthy();
     expect(screen.getByText('Review')).toBeTruthy();
 
@@ -710,7 +783,7 @@ describe('ModerationWorkspace', () => {
     expect(compactClasses).toContain('w-fit');
     expect(compactClasses).not.toContain('w-full');
     expect(card.getAttribute('style')).toContain('min-height: 0');
-    expect(card.getAttribute('draggable')).toBe('true');
+    expect(card.getAttribute('draggable')).toBe('false');
   });
 
   it('moves mini cards to the end of their score lane', async () => {
