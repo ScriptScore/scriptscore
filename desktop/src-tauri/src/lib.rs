@@ -10,6 +10,7 @@ mod protocol;
 mod secrets;
 pub mod state;
 pub mod test_support;
+mod updates;
 mod worker;
 mod worker_runtime;
 mod workflow_status;
@@ -45,6 +46,7 @@ pub fn run() {
             commands::get_default_projects_root,
             commands::project_exists,
             commands::get_legal_disclosure,
+            updates::check_app_update,
             commands::run_smoke_ping,
             commands::list_llm_models,
             commands::validate_llm_model,

@@ -4,6 +4,7 @@ export {
   isDesktopHost,
   toDesktopAssetUrl
 } from './desktop/shared';
+export { checkAppUpdate, getAppVersion, openExternalUrl } from './desktop/app';
 export {
   createProject,
   getDefaultProjectsRoot,

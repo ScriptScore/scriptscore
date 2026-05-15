@@ -12,14 +12,25 @@ const eventMocks = vi.hoisted(() => ({
   listen: vi.fn()
 }));
 
+const appMocks = vi.hoisted(() => ({
+  getVersion: vi.fn()
+}));
+
+const shellMocks = vi.hoisted(() => ({
+  open: vi.fn()
+}));
+
 vi.mock('@tauri-apps/api/core', () => coreMocks);
 vi.mock('@tauri-apps/api/event', () => eventMocks);
+vi.mock('@tauri-apps/api/app', () => appMocks);
+vi.mock('@tauri-apps/plugin-shell', () => shellMocks);
 
 import {
   approveTemplateSetup,
   RUNTIME_JOB_EVENT_NAME,
   beginStudentWorkflow,
   cancelActiveJob,
+  checkAppUpdate,
   closeCurrentProject,
   computeLmsBindingToken,
   confirmStudentAlignment,
@@ -48,6 +59,7 @@ import {
   reanalyzeQuestion,
   replaceTemplatePdf,
   exportStampedTemplatePdf,
+  getAppVersion,
   resolveLmsStudentRef,
   listenRuntimeJobEvents,
   runStudentIntake,
@@ -71,6 +83,7 @@ import {
   runResultsExport,
   runResultsLmsUpload,
   retryResultsLmsUpload,
+  openExternalUrl,
   toDesktopAssetUrl
 } from './desktop';
 
@@ -92,6 +105,8 @@ describe('desktop API wrapper', () => {
     coreMocks.isTauri.mockReset();
     coreMocks.convertFileSrc.mockClear();
     eventMocks.listen.mockReset();
+    appMocks.getVersion.mockReset();
+    shellMocks.open.mockReset();
     appSettings.save(defaultAppSettings);
   });
 
@@ -183,6 +198,53 @@ describe('desktop API wrapper', () => {
     coreMocks.isTauri.mockReturnValue(true);
     expect(toDesktopAssetUrl('/tmp/example.png')).toBe('asset:///tmp/example.png');
     expect(coreMocks.convertFileSrc).toHaveBeenCalledWith('/tmp/example.png');
+  });
+
+  it('reads the packaged app version only inside the desktop host', async () => {
+    coreMocks.isTauri.mockReturnValue(false);
+    await expect(getAppVersion()).resolves.toBeNull();
+    expect(appMocks.getVersion).not.toHaveBeenCalled();
+
+    coreMocks.isTauri.mockReturnValue(true);
+    appMocks.getVersion.mockResolvedValue('0.1.0-rc.1');
+    await expect(getAppVersion()).resolves.toBe('0.1.0-rc.1');
+  });
+
+  it('checks for stable app updates through the desktop host with browser fallback', async () => {
+    coreMocks.isTauri.mockReturnValue(false);
+    await expect(checkAppUpdate()).resolves.toEqual(
+      expect.objectContaining({
+        installedVersion: 'Browser preview',
+        status: 'unavailable',
+        updateAvailable: false
+      })
+    );
+    expect(coreMocks.invoke).not.toHaveBeenCalled();
+
+    coreMocks.isTauri.mockReturnValue(true);
+    coreMocks.invoke.mockResolvedValueOnce({
+      installedVersion: '0.1.0-rc.1',
+      latestStableVersion: '0.1.0',
+      latestStableTag: 'v0.1.0',
+      releaseUrl: 'https://github.com/ScriptScore/scriptscore/releases/tag/v0.1.0',
+      updateAvailable: true,
+      status: 'update_available',
+      message: 'A newer stable ScriptScore Desktop release is available.'
+    });
+
+    await checkAppUpdate();
+
+    expect(coreMocks.invoke).toHaveBeenCalledWith('check_app_update', {});
+  });
+
+  it('opens external update URLs through the shell plugin inside Tauri', async () => {
+    coreMocks.isTauri.mockReturnValue(true);
+
+    await openExternalUrl('https://github.com/ScriptScore/scriptscore/releases/tag/v0.1.0');
+
+    expect(shellMocks.open).toHaveBeenCalledWith(
+      'https://github.com/ScriptScore/scriptscore/releases/tag/v0.1.0'
+    );
   });
 
   it('passes through Canvas and project query wrappers', async () => {

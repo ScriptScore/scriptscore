@@ -6,7 +6,7 @@
   export let title = 'Confirm action';
   export let description = '';
   export let confirmLabel = 'Confirm';
-  export let cancelLabel = 'Cancel';
+  export let cancelLabel: string | null = 'Cancel';
   export let destructive = false;
   export let busy = false;
   export let onCancel: (() => void) | null = null;
@@ -27,7 +27,9 @@
         {description}
       </p>
       <div class="mt-5 flex justify-end gap-2">
-        <DesktopButton size="compact" onclick={() => onCancel?.()}>{cancelLabel}</DesktopButton>
+        {#if cancelLabel}
+          <DesktopButton size="compact" onclick={() => onCancel?.()}>{cancelLabel}</DesktopButton>
+        {/if}
         <DesktopButton
           size="compact"
           variant={destructive ? 'destructive' : 'primary'}

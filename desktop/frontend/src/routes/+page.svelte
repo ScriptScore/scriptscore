@@ -19,6 +19,7 @@
   import { ConfirmDialog, DesktopButton, Surface } from '$lib/components/desktop/ui';
   import {
     cancelActiveJob,
+    checkAppUpdate,
     closeCurrentProject,
     computeLmsBindingToken,
     createProject,
@@ -30,12 +31,14 @@
     finalizeReadyResults,
     generateQuestionRubric,
     getJobTrace,
+    getAppVersion,
     getDefaultProjectsRoot,
     getExamWorkspaceState,
     getLmsRosterCacheState,
     isDesktopHost,
     listJobTraces,
     listVisionModels,
+    openExternalUrl,
     openProject,
     previewResultsLmsReport,
     projectExists,
@@ -83,6 +86,7 @@
   import { resultsWorkspaceView } from '$lib/stores/resultsWorkspaceView';
   import type {
     AppSettings,
+    AppUpdateCheck,
     CreateProjectInput,
     ExamWorkspaceState,
     ProjectConfig,
@@ -104,7 +108,7 @@
     title: string;
     message: string;
     confirmLabel: string;
-    cancelLabel: string;
+    cancelLabel: string | null;
     destructive: boolean;
     resolve: (confirmed: boolean) => void;
   };
@@ -140,6 +144,9 @@
   let busyAction: BusyAction = null;
   let actionError: string | null = null;
   let runtimeResult: SmokePingResult | null = null;
+  let appVersion: string | null = null;
+  let updateCheck: AppUpdateCheck | null = null;
+  let updateBusy = false;
   let workspaceState: ExamWorkspaceState | null = null;
   let questionDrafts: QuestionEdit[] = [];
   let projectConfigDraft: ProjectConfig | null = null;
@@ -177,6 +184,7 @@
 
   const hasDesktopHost = isDesktopHost();
   $: analysisInProgress = activeAnalysisJobKeys.size > 0;
+  $: effectiveUpdateAvailable = Boolean(updateCheck?.updateAvailable);
 
   let createInput: CreateProjectInput = {
     displayName: '',
@@ -447,10 +455,12 @@
     theme.init();
     appSettings.init();
     void (async () => {
+      appVersion = await getAppVersion();
       await ensureRuntimeJobBridge();
       await refreshShellState();
       await loadDefaultProjectsRoot();
       await loadWorkspaceState();
+      await refreshStableUpdateCheck({ silent: true });
     })();
 
     return () => {
@@ -1079,6 +1089,75 @@
       await refreshShellState();
     } finally {
       busyAction = null;
+    }
+  }
+
+  async function refreshStableUpdateCheck(options: { silent: boolean } = { silent: false }) {
+    if (!hasDesktopHost || updateBusy) {
+      return;
+    }
+
+    updateBusy = true;
+    try {
+      const next = await checkAppUpdate();
+      updateCheck = next;
+      if (next.installedVersion && next.installedVersion !== 'Unknown') {
+        appVersion = next.installedVersion;
+      }
+      if (options.silent) {
+        return;
+      } else if (!next.updateAvailable) {
+        showNoStableUpdateDialog(next);
+      }
+    } catch (error) {
+      updateCheck = {
+        installedVersion: appVersion ?? 'Unknown',
+        latestStableVersion: null,
+        latestStableTag: null,
+        releaseUrl: null,
+        updateAvailable: false,
+        status: 'unavailable',
+        message: `Could not check for updates: ${String(error)}`
+      };
+      if (!options.silent) {
+        showNoStableUpdateDialog(updateCheck);
+      }
+    } finally {
+      updateBusy = false;
+    }
+  }
+
+  function showNoStableUpdateDialog(check: AppUpdateCheck) {
+    if (check.status === 'unavailable') {
+      pendingOperatorConfirmation = {
+        title: 'Update check unavailable',
+        message: 'ScriptScore could not check for updates right now.',
+        confirmLabel: 'OK',
+        cancelLabel: null,
+        destructive: false,
+        resolve: () => {}
+      };
+      return;
+    }
+
+    pendingOperatorConfirmation = {
+      title: 'No updates',
+      message:
+        check.status === 'no_stable_release'
+          ? 'No release has been published yet.'
+          : 'You are on the current release. No updates are available.',
+      confirmLabel: 'OK',
+      cancelLabel: null,
+      destructive: false,
+      resolve: () => {}
+    };
+  }
+
+  async function handleDownloadUpdate(url: string) {
+    try {
+      await openExternalUrl(url);
+    } catch (error) {
+      actionError = String(error);
     }
   }
 
@@ -1955,6 +2034,7 @@
       <ProjectRail
         activeWorkflowStep={$workspaceView.activeWorkflowStep}
         attentionByStep={attentionByStep}
+        updateAvailable={effectiveUpdateAvailable}
         hasDesktopHost={hasDesktopHost}
         busy={busyAction !== null}
         onOpenProject={handleOpenProject}
@@ -2113,6 +2193,10 @@
               settings={settingsDraft}
               busy={busyAction === 'saveSetup' || busyAction === 'smoke'}
               smokeResult={runtimeResult}
+              {appVersion}
+              {updateCheck}
+              {updateBusy}
+              updateAvailable={effectiveUpdateAvailable}
               {hasDesktopHost}
               {resolvedProjectsDirectory}
               hasCurrentProject={Boolean(workspaceState?.project ?? $shellState.currentProject)}
@@ -2121,6 +2205,8 @@
               visionModelsError={visionModelsError}
               onSettingsChange={handleSettingsChange}
               onRuntimeCheck={handleRuntimeCheck}
+              onCheckForUpdates={() => refreshStableUpdateCheck({ silent: false })}
+              onDownloadUpdate={handleDownloadUpdate}
               onOpenTraceHistory={openTraceHistory}
               onChooseProjectsDirectory={chooseProjectsDirectory}
               onClearProjectsDirectory={clearProjectsDirectory}
@@ -2167,6 +2253,10 @@
         settings={settingsDraft}
         busy={busyAction === 'saveSetup' || busyAction === 'smoke'}
         smokeResult={runtimeResult}
+        {appVersion}
+        {updateCheck}
+        {updateBusy}
+        updateAvailable={effectiveUpdateAvailable}
         {hasDesktopHost}
         {resolvedProjectsDirectory}
         hasCurrentProject={Boolean(workspaceState?.project ?? $shellState.currentProject)}
@@ -2175,6 +2265,8 @@
         visionModelsError={visionModelsError}
         onSettingsChange={handleSettingsChange}
         onRuntimeCheck={handleRuntimeCheck}
+        onCheckForUpdates={() => refreshStableUpdateCheck({ silent: false })}
+        onDownloadUpdate={handleDownloadUpdate}
         onOpenTraceHistory={openTraceHistory}
         onChooseProjectsDirectory={chooseProjectsDirectory}
         onClearProjectsDirectory={clearProjectsDirectory}
@@ -2237,7 +2329,7 @@
   title={pendingOperatorConfirmation?.title ?? 'Confirm action'}
   description={pendingOperatorConfirmation?.message ?? ''}
   confirmLabel={pendingOperatorConfirmation?.confirmLabel ?? 'Confirm'}
-  cancelLabel={pendingOperatorConfirmation?.cancelLabel ?? 'Cancel'}
+  cancelLabel={pendingOperatorConfirmation ? pendingOperatorConfirmation.cancelLabel : 'Cancel'}
   destructive={pendingOperatorConfirmation?.destructive ?? false}
   onCancel={() => resolveOperatorConfirmation(false)}
   onConfirm={() => resolveOperatorConfirmation(true)}

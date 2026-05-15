@@ -72,4 +72,12 @@ describe('ProjectRail', () => {
 
     expect(props.onCloseProject).toHaveBeenCalledOnce();
   });
+
+  it('highlights settings when an update is available', () => {
+    renderRail({ updateAvailable: true });
+
+    const settings = screen.getByRole('button', { name: 'Settings' });
+    expect(settings.getAttribute('title')).toBe('Update available');
+    expect(settings.className).toContain('border-message-info-border');
+  });
 });

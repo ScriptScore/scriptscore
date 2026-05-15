@@ -45,6 +45,22 @@ export interface LegalDisclosure {
   artifactStatus: string;
 }
 
+export type AppUpdateStatus =
+  | 'up_to_date'
+  | 'update_available'
+  | 'no_stable_release'
+  | 'unavailable';
+
+export interface AppUpdateCheck {
+  installedVersion: string;
+  latestStableVersion: string | null;
+  latestStableTag: string | null;
+  releaseUrl: string | null;
+  updateAvailable: boolean;
+  status: AppUpdateStatus;
+  message: string;
+}
+
 export interface InstructorProfile {
   gradingStrictness: string;
   syntaxLeniency: string;
