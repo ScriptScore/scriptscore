@@ -431,11 +431,12 @@ fn normalized_workflow_status(workflow: &StudentWorkflowState) -> String {
         .all(|submission| submission.stage == "graded")
     {
         "graded".into()
-    } else if workflow
-        .submissions
-        .iter()
-        .any(|submission| !matches!(submission.stage.as_str(), "intake_ready" | "stopped"))
-    {
+    } else if workflow.submissions.iter().any(|submission| {
+        !matches!(
+            submission.stage.as_str(),
+            "intake_ready" | "stopped" | "graded"
+        )
+    }) {
         "running".into()
     } else {
         "ready".into()
@@ -1276,6 +1277,29 @@ mod tests {
         assert_eq!(by_ref["student_2"].failure_message, None);
         assert_eq!(by_ref["student_3"].stage, "stopped");
         assert_eq!(loaded.status, "attention");
+    }
+
+    #[test]
+    fn recovered_stopped_and_graded_submissions_are_ready_not_running() {
+        let _guard = lock_env_vars();
+        let project_path = temp_root("scriptscore-workflow-state-recovered-ready");
+        bootstrap_project(&project_path);
+
+        save_student_workflow_state(
+            &project_path,
+            &StudentWorkflowState {
+                status: "running".into(),
+                latest_job_id: None,
+                submissions: vec![
+                    workflow_submission("student_1", "graded"),
+                    workflow_submission("student_2", "stopped"),
+                ],
+            },
+        )
+        .expect("initial state should save");
+
+        let loaded = load_student_workflow_state(&project_path).expect("workflow should load");
+        assert_eq!(loaded.status, "ready");
     }
 
     #[test]
