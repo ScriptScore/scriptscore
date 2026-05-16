@@ -341,7 +341,7 @@ describe('ModerationWorkspace', () => {
     });
   });
 
-  it('does not start a card move when selecting parsed answer text', async () => {
+  it('moves a card from parsed answer text without starting text selection', async () => {
     const onSaveModeratedScore = vi.fn().mockResolvedValue(undefined);
     render(ModerationWorkspace, {
       workspaceState: moderationWorkspaceState(),
@@ -357,7 +357,7 @@ describe('ModerationWorkspace', () => {
 
     const parsedText = screen
       .getByText('accurate')
-      .closest('[data-moderation-selectable-text]') as HTMLElement;
+      .closest('div[style*="max-height"]') as HTMLElement;
     const lane = screen.getByTestId('score-lane-5');
     const originalElementFromPoint = document.elementFromPoint;
     Object.defineProperty(document, 'elementFromPoint', {
@@ -369,7 +369,7 @@ describe('ModerationWorkspace', () => {
     await fireEvent.pointerMove(parsedText, { pointerId: 8, clientX: 30, clientY: 10 });
     await fireEvent.pointerUp(parsedText, { pointerId: 8, clientX: 30, clientY: 10 });
 
-    expect(onSaveModeratedScore).not.toHaveBeenCalled();
+    expect(onSaveModeratedScore).toHaveBeenCalledWith('student_1', 'question_1', 5);
     Object.defineProperty(document, 'elementFromPoint', {
       value: originalElementFromPoint,
       configurable: true
@@ -401,7 +401,7 @@ describe('ModerationWorkspace', () => {
     );
     expect(cardGrid?.getAttribute('style')).not.toContain('1fr');
     expect(card.className).toContain('select-none');
-    expect(textEvidence?.className).toContain('select-text');
+    expect(textEvidence?.className).toContain('select-none');
     expect(feedback.className).toContain('select-text');
     expect(card.getAttribute('style')).toContain('min-height: 11rem;');
     expect(card.getAttribute('style')).not.toMatch(/(^|;)\s*height:/);

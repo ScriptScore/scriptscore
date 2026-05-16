@@ -635,7 +635,7 @@
     return (
       target instanceof Element &&
       target.closest(
-        'button, a, input, textarea, select, [role="button"], [contenteditable="true"], [data-moderation-selectable-text]'
+        'button, a, input, textarea, select, [role="button"], [contenteditable="true"]'
       ) !== null
     );
   }
@@ -675,6 +675,7 @@
     if (busy || event.button !== 0 || isInteractiveCardTarget(event.target)) {
       return;
     }
+    event.preventDefault();
     pointerDragState = {
       cardKey: cardKey(card.studentRef, card.answer.questionId),
       pointerId: event.pointerId,
@@ -1132,8 +1133,7 @@
                       {#if !compactCard}
                         {#if evidenceView === 'text' || evidenceView === 'both'}
                           <div
-                            data-moderation-selectable-text="true"
-                            class="select-text overflow-auto rounded-md bg-surface-canvas px-2 py-1.5 text-[11px] leading-4 text-text-primary"
+                            class="select-none overflow-auto rounded-md bg-surface-canvas px-2 py-1.5 text-[11px] leading-4 text-text-primary"
                             style:max-height={textBlockMaxHeightStyle}
                             style:font-size={evidenceFontSizeStyle}
                             style:line-height={evidenceLineHeightStyle}

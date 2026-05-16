@@ -271,6 +271,32 @@ pub fn mark_student_answers_stale_for_questions(
     }
 }
 
+pub(crate) fn mark_interrupted_student_workflow_runs(
+    project_path: &Path,
+    message: &str,
+) -> HostResult<usize> {
+    let mut workflow = load_student_workflow_state(project_path)?;
+    let mut changed = 0;
+    for submission in &mut workflow.submissions {
+        if interrupted_workflow_stage_is_recoverable(&submission.stage) {
+            submission.stage = "stopped".into();
+            submission.failure_message = Some(message.to_string());
+            changed += 1;
+        }
+    }
+    if changed > 0 {
+        save_student_workflow_state(project_path, &workflow)?;
+    }
+    Ok(changed)
+}
+
+fn interrupted_workflow_stage_is_recoverable(stage: &str) -> bool {
+    matches!(
+        stage,
+        "alignment" | "canonicalize" | "detect" | "crop" | "pii" | "parse" | "grading"
+    )
+}
+
 fn mark_workflow_answers_stale(
     workflow: &mut StudentWorkflowState,
     question_ids: &std::collections::HashSet<&str>,
@@ -754,8 +780,8 @@ mod tests {
     use super::super::schema::{initialize_schema, project_db_path};
     use super::{
         append_generated_rubric, list_job_traces, load_job_trace, load_student_intake_state,
-        load_student_workflow_state, save_rubric_state, save_student_intake_state,
-        save_student_workflow_state, save_student_workflow_submissions,
+        load_student_workflow_state, mark_interrupted_student_workflow_runs, save_rubric_state,
+        save_student_intake_state, save_student_workflow_state, save_student_workflow_submissions,
     };
 
     fn temp_root(prefix: &str) -> PathBuf {
@@ -1206,6 +1232,50 @@ mod tests {
             .collect::<HashMap<_, _>>();
         assert_eq!(by_ref.get("student_1"), Some(&"grading"));
         assert_eq!(by_ref.get("student_2"), Some(&"graded"));
+    }
+
+    #[test]
+    fn interrupted_student_workflow_recovery_stops_running_stages_only() {
+        let _guard = lock_env_vars();
+        let project_path = temp_root("scriptscore-workflow-state-interrupted-recovery");
+        bootstrap_project(&project_path);
+
+        save_student_workflow_state(
+            &project_path,
+            &StudentWorkflowState {
+                status: "running".into(),
+                latest_job_id: None,
+                submissions: vec![
+                    workflow_submission("student_1", "parse"),
+                    workflow_submission("student_2", "parse_review"),
+                    workflow_submission("student_3", "grading"),
+                ],
+            },
+        )
+        .expect("initial state should save");
+
+        let changed = mark_interrupted_student_workflow_runs(
+            &project_path,
+            "Recovered interrupted workflow.",
+        )
+        .expect("interrupted workflow recovery should save");
+
+        let loaded = load_student_workflow_state(&project_path).expect("workflow should load");
+        let by_ref = loaded
+            .submissions
+            .iter()
+            .map(|submission| (submission.student_ref.as_str(), submission))
+            .collect::<HashMap<_, _>>();
+        assert_eq!(changed, 2);
+        assert_eq!(by_ref["student_1"].stage, "stopped");
+        assert_eq!(
+            by_ref["student_1"].failure_message.as_deref(),
+            Some("Recovered interrupted workflow.")
+        );
+        assert_eq!(by_ref["student_2"].stage, "parse_review");
+        assert_eq!(by_ref["student_2"].failure_message, None);
+        assert_eq!(by_ref["student_3"].stage, "stopped");
+        assert_eq!(loaded.status, "attention");
     }
 
     #[test]
