@@ -43,3 +43,10 @@ def test_fake_feedback_draft_ignores_non_numeric_full_credit_attrs() -> None:
     )
 
     assert "missed a key detail" in provider.generate(request).raw_text
+
+
+def test_fake_markup_returns_span_tagged_student_answer() -> None:
+    provider = FakeLlmProvider()
+    request = _llm_request("markup", "<student_answer>return xs[1:]</student_answer>")
+
+    assert provider.generate(request).raw_text == '<span data-kind="correct">return xs[1:]</span>'

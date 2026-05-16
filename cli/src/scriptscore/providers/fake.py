@@ -179,7 +179,10 @@ def _default_llm_response(request: LlmRequest) -> LlmResponse:
         return LlmResponse(raw_text="You showed some understanding but missed a key detail.")
 
     if request.prompt_id == "markup":
-        return LlmResponse(raw_text=json.dumps({"incorrect_segments": []}))
+        student_answer = _extract_tag(request.rendered_text, "student_answer")
+        if not student_answer:
+            return LlmResponse(raw_text="")
+        return LlmResponse(raw_text=f'<span data-kind="correct">{student_answer}</span>')
 
     raise ValueError(f"Unsupported fake prompt id: {request.prompt_id}")
 
