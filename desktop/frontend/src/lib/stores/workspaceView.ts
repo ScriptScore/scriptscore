@@ -18,6 +18,7 @@ export type BusyAction =
   | 'reAnalyze'
   | 'studentIntake'
   | 'studentWorkflow'
+  | 'studentWorkflowRecovery'
   | 'resultsAssignment'
   | 'resultsUpload'
   | null;

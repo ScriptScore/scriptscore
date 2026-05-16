@@ -56,6 +56,7 @@ export {
   saveStudentParseReview,
   deleteStudentSubmission,
   intakeDefaultPdfRectsFromTemplate,
+  recoverInterruptedStudentWorkflow,
   runStudentIntake,
   saveCriterionScore,
   saveModeratedFeedback,

@@ -53,6 +53,7 @@ pub fn run() {
             commands::cancel_active_job,
             commands::start_job,
             commands::get_exam_workspace_state,
+            commands::recover_interrupted_student_workflow,
             commands::save_question_edits,
             commands::save_redaction_regions,
             commands::approve_template_setup,

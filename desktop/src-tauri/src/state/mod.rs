@@ -554,6 +554,22 @@ impl AppState {
         Ok(workspace)
     }
 
+    pub fn recover_interrupted_student_workflow(&self) -> HostResult<ExamWorkspaceState> {
+        let project_path = {
+            let app = self.inner.lock();
+            app.ensure_no_active_job()?;
+            app.current_project_path()?
+        };
+        project_store::mark_interrupted_student_workflow_runs(
+            &project_path,
+            "Workflow was recovered because no desktop job was active. Start workflow again to retry.",
+        )?;
+        let mut app = self.inner.lock();
+        let workspace = project_store::load_exam_workspace_state(&project_path)?;
+        app.current_project = Some(workspace.project.clone());
+        Ok(workspace)
+    }
+
     pub fn current_project_path_for_commands(&self) -> HostResult<std::path::PathBuf> {
         let app = self.inner.lock();
         app.current_project_path()
@@ -1379,6 +1395,7 @@ mod tests {
         let settings = crate::models::AppSettings::default();
 
         assert_no_open_project(state.workspace_state());
+        assert_no_open_project(state.recover_interrupted_student_workflow());
         assert_no_open_project(state.current_project_path_for_commands());
         assert_no_open_project(state.replace_template_pdf("template.pdf".into(), &sink));
         assert_no_open_project(state.export_stamped_template_pdf("template.pdf".into(), &sink));

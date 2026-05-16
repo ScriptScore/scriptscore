@@ -379,6 +379,7 @@ describe('StudentWorkflowWorkspace roster and stage state', () => {
 
   it('disables workflow start controls when a recovered workflow session is still running', async () => {
     const onBeginWorkflow = vi.fn().mockResolvedValue(undefined);
+    const onRecoverWorkflow = vi.fn().mockResolvedValue(undefined);
     render(StudentWorkflowWorkspace, {
       workspaceState: baseWorkspaceState({
         studentIntake: {
@@ -420,18 +421,24 @@ describe('StudentWorkflowWorkspace roster and stage state', () => {
       lmsCourseId: 'persisted-course-id',
       busyAction: null,
       onFinalizeSubmission: vi.fn(),
-      onBeginWorkflow
+      onBeginWorkflow,
+      onRecoverWorkflow
     });
 
     const headerBegin = await screen.findByRole('button', { name: 'Running…' });
     const playBegin = screen.getByRole('button', { name: 'Begin student workflow' });
+    const recover = screen.getByRole('button', { name: 'Recover Workflow' });
 
     expect((headerBegin as HTMLButtonElement).disabled).toBe(true);
     expect((playBegin as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText(/the desktop runtime has no active job/i)).toBeTruthy();
 
     await fireEvent.click(headerBegin);
     await fireEvent.click(playBegin);
     expect(onBeginWorkflow).not.toHaveBeenCalled();
+
+    await fireEvent.click(recover);
+    expect(onRecoverWorkflow).toHaveBeenCalledTimes(1);
   });
 
   it('disables workflow start controls when project workflow stage is actively grading', async () => {

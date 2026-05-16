@@ -42,6 +42,7 @@
     openProject,
     previewResultsLmsReport,
     projectExists,
+    recoverInterruptedStudentWorkflow,
     retryResultsLmsUpload,
     exportStampedTemplatePdf,
     replaceTemplatePdf,
@@ -1737,6 +1738,21 @@
     }
   }
 
+  async function handleRecoverInterruptedStudentWorkflow() {
+    busyAction = 'studentWorkflowRecovery';
+    actionError = null;
+    try {
+      const next = await recoverInterruptedStudentWorkflow();
+      applyWorkspaceState(next, false);
+      notifications.pushSuccess('Interrupted student workflow recovered');
+    } catch (error) {
+      actionError = String(error);
+      throw error;
+    } finally {
+      busyAction = null;
+    }
+  }
+
   async function handleStopStudentWorkflow() {
     if (busyAction !== 'studentWorkflow' || stopWorkflowBusy) {
       return;
@@ -2192,6 +2208,7 @@
               ) => await handleRunStudentIntake(finalize, hooks)}
               onBeginWorkflow={handleBeginStudentWorkflow}
               onStopWorkflow={handleStopStudentWorkflow}
+              onRecoverWorkflow={handleRecoverInterruptedStudentWorkflow}
               onDeleteSubmission={handleDeleteStudentSubmission}
               onSaveStudentIntakePageOrder={handleSaveStudentIntakePageOrder}
               stopWorkflowBusy={stopWorkflowBusy}

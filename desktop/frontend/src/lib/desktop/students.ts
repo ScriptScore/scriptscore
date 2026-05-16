@@ -149,6 +149,10 @@ export function runStudentIntake(inputs: StudentIntakeInput[]): Promise<string> 
   });
 }
 
+export function recoverInterruptedStudentWorkflow(): Promise<ExamWorkspaceState> {
+  return invokeDesktopHost<ExamWorkspaceState>('recover_interrupted_student_workflow');
+}
+
 export function saveStudentIntakePageOrder(
   studentRef: string,
   examPagePaths: string[]

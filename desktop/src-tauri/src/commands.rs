@@ -227,6 +227,15 @@ pub fn get_exam_workspace_state(state: State<'_, AppState>) -> Result<ExamWorksp
 }
 
 #[tauri::command]
+pub fn recover_interrupted_student_workflow(
+    state: State<'_, AppState>,
+) -> Result<ExamWorkspaceState, String> {
+    state
+        .recover_interrupted_student_workflow()
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
 pub fn save_question_edits(
     edits: Vec<QuestionEdit>,
     state: State<'_, AppState>,

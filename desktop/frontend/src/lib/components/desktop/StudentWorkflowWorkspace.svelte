@@ -59,6 +59,7 @@
   ) => Promise<StudentIntakeFinalizeResult | null>) | null = null;
   export let onBeginWorkflow: (() => Promise<void>) | null = null;
   export let onStopWorkflow: (() => Promise<void>) | null = null;
+  export let onRecoverWorkflow: (() => Promise<void>) | null = null;
   export let onDeleteSubmission:
     | ((studentRef: string, nextSelectedStudentRef: string | null) => Promise<void>)
     | null = null;
@@ -196,11 +197,21 @@
   $: workflowAutomationActive = workflowSubmissions.some((submission) =>
     activeAutomationStages.has(submission.stage)
   );
-  $: studentWorkflowRunning =
-    busyAction === 'studentWorkflow' ||
+  $: persistedStudentWorkflowRunning =
     workspaceState?.studentWorkflow?.status === 'running' ||
     workspaceState?.workflowStage === 'student_workflow_running' ||
-    workspaceState?.workflowStage === 'student_grading' ||
+    workspaceState?.workflowStage === 'student_grading';
+  $: desktopRuntimeHasActiveJob =
+    (($shellState.workerActivity?.activeJobs.length ?? 0) > 0) ||
+    (($shellState.workerActivity?.pendingJobCount ?? 0) > 0);
+  $: studentWorkflowRecoveryAvailable =
+    persistedStudentWorkflowRunning &&
+    (busyAction === null || busyAction === 'studentWorkflowRecovery') &&
+    !desktopRuntimeHasActiveJob;
+  $: studentWorkflowRunning =
+    busyAction === 'studentWorkflow' ||
+    busyAction === 'studentWorkflowRecovery' ||
+    persistedStudentWorkflowRunning ||
     (($shellState.workerStatus === 'busy' || $shellState.workerStatus === 'starting') &&
       workflowAutomationActive);
   $: workflowByStudentRef = new Map(
@@ -1040,12 +1051,15 @@
         {readyCount}
         canonicalReadyCount={canonicalReadyRows.length}
         busyActionLabel={studentWorkflowRunning ? 'Running…' : null}
+        recoveryAvailable={studentWorkflowRecoveryAvailable}
+        recoveryBusy={busyAction === 'studentWorkflowRecovery'}
         {stopWorkflowBusy}
         {attentionItems}
         {canonicalReadyRows}
         onSelectStudent={selectStudent}
         onBeginWorkflow={onBeginWorkflow}
         onStopWorkflow={onStopWorkflow}
+        onRecoverWorkflow={onRecoverWorkflow}
       />
     {/if}
   </section>
