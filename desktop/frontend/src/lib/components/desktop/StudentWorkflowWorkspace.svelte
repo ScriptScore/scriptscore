@@ -62,6 +62,9 @@
   export let onDeleteSubmission:
     | ((studentRef: string, nextSelectedStudentRef: string | null) => Promise<void>)
     | null = null;
+  export let onSaveStudentIntakePageOrder:
+    | ((studentRef: string, examPagePaths: string[]) => Promise<void>)
+    | null = null;
   export let stopWorkflowBusy = false;
   export let onConfirmAlignment:
     | ((studentRef: string, pages: StudentWorkflowAlignmentPage[]) => Promise<void>)
@@ -259,6 +262,14 @@
   $: selectedWorkflowSubmission = selectedRosterEntry?.workflowSubmission ?? null;
   $: selectedDisplayName = selectedRosterEntry?.displayName ?? '';
   $: selectedHasSubmission = selectedIntakeItem !== null || selectedWorkflowSubmission !== null;
+  $: expectedTemplatePageCount = Math.max(
+    0,
+    ...((workspaceState?.templatePreviewArtifacts ?? []).map((page) => page.pageNumber))
+  );
+  $: selectedHasExtraPages =
+    expectedTemplatePageCount > 0 &&
+    (selectedIntakeItem?.examPagePaths?.filter((path) => path.trim().length > 0).length ?? 0) >
+      expectedTemplatePageCount;
 
   $: attentionItems = workflowSubmissions.filter((submission) =>
     ['alignment_review', 'detect_review', 'parse_review', 'manual_grading', 'failed'].includes(submission.stage)
@@ -280,7 +291,9 @@
   $: currentView = shellMode === 'intake'
     ? 'intake'
     : selectedStudentRef
-      ? stageView ?? 'home'
+      ? selectedWorkflowSubmission?.stage === 'failed' && selectedHasExtraPages
+        ? 'submissionPages'
+        : stageView ?? 'home'
       : 'home';
   $: compactReviewHeader =
     currentView === 'alignmentReview' || currentView === 'detectReview' || currentView === 'questionDetail';
@@ -982,6 +995,8 @@
         submission={selectedWorkflowSubmission}
         displayName={selectedDisplayName}
         stageProgress={selectedStageProgress}
+        expectedPageCount={expectedTemplatePageCount}
+        onSavePageOrder={onSaveStudentIntakePageOrder}
         ondelete={onDeleteSubmission && selectedHasSubmission ? requestSelectedDelete : null}
         deleteDisabled={busyAction !== null}
         onback={showHome}

@@ -546,18 +546,40 @@ fn run_canonicalize_batch(
         student_refs,
         "canonicalize",
     )?;
-    let targets =
-        build_canonicalize_batch_targets(workspace, intake_by_ref, workflow_state, student_refs)?;
+    let plan =
+        build_canonicalize_batch_plan(workspace, intake_by_ref, workflow_state, student_refs)?;
+    if !plan.failed_refs.is_empty() {
+        let worker_status = if plan.runnable_refs.is_empty() {
+            WorkerStatus::Ready
+        } else {
+            WorkerStatus::Busy
+        };
+        save_workflow_state_for_refs_and_emit(
+            project_path,
+            workflow_state,
+            event_sink,
+            &plan.failed_refs,
+            worker_status,
+        )?;
+    }
+    if plan.runnable_refs.is_empty() {
+        return Ok(Vec::new());
+    }
     let completed = match run_cli_job(
         exec.state,
         exec.event_sink,
         exec.project_path,
         "scans.canonicalize",
-        json!({ "canonicalize_targets": targets }),
-        json!({ "student_refs": student_refs }),
+        json!({ "canonicalize_targets": plan.targets }),
+        json!({ "student_refs": plan.runnable_refs }),
     ) {
         Ok(completed) if completed_was_cancelled(&completed) => {
-            mark_refs_stopped_and_emit(project_path, workflow_state, event_sink, student_refs)?;
+            mark_refs_stopped_and_emit(
+                project_path,
+                workflow_state,
+                event_sink,
+                &plan.runnable_refs,
+            )?;
             return Ok(Vec::new());
         }
         Ok(completed) => completed,
@@ -566,7 +588,7 @@ fn run_canonicalize_batch(
                 project_path,
                 workflow_state,
                 event_sink,
-                student_refs,
+                &plan.runnable_refs,
                 &err,
             )?;
             return Ok(Vec::new());
@@ -576,11 +598,62 @@ fn run_canonicalize_batch(
         project_path,
         event_sink,
         workflow_state,
-        student_refs,
+        &plan.runnable_refs,
         &completed,
     )
 }
 
+struct CanonicalizeBatchPlan {
+    runnable_refs: Vec<String>,
+    failed_refs: Vec<String>,
+    targets: Vec<Value>,
+}
+
+fn build_canonicalize_batch_plan(
+    workspace: &ExamWorkspaceState,
+    intake_by_ref: &HashMap<String, crate::models::StudentIntakeSummary>,
+    workflow_state: &mut StudentWorkflowState,
+    student_refs: &[String],
+) -> HostResult<CanonicalizeBatchPlan> {
+    let mut runnable_refs = Vec::new();
+    let mut failed_refs = Vec::new();
+    let mut targets = Vec::new();
+    for student_ref in student_refs {
+        let intake = match intake_by_ref.get(student_ref) {
+            Some(intake) => intake,
+            None => {
+                mark_submission_failed(
+                    workflow_state,
+                    student_ref,
+                    &format!("Student intake '{student_ref}' was missing."),
+                )?;
+                failed_refs.push(student_ref.clone());
+                continue;
+            }
+        };
+        let target_result = {
+            let submission = find_submission_mut(workflow_state, student_ref)?;
+            build_canonicalize_targets(workspace, intake, submission)
+        };
+        match target_result {
+            Ok(student_targets) => {
+                targets.extend(student_targets);
+                runnable_refs.push(student_ref.clone());
+            }
+            Err(err) => {
+                mark_submission_failed(workflow_state, student_ref, &err.to_string())?;
+                failed_refs.push(student_ref.clone());
+            }
+        }
+    }
+    Ok(CanonicalizeBatchPlan {
+        runnable_refs,
+        failed_refs,
+        targets,
+    })
+}
+
+#[cfg(test)]
 fn build_canonicalize_batch_targets(
     workspace: &ExamWorkspaceState,
     intake_by_ref: &HashMap<String, crate::models::StudentIntakeSummary>,
@@ -2926,11 +2999,11 @@ mod tests {
     use super::{
         apply_alignment_results, apply_canonicalize_batch_results, apply_detect_batch_results,
         apply_parse_batch_results, apply_pii_batch_results, build_batch_answer_score_requests,
-        build_canonicalize_batch_targets, build_crop_targets, build_detect_review,
-        classify_batch_resume_points, completed_was_cancelled, crop_rows_from_answers,
-        crop_targets_for_cli, detect_batch_command_error, emit_ready_for_empty_batch_continuation,
-        ensure_submission_row, failed_resume_point, feedback_request_rows,
-        filtered_completed_by_student, finish_batch_grading, intake_map,
+        build_canonicalize_batch_plan, build_canonicalize_batch_targets, build_crop_targets,
+        build_detect_review, classify_batch_resume_points, completed_was_cancelled,
+        crop_rows_from_answers, crop_targets_for_cli, detect_batch_command_error,
+        emit_ready_for_empty_batch_continuation, ensure_submission_row, failed_resume_point,
+        feedback_request_rows, filtered_completed_by_student, finish_batch_grading, intake_map,
         mark_refs_failed_with_message, mark_refs_stopped_and_emit, persist_batch_feedback_rows,
         persist_batch_preliminary_rows, pii_identity_unavailable_warning,
         preliminary_grading_request_payload, preliminary_grading_runtime_config,
@@ -3372,6 +3445,43 @@ mod tests {
         assert!(error
             .to_string()
             .contains("Student intake 'student_1' was missing"));
+    }
+
+    #[test]
+    fn canonicalize_batch_plan_fails_unmatched_pages_without_blocking_valid_students() {
+        let workspace = minimal_workspace_with_template_pages();
+        let mut intake_by_ref = HashMap::new();
+        intake_by_ref.insert("student_1".to_string(), intake_summary("student_1"));
+        intake_by_ref.insert("student_2".to_string(), intake_summary("student_2"));
+        let mut valid = workflow_submission("student_1");
+        valid.stage = "canonicalize".into();
+        valid.alignment_pages = vec![alignment_page(1), alignment_page(2)];
+        let mut extra_page = workflow_submission("student_2");
+        extra_page.stage = "canonicalize".into();
+        extra_page.alignment_pages = vec![alignment_page(1), alignment_page(3)];
+        let mut state = StudentWorkflowState {
+            status: "running".into(),
+            latest_job_id: None,
+            submissions: vec![valid, extra_page],
+        };
+
+        let plan = build_canonicalize_batch_plan(
+            &workspace,
+            &intake_by_ref,
+            &mut state,
+            &["student_1".to_string(), "student_2".to_string()],
+        )
+        .expect("canonicalize plan should isolate per-student target errors");
+
+        assert_eq!(plan.runnable_refs, vec!["student_1"]);
+        assert_eq!(plan.failed_refs, vec!["student_2"]);
+        assert_eq!(plan.targets.len(), 2);
+        assert_eq!(state.submissions[0].stage, "canonicalize");
+        assert_eq!(state.submissions[1].stage, "failed");
+        assert_eq!(
+            state.submissions[1].failure_message.as_deref(),
+            Some("Template page '3' was missing for canonicalization.")
+        );
     }
 
     #[test]

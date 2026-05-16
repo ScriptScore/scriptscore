@@ -60,6 +60,7 @@
     saveStudentParseReview,
     saveModeratedFeedback,
     saveModeratedScore,
+    saveStudentIntakePageOrder,
     setModerationQuestionReviewed,
     setSubmissionResultFinalized,
     resolveLmsStudentRef,
@@ -1721,6 +1722,21 @@
     }
   }
 
+  async function handleSaveStudentIntakePageOrder(studentRef: string, examPagePaths: string[]) {
+    busyAction = 'studentIntake';
+    actionError = null;
+    try {
+      const next = await saveStudentIntakePageOrder(studentRef, examPagePaths);
+      applyWorkspaceState(next, false);
+      notifications.pushSuccess('Student page list updated');
+    } catch (error) {
+      actionError = String(error);
+      throw error;
+    } finally {
+      busyAction = null;
+    }
+  }
+
   async function handleStopStudentWorkflow() {
     if (busyAction !== 'studentWorkflow' || stopWorkflowBusy) {
       return;
@@ -2177,6 +2193,7 @@
               onBeginWorkflow={handleBeginStudentWorkflow}
               onStopWorkflow={handleStopStudentWorkflow}
               onDeleteSubmission={handleDeleteStudentSubmission}
+              onSaveStudentIntakePageOrder={handleSaveStudentIntakePageOrder}
               stopWorkflowBusy={stopWorkflowBusy}
               onConfirmAlignment={handleConfirmStudentAlignment}
               onConfirmDetectReview={handleConfirmStudentDetectReview}
