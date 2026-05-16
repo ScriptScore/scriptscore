@@ -124,6 +124,10 @@ The `RC Package Validation` GitHub Actions workflow builds first-release package
 candidates across the platform matrix without publishing them. It is intended
 for release-candidate validation, not a signed public release.
 
+Push semver prerelease tags such as `v0.1.0-rc.1` to publish draft RC assets.
+Stable `v*` tags still run package validation, but they do not run the draft
+prerelease publishing job.
+
 The workflow builds:
 
 - unsigned preview DMGs on macOS Intel and macOS Apple Silicon,

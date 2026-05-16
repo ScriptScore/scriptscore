@@ -22,7 +22,6 @@ on:
   push:
     tags:
       - "v*"
-      - "rc-*"
 
 permissions:
   contents: read
@@ -523,7 +522,7 @@ jobs:
 
   publish-release-assets:
     name: Publish draft prerelease assets
-    if: ${{ startsWith(github.ref, 'refs/tags/rc-') }}
+    if: ${{ startsWith(github.ref, 'refs/tags/v') && contains(github.ref_name, '-rc.') }}
     needs: package
     runs-on: ubuntu-latest
     permissions:
@@ -578,6 +577,7 @@ jobs:
       - name: Create or update draft prerelease
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           TAG_NAME: ${{ github.ref_name }}
         run: |
           release_title="ScriptScore ${TAG_NAME}"
@@ -592,6 +592,7 @@ jobs:
             gh release create "${TAG_NAME}" \
               --draft \
               --prerelease \
+              --verify-tag \
               --title "${release_title}" \
               --notes "${release_notes}"
           fi
