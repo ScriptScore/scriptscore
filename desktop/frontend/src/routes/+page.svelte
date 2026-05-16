@@ -279,8 +279,11 @@
   }
 
   function isRecoveredStaleJobNotice(message: string | null): message is string {
-    return /^Recovered \d+ stale desktop job records? from a prior session\.$/.test(
-      message ?? ''
+    const text = message ?? '';
+    return (
+      /^Recovered \d+ stale desktop job records? from a prior session(?: and marked \d+ interrupted student workflows? as stopped)?\.$/.test(
+        text
+      ) || /^Recovered prior session state and marked \d+ interrupted student workflows? as stopped\.$/.test(text)
     );
   }
 
@@ -299,6 +302,18 @@
     }
     if (event.eventType === 'job_failed' || event.eventType === 'job_cancelled') {
       alignmentStampJobActive = false;
+    }
+  }
+
+  function settleStudentWorkflowBusyFromStateEvent(event: RuntimeJobEvent): void {
+    if (
+      event.eventType === 'workflow_state_updated' &&
+      busyAction === 'studentWorkflow' &&
+      event.workerStatus === 'ready' &&
+      event.payload.workflowStatus !== 'running'
+    ) {
+      busyAction = null;
+      stopWorkflowBusy = false;
     }
   }
 
@@ -445,6 +460,7 @@
     const stopWorkflowRefresh = onRuntimeJobEvent((event) => {
       applyAnalysisRuntimeEvent(event);
       applyAlignmentStampRuntimeEvent(event);
+      settleStudentWorkflowBusyFromStateEvent(event);
       if (shouldRefreshWorkspaceDuringRuntimeEvent(event)) {
         requestWorkspaceRefresh(true, true);
       }

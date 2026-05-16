@@ -1289,13 +1289,35 @@ fn recover_abandoned_project_jobs(project_path: &Path) -> HostResult<Option<Stri
     let workflow_count =
         project_store::mark_abandoned_host_workflows(project_path, &finished_at, message)?;
     let total = runtime_count + workflow_count;
-    if total == 0 {
+    let interrupted_count = project_store::mark_interrupted_student_workflow_runs(
+        project_path,
+        "Workflow was interrupted when the previous app session ended. Start workflow again to retry.",
+    )?;
+    if total == 0 && interrupted_count == 0 {
         return Ok(None);
     }
-    Ok(Some(format!(
-        "Recovered {total} stale desktop job record{} from a prior session.",
-        if total == 1 { "" } else { "s" }
-    )))
+    let job_record_notice = (total > 0).then(|| {
+        format!(
+            "Recovered {total} stale desktop job record{} from a prior session",
+            if total == 1 { "" } else { "s" }
+        )
+    });
+    let workflow_notice = (interrupted_count > 0).then(|| {
+        format!(
+            "marked {interrupted_count} interrupted student workflow{} as stopped",
+            if interrupted_count == 1 { "" } else { "s" }
+        )
+    });
+    Ok(Some(match (job_record_notice, workflow_notice) {
+        (Some(job_record_notice), Some(workflow_notice)) => {
+            format!("{job_record_notice} and {workflow_notice}.")
+        }
+        (Some(job_record_notice), None) => format!("{job_record_notice}."),
+        (None, Some(workflow_notice)) => {
+            format!("Recovered prior session state and {workflow_notice}.")
+        }
+        (None, None) => unreachable!("recovery message requires recovered state"),
+    }))
 }
 
 fn runtime_error_after_project_open(
