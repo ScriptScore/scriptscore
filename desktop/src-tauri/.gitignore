@@ -1,3 +1,5 @@
 target/
 gen/
 coverage/
+.tauri.msi.conf.json
+.tauri.release.conf.json

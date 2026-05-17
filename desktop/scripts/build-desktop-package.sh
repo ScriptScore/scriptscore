@@ -9,6 +9,7 @@ BUNDLES="${SCRIPTSCORE_DESKTOP_BUNDLES:-appimage}"
 TARGET="${SCRIPTSCORE_DESKTOP_TARGET:-}"
 AUTO_PORTABLE_PYTHON="${SCRIPTSCORE_DESKTOP_AUTO_PORTABLE_PYTHON:-1}"
 PORTABLE_PYTHON_DIR="${SCRIPTSCORE_DESKTOP_PORTABLE_PYTHON_DIR:-${DESKTOP_ROOT}/dist/portable-python}"
+TAURI_CONFIG="${SCRIPTSCORE_DESKTOP_TAURI_CONFIG:-${DESKTOP_ROOT}/src-tauri/tauri.conf.json}"
 
 if [[ $# -gt 0 ]]; then
   BUNDLES=$1
@@ -204,7 +205,7 @@ build_cmd=(
   tauri
   build
   --config
-  "${DESKTOP_ROOT}/src-tauri/tauri.conf.json"
+  "${TAURI_CONFIG}"
 )
 
 if [[ -n "${BUNDLES}" ]]; then
