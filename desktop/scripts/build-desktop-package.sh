@@ -200,34 +200,71 @@ if [[ "$(uname -s)" == "Linux" ]] && bundle_selection_includes "${BUNDLES}" "app
   fi
 fi
 
-build_cmd=(
-  cargo
-  tauri
-  build
-  --config
-  "${TAURI_CONFIG}"
-)
+run_tauri_build() {
+  local selected_bundles=$1
+  local config_path=$2
+  local build_cmd=(
+    cargo
+    tauri
+    build
+    --config
+    "${config_path}"
+  )
 
-if [[ -n "${BUNDLES}" ]]; then
-  build_cmd+=(--bundles "${BUNDLES}")
-fi
+  if [[ -n "${selected_bundles}" ]]; then
+    build_cmd+=(--bundles "${selected_bundles}")
+  fi
 
-if [[ -n "${TARGET}" ]]; then
-  build_cmd+=(--target "${TARGET}")
-fi
+  if [[ -n "${TARGET}" ]]; then
+    build_cmd+=(--target "${TARGET}")
+  fi
 
-if [[ "${SCRIPTSCORE_DESKTOP_VERBOSE_TAURI:-0}" == "1" ]]; then
-  build_cmd+=(--verbose)
-fi
+  if [[ "${SCRIPTSCORE_DESKTOP_VERBOSE_TAURI:-0}" == "1" ]]; then
+    build_cmd+=(--verbose)
+  fi
 
-set +e
-"${build_cmd[@]}"
-build_status=$?
-set -e
+  "${build_cmd[@]}"
+}
 
-if [[ ${build_status} -ne 0 ]]; then
-  if create_plain_macos_dmg_fallback; then
-    build_status=0
+append_bundle_selection() {
+  local current=$1
+  local bundle=$2
+  if [[ -z "${current}" ]]; then
+    printf '%s' "${bundle}"
+  else
+    printf '%s,%s' "${current}" "${bundle}"
+  fi
+}
+
+build_status=0
+if bundle_selection_includes "${BUNDLES}" "msi" && [[ -n "${SCRIPTSCORE_DESKTOP_MSI_TAURI_CONFIG:-}" ]]; then
+  non_msi_bundles=""
+  for bundle in appimage deb dmg nsis rpm; do
+    if bundle_selection_includes "${BUNDLES}" "${bundle}"; then
+      non_msi_bundles=$(append_bundle_selection "${non_msi_bundles}" "${bundle}")
+    fi
+  done
+
+  set +e
+  if [[ -n "${non_msi_bundles}" ]]; then
+    run_tauri_build "${non_msi_bundles}" "${TAURI_CONFIG}"
+    build_status=$?
+  fi
+  if [[ ${build_status} -eq 0 ]]; then
+    run_tauri_build "msi" "${SCRIPTSCORE_DESKTOP_MSI_TAURI_CONFIG}"
+    build_status=$?
+  fi
+  set -e
+else
+  set +e
+  run_tauri_build "${BUNDLES}" "${TAURI_CONFIG}"
+  build_status=$?
+  set -e
+
+  if [[ ${build_status} -ne 0 ]]; then
+    if create_plain_macos_dmg_fallback; then
+      build_status=0
+    fi
   fi
 fi
 
