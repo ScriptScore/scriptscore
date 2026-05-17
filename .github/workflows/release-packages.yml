@@ -1,8 +1,16 @@
-name: RC Package Validation
+name: Desktop Preview Packages
 
 on:
   workflow_dispatch:
     inputs:
+      channel:
+        description: "Preview channel to publish."
+        required: false
+        default: latest
+        type: choice
+        options:
+          - latest
+          - rc
       fast_track:
         description: "Skip expensive quality gates while iterating on package assembly."
         required: false
@@ -19,20 +27,89 @@ on:
           - macos-arm64
           - windows-x64
           - linux-x64
-  push:
-    tags:
-      - "v*"
-      - "rc-*"
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
+    branches:
+      - main
+      - "release/**"
 
 permissions:
   contents: read
 
 jobs:
+  resolve-release:
+    name: Resolve release metadata
+    if: ${{ github.event_name != 'workflow_run' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push') }}
+    runs-on: ubuntu-latest
+    outputs:
+      public_version: ${{ steps.metadata.outputs.public_version }}
+      msi_version: ${{ steps.metadata.outputs.msi_version }}
+      release_tag: ${{ steps.metadata.outputs.release_tag }}
+      latest_tag: ${{ steps.metadata.outputs.latest_tag }}
+      release_title: ${{ steps.metadata.outputs.release_title }}
+      channel: ${{ steps.metadata.outputs.channel }}
+      source_sha: ${{ steps.metadata.outputs.source_sha }}
+      source_ref: ${{ steps.metadata.outputs.source_ref }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Resolve generated version
+        id: metadata
+        env:
+          RELEASE_CHANNEL: ${{ inputs.channel || 'latest' }}
+          SOURCE_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+          SOURCE_REF: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_branch || github.ref_name }}
+        run: |
+          base_version=$(
+            python3 desktop/scripts/project_release_version.py \
+              tauri-version desktop/src-tauri/tauri.conf.json
+          )
+          python3 desktop/scripts/project_release_version.py resolve \
+            --base-version "${base_version}" \
+            --channel "${RELEASE_CHANNEL}" \
+            --run-number "${GITHUB_RUN_NUMBER}" \
+            --source-sha "${SOURCE_SHA}" \
+            --source-ref "${SOURCE_REF}" \
+            > release-metadata.json
+          python3 <<'PY'
+          import json
+          import os
+
+          metadata = json.loads(open("release-metadata.json", encoding="utf-8").read())
+          output_keys = [
+              "public_version",
+              "msi_version",
+              "release_tag",
+              "latest_tag",
+              "release_title",
+              "channel",
+              "source_sha",
+              "source_ref",
+          ]
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              for key in output_keys:
+                  print(f"{key}={metadata[key]}", file=output)
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+              summary.write("## Release metadata\n\n")
+              for key in output_keys:
+                  summary.write(f"- `{key}`: `{metadata[key]}`\n")
+              summary.write(f"- `source_sha`: `{metadata['source_sha']}`\n")
+              summary.write(f"- `source_ref`: `{metadata['source_ref']}`\n")
+          PY
+
   define-package-matrix:
     name: Define package matrix
+    if: ${{ github.event_name != 'workflow_run' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push') }}
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
+      package_platform: ${{ steps.matrix.outputs.package_platform }}
     steps:
       - name: Select package matrix
         id: matrix
@@ -49,7 +126,7 @@ jobs:
                   "rust_target": "x86_64-apple-darwin",
                   "python_target": "x86_64-apple-darwin",
                   "bundles": "dmg",
-                  "artifact_name": "scriptscore-rc-macos-intel-unsigned-preview",
+                  "artifact_name": "scriptscore-package-macos-intel",
               },
               {
                   "label": "macos-arm64",
@@ -57,7 +134,7 @@ jobs:
                   "rust_target": "aarch64-apple-darwin",
                   "python_target": "aarch64-apple-darwin",
                   "bundles": "dmg",
-                  "artifact_name": "scriptscore-rc-macos-arm64-unsigned-preview",
+                  "artifact_name": "scriptscore-package-macos-arm64",
               },
               {
                   "label": "windows-x64",
@@ -65,7 +142,7 @@ jobs:
                   "rust_target": "x86_64-pc-windows-msvc",
                   "python_target": "x86_64-pc-windows-msvc-shared",
                   "bundles": "nsis,msi",
-                  "artifact_name": "scriptscore-rc-windows-x64",
+                  "artifact_name": "scriptscore-package-windows-x64",
               },
               {
                   "label": "linux-x64",
@@ -73,7 +150,7 @@ jobs:
                   "rust_target": "x86_64-unknown-linux-gnu",
                   "python_target": "x86_64-unknown-linux-gnu",
                   "bundles": "appimage,deb,rpm",
-                  "artifact_name": "scriptscore-rc-linux-x64",
+                  "artifact_name": "scriptscore-package-linux-x64",
               },
           ]
 
@@ -85,17 +162,21 @@ jobs:
 
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
               print(f"matrix={json.dumps({'include': packages}, separators=(',', ':'))}", file=output)
+              print(f"package_platform={selected}", file=output)
           PY
         env:
           PACKAGE_PLATFORM: ${{ inputs.package_platform || 'all' }}
 
   prepare-paddle-models:
     name: Prepare Paddle models
+    if: ${{ github.event_name != 'workflow_run' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push') }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
 
       - name: Install Paddle model resources
         run: |
@@ -118,6 +199,7 @@ jobs:
   package:
     name: ${{ matrix.label }}
     needs:
+      - resolve-release
       - define-package-matrix
       - prepare-paddle-models
     runs-on: ${{ matrix.runner }}
@@ -129,6 +211,7 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(needs.define-package-matrix.outputs.matrix) }}
     env:
+      SCRIPTSCORE_RELEASE_VERSION: ${{ needs.resolve-release.outputs.public_version }}
       SCRIPTSCORE_DESKTOP_BUNDLES: ${{ matrix.bundles }}
       SCRIPTSCORE_DESKTOP_TARGET: ${{ matrix.rust_target }}
       SCRIPTSCORE_DESKTOP_PORTABLE_PYTHON_TARGET: ${{ matrix.python_target }}
@@ -142,6 +225,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -211,7 +296,7 @@ jobs:
         run: npm ci
 
       - name: Install CLI fast-quality dependencies
-        if: ${{ !inputs.fast_track }}
+        if: ${{ github.event_name != 'workflow_dispatch' || !inputs.fast_track }}
         working-directory: cli
         run: uv sync --only-group ci-runtime --only-group quality --no-install-project --frozen
 
@@ -223,11 +308,21 @@ jobs:
             echo "SCRIPTSCORE_PYTHON=${GITHUB_WORKSPACE}/cli/.venv/bin/python" >> "${GITHUB_ENV}"
           fi
 
+      - name: Generate release Tauri config
+        run: |
+          release_config="$(pwd)/desktop/src-tauri/.tauri.release.conf.json"
+          python desktop/scripts/project_release_version.py write-tauri-config \
+            --source desktop/src-tauri/tauri.conf.json \
+            --output "${release_config}" \
+            --version "${SCRIPTSCORE_RELEASE_VERSION}"
+          echo "SCRIPTSCORE_DESKTOP_TAURI_CONFIG=${release_config}" >> "${GITHUB_ENV}"
+          echo "Using generated Tauri config ${release_config}"
+
       - name: Install cargo-tauri
         run: cargo install tauri-cli --version '^2'
 
       - name: CLI fast-quality gate
-        if: ${{ !inputs.fast_track }}
+        if: ${{ github.event_name != 'workflow_dispatch' || !inputs.fast_track }}
         working-directory: cli
         run: |
           uv run --no-sync ruff check .
@@ -235,7 +330,7 @@ jobs:
           uv run --no-sync mypy
 
       - name: Frontend quality gate
-        if: ${{ !inputs.fast_track }}
+        if: ${{ github.event_name != 'workflow_dispatch' || !inputs.fast_track }}
         working-directory: desktop/frontend
         run: |
           npm run lint
@@ -248,7 +343,7 @@ jobs:
           mkdir -p desktop/dist/legal
 
       - name: Desktop host quality gate
-        if: ${{ !inputs.fast_track }}
+        if: ${{ github.event_name != 'workflow_dispatch' || !inputs.fast_track }}
         run: |
           cargo fmt --check --manifest-path desktop/src-tauri/Cargo.toml
           cargo clippy --manifest-path desktop/src-tauri/Cargo.toml --workspace --all-targets --all-features --target "${SCRIPTSCORE_DESKTOP_TARGET}" -- -D warnings
@@ -441,75 +536,12 @@ jobs:
 
       - name: Stage release assets
         run: |
-          if command -v python3 >/dev/null 2>&1; then
-            release_python=python3
-          else
-            release_python=python
-          fi
-          "${release_python}" <<'PY'
-          import json
-          import shutil
-          from pathlib import Path
-
-          label = "${{ matrix.label }}"
-          version = json.loads(Path("desktop/src-tauri/tauri.conf.json").read_text(encoding="utf-8"))[
-              "version"
-          ]
-          bundle_root = Path("desktop/src-tauri/target")
-          output_dir = Path("desktop/dist/release-assets") / label
-          package_dirs = {"appimage", "deb", "dmg", "msi", "nsis", "rpm"}
-          target_names = {
-              ("macos-intel", ".dmg"): f"ScriptScore-Desktop-{version}-macos-intel.dmg",
-              ("macos-arm64", ".dmg"): f"ScriptScore-Desktop-{version}-macos-arm64.dmg",
-              ("windows-x64", ".exe"): f"ScriptScore-Desktop-{version}-windows-x64-setup.exe",
-              ("windows-x64", ".msi"): f"ScriptScore-Desktop-{version}-windows-x64.msi",
-              ("linux-x64", ".AppImage"): f"ScriptScore-Desktop-{version}-linux-x64.AppImage",
-              ("linux-x64", ".deb"): f"ScriptScore-Desktop-{version}-linux-x64.deb",
-              ("linux-x64", ".rpm"): f"ScriptScore-Desktop-{version}-linux-x64.rpm",
-          }
-
-          if output_dir.exists():
-              shutil.rmtree(output_dir)
-          output_dir.mkdir(parents=True)
-
-          staged: dict[str, Path] = {}
-          for package_file in sorted(bundle_root.rglob("*")):
-              if not package_file.is_file() or package_file.parent.name.lower() not in package_dirs:
-                  continue
-              suffix = package_file.suffix
-              if suffix.lower() != ".appimage":
-                  suffix = suffix.lower()
-              destination_name = target_names.get((label, suffix))
-              if destination_name is None:
-                  continue
-              if destination_name in staged:
-                  raise SystemExit(
-                      f"Multiple package files map to {destination_name}: "
-                      f"{staged[destination_name]} and {package_file}"
-                  )
-              staged[destination_name] = package_file
-              shutil.copy2(package_file, output_dir / destination_name)
-
-          expected_names = {
-              target_names[(label, ".AppImage")]
-              for bundle in "${{ matrix.bundles }}".split(",")
-              if bundle == "appimage"
-          }
-          expected_names.update(
-              target_names[(label, f".{bundle}")]
-              for bundle in "${{ matrix.bundles }}".split(",")
-              if bundle in {"deb", "dmg", "msi", "rpm"}
-          )
-          if "nsis" in "${{ matrix.bundles }}".split(","):
-              expected_names.add(target_names[(label, ".exe")])
-
-          missing = sorted(expected_names.difference(staged))
-          if missing:
-              raise SystemExit(f"Missing staged release asset(s): {', '.join(missing)}")
-
-          for destination_name, source in sorted(staged.items()):
-              print(f"staged {source} -> {output_dir / destination_name}")
-          PY
+          python desktop/scripts/project_release_version.py stage-assets \
+            --version "${SCRIPTSCORE_RELEASE_VERSION}" \
+            --label "${{ matrix.label }}" \
+            --bundles "${SCRIPTSCORE_DESKTOP_BUNDLES}" \
+            --bundle-root desktop/src-tauri/target \
+            --output-dir "desktop/dist/release-assets/${{ matrix.label }}"
 
       - name: Upload package artifacts
         uses: actions/upload-artifact@v7
@@ -522,27 +554,39 @@ jobs:
             desktop/dist/release-package-validation/${{ matrix.label }}/summary.json
 
   publish-release-assets:
-    name: Publish draft prerelease assets
-    if: ${{ startsWith(github.ref, 'refs/tags/rc-') }}
-    needs: package
+    name: Publish preview release assets
+    needs:
+      - resolve-release
+      - define-package-matrix
+      - package
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.resolve-release.outputs.source_sha }}
+          fetch-depth: 0
+
       - name: Download package artifacts
         uses: actions/download-artifact@v7
         with:
-          pattern: scriptscore-rc-*
+          pattern: scriptscore-package-*
           path: release-artifacts
           merge-multiple: true
 
       - name: Prepare release assets
+        env:
+          PUBLIC_VERSION: ${{ needs.resolve-release.outputs.public_version }}
         run: |
           python3 <<'PY'
           import hashlib
+          import os
           import shutil
           from pathlib import Path
 
+          version = os.environ["PUBLIC_VERSION"]
           source_root = Path("release-artifacts")
           output_dir = Path("release-assets")
           package_suffixes = {".AppImage", ".deb", ".dmg", ".exe", ".msi", ".rpm"}
@@ -557,6 +601,8 @@ jobs:
                   continue
               if source.suffix not in package_suffixes:
                   continue
+              if version not in source.name:
+                  raise SystemExit(f"Release asset is missing computed version {version}: {source.name}")
               destination = output_dir / source.name
               if destination.exists():
                   raise SystemExit(f"Duplicate release asset name: {source.name}")
@@ -571,28 +617,116 @@ jobs:
                   digest = hashlib.sha256(asset.read_bytes()).hexdigest()
                   handle.write(f"{digest}  {asset.name}\n")
 
-          for asset in sorted(output_dir.iterdir()):
-              print(asset)
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+              summary.write("## Release assets\n\n")
+              for asset in sorted(output_dir.iterdir()):
+                  summary.write(f"- `{asset.name}`\n")
+                  print(asset)
           PY
 
-      - name: Create or update draft prerelease
+      - name: Decide whether to publish
+        id: publish-guard
+        env:
+          CHANNEL: ${{ needs.resolve-release.outputs.channel }}
+          EVENT_NAME: ${{ github.event_name }}
+          PACKAGE_PLATFORM: ${{ needs.define-package-matrix.outputs.package_platform }}
+          SOURCE_REF: ${{ needs.resolve-release.outputs.source_ref }}
+          SOURCE_SHA: ${{ needs.resolve-release.outputs.source_sha }}
+        run: |
+          should_publish=true
+          reason=""
+
+          if [[ "${CHANNEL}" == "latest" && "${PACKAGE_PLATFORM}" != "all" ]]; then
+            should_publish=false
+            reason="Skipping ci/latest publish because package_platform=${PACKAGE_PLATFORM} is a partial build."
+          fi
+
+          if [[ "${should_publish}" == "true" && "${EVENT_NAME}" == "workflow_run" && "${CHANNEL}" == "latest" ]]; then
+            branch_sha=$(git ls-remote origin "refs/heads/${SOURCE_REF}" | awk '{print $1}')
+            if [[ -z "${branch_sha}" ]]; then
+              should_publish=false
+              reason="Skipping ci/latest publish because branch ${SOURCE_REF} no longer exists."
+            elif [[ "${branch_sha}" != "${SOURCE_SHA}" ]]; then
+              should_publish=false
+              reason="Skipping ci/latest publish because ${SOURCE_SHA} is no longer the tip of ${SOURCE_REF} (${branch_sha})."
+            fi
+          fi
+
+          echo "should_publish=${should_publish}" >> "${GITHUB_OUTPUT}"
+          if [[ "${should_publish}" == "false" ]]; then
+            echo "${reason}"
+            {
+              echo "## Preview publish skipped"
+              echo
+              echo "${reason}"
+            } >> "${GITHUB_STEP_SUMMARY}"
+          fi
+
+      - name: Create CI-owned release tag
+        if: ${{ steps.publish-guard.outputs.should_publish == 'true' }}
+        env:
+          RELEASE_TAG: ${{ needs.resolve-release.outputs.release_tag }}
+          LATEST_TAG: ${{ needs.resolve-release.outputs.latest_tag }}
+          SOURCE_SHA: ${{ needs.resolve-release.outputs.source_sha }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          remote_sha=$(git ls-remote --tags origin "refs/tags/${RELEASE_TAG}" | awk '{print $1}')
+          if [[ "${RELEASE_TAG}" == "${LATEST_TAG}" ]]; then
+            git tag -f "${RELEASE_TAG}" "${SOURCE_SHA}"
+            git push --force origin "refs/tags/${RELEASE_TAG}"
+            exit 0
+          fi
+
+          if [[ -n "${remote_sha}" && "${remote_sha}" != "${SOURCE_SHA}" ]]; then
+            echo "error: release tag ${RELEASE_TAG} already points at ${remote_sha}, not ${SOURCE_SHA}" >&2
+            exit 1
+          fi
+          if [[ -z "${remote_sha}" ]]; then
+            git tag "${RELEASE_TAG}" "${SOURCE_SHA}"
+            git push origin "refs/tags/${RELEASE_TAG}"
+          fi
+
+          git tag -f "${LATEST_TAG}" "${SOURCE_SHA}"
+          git push --force origin "refs/tags/${LATEST_TAG}"
+
+      - name: Create or update preview release
+        if: ${{ steps.publish-guard.outputs.should_publish == 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG_NAME: ${{ github.ref_name }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.resolve-release.outputs.release_tag }}
+          RELEASE_TITLE: ${{ needs.resolve-release.outputs.release_title }}
+          PUBLIC_VERSION: ${{ needs.resolve-release.outputs.public_version }}
+          CHANNEL: ${{ needs.resolve-release.outputs.channel }}
+          SOURCE_SHA: ${{ needs.resolve-release.outputs.source_sha }}
         run: |
-          release_title="ScriptScore ${TAG_NAME}"
-          release_notes="Draft RC package assets from ${GITHUB_WORKFLOW} run ${GITHUB_RUN_NUMBER}."
-          if gh release view "${TAG_NAME}" >/dev/null 2>&1; then
-            gh release edit "${TAG_NAME}" \
-              --draft \
+          release_notes=$(
+            cat <<EOF
+          Automated ${CHANNEL} preview build.
+
+          Version: ${PUBLIC_VERSION}
+          Commit: ${SOURCE_SHA}
+          Workflow run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
+          EOF
+          )
+          if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
+            gh release edit "${RELEASE_TAG}" \
               --prerelease \
-              --title "${release_title}" \
+              --title "${RELEASE_TITLE}" \
               --notes "${release_notes}"
           else
-            gh release create "${TAG_NAME}" \
-              --draft \
+            gh release create "${RELEASE_TAG}" \
               --prerelease \
-              --title "${release_title}" \
+              --verify-tag \
+              --title "${RELEASE_TITLE}" \
               --notes "${release_notes}"
           fi
-          gh release upload "${TAG_NAME}" release-assets/* --clobber
+          if [[ "${RELEASE_TAG}" == "ci/latest" ]]; then
+            while IFS= read -r asset_name; do
+              [[ -n "${asset_name}" ]] || continue
+              gh release delete-asset "${RELEASE_TAG}" "${asset_name}" -y
+            done < <(gh release view "${RELEASE_TAG}" --json assets --jq '.assets[].name')
+          fi
+          gh release upload "${RELEASE_TAG}" release-assets/* --clobber
