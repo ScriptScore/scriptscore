@@ -1,4 +1,8 @@
 name: Desktop Preview Packages
+run-name: >-
+  Desktop Preview Packages ${{ inputs.channel || 'latest' }}
+  ${{ github.event.workflow_run.head_branch || github.ref_name }}
+  ${{ github.event.workflow_run.head_sha || github.sha }}
 
 on:
   workflow_dispatch:
@@ -212,6 +216,7 @@ jobs:
       matrix: ${{ fromJSON(needs.define-package-matrix.outputs.matrix) }}
     env:
       SCRIPTSCORE_RELEASE_VERSION: ${{ needs.resolve-release.outputs.public_version }}
+      SCRIPTSCORE_RELEASE_MSI_VERSION: ${{ needs.resolve-release.outputs.msi_version }}
       SCRIPTSCORE_DESKTOP_BUNDLES: ${{ matrix.bundles }}
       SCRIPTSCORE_DESKTOP_TARGET: ${{ matrix.rust_target }}
       SCRIPTSCORE_DESKTOP_PORTABLE_PYTHON_TARGET: ${{ matrix.python_target }}
@@ -296,7 +301,7 @@ jobs:
         run: npm ci
 
       - name: Install CLI fast-quality dependencies
-        if: ${{ github.event_name != 'workflow_dispatch' || !inputs.fast_track }}
+        if: ${{ github.event_name != 'workflow_run' && (github.event_name != 'workflow_dispatch' || !inputs.fast_track) }}
         working-directory: cli
         run: uv sync --only-group ci-runtime --only-group quality --no-install-project --frozen
 
@@ -317,12 +322,21 @@ jobs:
             --version "${SCRIPTSCORE_RELEASE_VERSION}"
           echo "SCRIPTSCORE_DESKTOP_TAURI_CONFIG=${release_config}" >> "${GITHUB_ENV}"
           echo "Using generated Tauri config ${release_config}"
+          if [[ "${RUNNER_OS}" == "Windows" ]]; then
+            msi_config="$(pwd)/desktop/src-tauri/.tauri.msi.conf.json"
+            python desktop/scripts/project_release_version.py write-tauri-config \
+              --source desktop/src-tauri/tauri.conf.json \
+              --output "${msi_config}" \
+              --version "${SCRIPTSCORE_RELEASE_MSI_VERSION}"
+            echo "SCRIPTSCORE_DESKTOP_MSI_TAURI_CONFIG=${msi_config}" >> "${GITHUB_ENV}"
+            echo "Using generated MSI Tauri config ${msi_config}"
+          fi
 
       - name: Install cargo-tauri
         run: cargo install tauri-cli --version '^2'
 
       - name: CLI fast-quality gate
-        if: ${{ github.event_name != 'workflow_dispatch' || !inputs.fast_track }}
+        if: ${{ github.event_name != 'workflow_run' && (github.event_name != 'workflow_dispatch' || !inputs.fast_track) }}
         working-directory: cli
         run: |
           uv run --no-sync ruff check .
@@ -330,7 +344,7 @@ jobs:
           uv run --no-sync mypy
 
       - name: Frontend quality gate
-        if: ${{ github.event_name != 'workflow_dispatch' || !inputs.fast_track }}
+        if: ${{ github.event_name != 'workflow_run' && (github.event_name != 'workflow_dispatch' || !inputs.fast_track) }}
         working-directory: desktop/frontend
         run: |
           npm run lint
@@ -343,7 +357,7 @@ jobs:
           mkdir -p desktop/dist/legal
 
       - name: Desktop host quality gate
-        if: ${{ github.event_name != 'workflow_dispatch' || !inputs.fast_track }}
+        if: ${{ github.event_name != 'workflow_run' && (github.event_name != 'workflow_dispatch' || !inputs.fast_track) }}
         run: |
           cargo fmt --check --manifest-path desktop/src-tauri/Cargo.toml
           cargo clippy --manifest-path desktop/src-tauri/Cargo.toml --workspace --all-targets --all-features --target "${SCRIPTSCORE_DESKTOP_TARGET}" -- -D warnings

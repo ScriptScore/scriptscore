@@ -280,30 +280,43 @@ build_desktop_packages() {
 }
 
 if bundle_selection_includes "${BUNDLES}" "msi"; then
-  public_version=$(
-    "${PYTHON_BIN}" "${SCRIPT_DIR}/project_release_version.py" tauri-version "${TAURI_CONFIG}"
-  )
-  msi_version=$(
-    "${PYTHON_BIN}" "${SCRIPT_DIR}/project_release_version.py" msi-version "${public_version}"
-  )
   non_msi_bundles=$(bundle_selection_without "${BUNDLES}" "msi")
 
-  if [[ "${msi_version}" != "${public_version}" ]]; then
+  if [[ -n "${SCRIPTSCORE_DESKTOP_MSI_TAURI_CONFIG:-}" ]]; then
     if [[ -n "${non_msi_bundles}" ]]; then
-      echo "Building non-MSI desktop packages with public version ${public_version}:"
+      echo "Building non-MSI desktop packages with public release config:"
       echo "  ${non_msi_bundles}"
       build_desktop_packages "${TAURI_CONFIG}" "${non_msi_bundles}"
     fi
 
-    projected_config="${DESKTOP_ROOT}/src-tauri/.tauri.msi.conf.json"
-    "${PYTHON_BIN}" "${SCRIPT_DIR}/project_release_version.py" write-tauri-config \
-      --source "${TAURI_CONFIG}" \
-      --output "${projected_config}" \
-      --version "${msi_version}"
-    echo "Building MSI with native version projection ${public_version} -> ${msi_version}"
-    build_desktop_packages "${projected_config}" "msi"
+    echo "Building MSI with generated native version config:"
+    echo "  ${SCRIPTSCORE_DESKTOP_MSI_TAURI_CONFIG}"
+    build_desktop_packages "${SCRIPTSCORE_DESKTOP_MSI_TAURI_CONFIG}" "msi"
   else
-    build_desktop_packages "${TAURI_CONFIG}" "${BUNDLES}"
+    public_version=$(
+      "${PYTHON_BIN}" "${SCRIPT_DIR}/project_release_version.py" tauri-version "${TAURI_CONFIG}"
+    )
+    msi_version=$(
+      "${PYTHON_BIN}" "${SCRIPT_DIR}/project_release_version.py" msi-version "${public_version}"
+    )
+
+    if [[ "${msi_version}" != "${public_version}" ]]; then
+      if [[ -n "${non_msi_bundles}" ]]; then
+        echo "Building non-MSI desktop packages with public version ${public_version}:"
+        echo "  ${non_msi_bundles}"
+        build_desktop_packages "${TAURI_CONFIG}" "${non_msi_bundles}"
+      fi
+
+      projected_config="${DESKTOP_ROOT}/src-tauri/.tauri.msi.conf.json"
+      "${PYTHON_BIN}" "${SCRIPT_DIR}/project_release_version.py" write-tauri-config \
+        --source "${TAURI_CONFIG}" \
+        --output "${projected_config}" \
+        --version "${msi_version}"
+      echo "Building MSI with native version projection ${public_version} -> ${msi_version}"
+      build_desktop_packages "${projected_config}" "msi"
+    else
+      build_desktop_packages "${TAURI_CONFIG}" "${BUNDLES}"
+    fi
   fi
 else
   build_desktop_packages "${TAURI_CONFIG}" "${BUNDLES}"
