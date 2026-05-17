@@ -118,15 +118,29 @@ python desktop/scripts/generate_legal_artifacts.py
 The generated files are placed under `desktop/dist/legal/` for desktop bundling and release review.
 Do not commit `desktop/dist/`; it is generated output and may contain machine-local paths.
 
-## RC Package Validation
+## Desktop Preview Packages
 
-The `RC Package Validation` GitHub Actions workflow builds first-release package
-candidates across the platform matrix without publishing them. It is intended
-for release-candidate validation, not a signed public release.
+The `Desktop Preview Packages` GitHub Actions workflow builds preview desktop
+packages across the platform matrix and publishes them to GitHub Releases with
+CI-managed release tags. Maintainers do not need to create semver tags or bump
+checked-in prerelease versions before running the workflow.
 
-Push semver prerelease tags such as `v0.1.0-rc.1` to publish draft RC assets.
-Stable `v*` tags still run package validation, but they do not run the draft
-prerelease publishing job.
+Successful `CI` runs for push events on `main` and `release/**` publish the
+`latest` preview channel. Failed CI runs, pull request CI runs, and manually
+dispatched CI runs do not start preview package publishing. Manual workflow
+dispatch can publish either `latest` or `rc`, and can limit the build to one
+package platform while iterating. The workflow computes versions from the
+checked-in base desktop version plus the GitHub Actions run number, for example
+`0.1.0-latest.123` or `0.1.0-rc.124`. GitHub Releases require tags, so the
+workflow owns internal tags such as the moving `ci/latest` tag and immutable RC
+tags like `ci/rc/0.1.0-rc.124`; those tags are implementation details and
+should not be created manually. The moving `ci/latest` release replaces its
+asset set on each successful branch build, while RC releases keep their
+versioned per-run assets. Manual `latest` runs only publish to `ci/latest` when
+`package_platform=all`; single-platform manual runs retain their workflow
+artifacts without replacing the full latest release asset set. Automatic
+`latest` publishing also verifies that the successful CI commit is still the
+source branch tip before moving `ci/latest`.
 
 The workflow builds:
 

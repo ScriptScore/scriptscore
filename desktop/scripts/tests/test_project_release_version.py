@@ -25,6 +25,7 @@ class ProjectReleaseVersionTests(unittest.TestCase):
         self.assertEqual(MODULE.project_msi_version("0.1.0-alpha.1"), "0.1.0-1001")
         self.assertEqual(MODULE.project_msi_version("0.1.0-beta.12"), "0.1.0-2012")
         self.assertEqual(MODULE.project_msi_version("0.1.0-rc.1"), "0.1.0-3001")
+        self.assertEqual(MODULE.project_msi_version("0.1.0-latest.42"), "0.1.0-4042")
 
     def test_project_msi_version_rejects_non_numeric_or_unknown_prereleases(self) -> None:
         for version in ("0.1.0-preview.1", "0.1.0-rc.one", "0.1.0-rc.0"):
@@ -34,7 +35,107 @@ class ProjectReleaseVersionTests(unittest.TestCase):
 
     def test_project_msi_version_rejects_projection_above_msi_limit(self) -> None:
         with self.assertRaisesRegex(MODULE.VersionProjectionError, "exceeds"):
-            MODULE.project_msi_version("0.1.0-rc.62536")
+            MODULE.project_msi_version("0.1.0-latest.61536")
+
+    def test_resolve_release_metadata_generates_latest_from_run_number(self) -> None:
+        metadata = MODULE.resolve_release_metadata(
+            base_version="0.1.0",
+            channel="latest",
+            run_number=123,
+            source_sha="abc123",
+            source_ref="main",
+        )
+
+        self.assertEqual(metadata.public_version, "0.1.0-latest.123")
+        self.assertEqual(metadata.msi_version, "0.1.0-4123")
+        self.assertEqual(metadata.release_tag, "ci/latest")
+        self.assertEqual(metadata.latest_tag, "ci/latest")
+        self.assertEqual(metadata.asset_prefix, "ScriptScore-Desktop-0.1.0-latest.123")
+        self.assertTrue(metadata.prerelease)
+        self.assertEqual(metadata.source_sha, "abc123")
+        self.assertEqual(metadata.source_ref, "main")
+
+    def test_resolve_release_metadata_generates_rc_from_run_number(self) -> None:
+        metadata = MODULE.resolve_release_metadata(
+            base_version="0.1.0",
+            channel="rc",
+            run_number=7,
+        )
+
+        self.assertEqual(metadata.public_version, "0.1.0-rc.7")
+        self.assertEqual(metadata.msi_version, "0.1.0-3007")
+        self.assertEqual(metadata.release_tag, "ci/rc/0.1.0-rc.7")
+        self.assertEqual(metadata.latest_tag, "ci/rc/latest")
+
+    def test_resolve_release_metadata_rejects_prerelease_base_version(self) -> None:
+        with self.assertRaisesRegex(MODULE.VersionProjectionError, "base version"):
+            MODULE.resolve_release_metadata(
+                base_version="0.1.0-rc.1",
+                channel="rc",
+                run_number=1,
+            )
+
+    def test_resolve_release_metadata_rejects_zero_run_number(self) -> None:
+        with self.assertRaisesRegex(MODULE.VersionProjectionError, "run number"):
+            MODULE.resolve_release_metadata(
+                base_version="0.1.0",
+                channel="latest",
+                run_number=0,
+            )
+
+    def test_expected_desktop_asset_names_uses_public_version(self) -> None:
+        self.assertEqual(
+            MODULE.expected_desktop_asset_names(
+                "0.1.0-latest.123", "linux-x64", "appimage,deb,rpm"
+            ),
+            {
+                "ScriptScore-Desktop-0.1.0-latest.123-linux-x64.AppImage",
+                "ScriptScore-Desktop-0.1.0-latest.123-linux-x64.deb",
+                "ScriptScore-Desktop-0.1.0-latest.123-linux-x64.rpm",
+            },
+        )
+        self.assertEqual(
+            MODULE.expected_desktop_asset_names("0.1.0-rc.7", "windows-x64", "nsis,msi"),
+            {
+                "ScriptScore-Desktop-0.1.0-rc.7-windows-x64-setup.exe",
+                "ScriptScore-Desktop-0.1.0-rc.7-windows-x64.msi",
+            },
+        )
+
+    def test_stage_desktop_assets_renames_built_packages(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            bundle_root = root / "target"
+            output_dir = root / "release-assets"
+            for directory, name in (
+                ("appimage", "ScriptScore Desktop_0.1.0_amd64.AppImage"),
+                ("deb", "scriptscore-desktop_0.1.0_amd64.deb"),
+                ("rpm", "scriptscore-desktop-0.1.0.x86_64.rpm"),
+            ):
+                package_dir = bundle_root / "release" / "bundle" / directory
+                package_dir.mkdir(parents=True)
+                (package_dir / name).write_text("package", encoding="utf-8")
+
+            staged = MODULE.stage_desktop_assets(
+                version="0.1.0-latest.123",
+                label="linux-x64",
+                bundles="appimage,deb,rpm",
+                bundle_root=bundle_root,
+                output_dir=output_dir,
+            )
+
+            self.assertEqual(
+                staged,
+                [
+                    "ScriptScore-Desktop-0.1.0-latest.123-linux-x64.AppImage",
+                    "ScriptScore-Desktop-0.1.0-latest.123-linux-x64.deb",
+                    "ScriptScore-Desktop-0.1.0-latest.123-linux-x64.rpm",
+                ],
+            )
+            self.assertEqual(
+                sorted(path.name for path in output_dir.iterdir()),
+                staged,
+            )
 
     def test_write_tauri_config_with_version_preserves_other_config(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
