@@ -284,6 +284,10 @@ fn pii_name_parts(display_name: &str) -> Vec<String> {
         .collect()
 }
 
+fn has_active_runtime_job(state: &Arc<AppStateInner>) -> bool {
+    state.lock().scheduler.has_active_jobs()
+}
+
 pub(crate) fn confirm_student_alignment(
     state: &Arc<AppStateInner>,
     project_path: &Path,
@@ -291,6 +295,9 @@ pub(crate) fn confirm_student_alignment(
     settings: &AppSettings,
     event_sink: &dyn RuntimeEventSink,
 ) -> HostResult<ExamWorkspaceState> {
+    if has_active_runtime_job(state) {
+        return save_student_alignment_review(project_path, input);
+    }
     let workspace = project_store::load_exam_workspace_state(project_path)?;
     let intake_by_ref = intake_map(&workspace)?;
     let intake = intake_by_ref.get(&input.student_ref).ok_or_else(|| {
@@ -343,6 +350,9 @@ pub(crate) fn confirm_student_detect_review(
     settings: &AppSettings,
     event_sink: &dyn RuntimeEventSink,
 ) -> HostResult<ExamWorkspaceState> {
+    if has_active_runtime_job(state) {
+        return save_student_detect_review(project_path, input);
+    }
     let workspace = project_store::load_exam_workspace_state(project_path)?;
     let intake_by_ref = intake_map(&workspace)?;
     let intake = intake_by_ref.get(&input.student_ref).ok_or_else(|| {
@@ -467,6 +477,9 @@ pub(crate) fn confirm_student_parse_review(
     settings: &AppSettings,
     event_sink: &dyn RuntimeEventSink,
 ) -> HostResult<ExamWorkspaceState> {
+    if has_active_runtime_job(state) {
+        return save_student_parse_review(project_path, input);
+    }
     let workspace = project_store::load_exam_workspace_state(project_path)?;
     let mut workflow_state = project_store::load_student_workflow_state(project_path)?;
     let should_run_grading = {

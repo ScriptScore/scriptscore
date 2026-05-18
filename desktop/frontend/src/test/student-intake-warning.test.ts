@@ -1146,6 +1146,23 @@ describe('student intake overwrite warning', () => {
     expect(screen.getByText('2 submissions in this intake session')).toBeTruthy();
   });
 
+  it('shows the active PDF filename in the intake header', async () => {
+    dialogMocks.open.mockResolvedValue(['/tmp/Jordan_Rivera_exam.pdf', '/tmp/other-exam.pdf']);
+
+    render(StudentWorkflowWorkspace, {
+      workspaceState: baseWorkspaceState(),
+      prerequisitesMet: true,
+      lmsCourseId: 'persisted-course-id',
+      busyAction: null,
+      onFinalizeSubmission: vi.fn()
+    });
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Upload Submission' }));
+
+    expect(await screen.findByText('Student Intake - Jordan_Rivera_exam.pdf')).toBeTruthy();
+    expect(screen.getByText('Jordan_Rivera_exam.pdf')).toBeTruthy();
+  });
+
   it('scrolls the whole intake main panel including the queued PDF summary', async () => {
     dialogMocks.open.mockResolvedValue(['/tmp/exam-a.pdf', '/tmp/exam-b.pdf']);
 
@@ -1158,7 +1175,7 @@ describe('student intake overwrite warning', () => {
 
     await fireEvent.click(screen.getByRole('button', { name: 'Upload Submission' }));
 
-    const header = await screen.findByText('Student Intake Processor');
+    const header = await screen.findByText('Student Intake - exam-a.pdf');
     const mainPanel = header.closest('section');
     expect(mainPanel?.className).toContain('overflow-y-auto');
     expect(within(mainPanel as HTMLElement).getByText('Queued PDFs')).toBeTruthy();

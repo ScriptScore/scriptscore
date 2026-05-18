@@ -133,6 +133,7 @@
   let workflowCommandProgressByJobId = new Map<string, WorkflowCommandProgressEntry>();
   let workflowStudentRefByJobId = new Map<string, string>();
   let latestWorkflowStudentRefByStage = new Map<string, string>();
+  let activeIntakeFilename: string | null = null;
   let pendingDeleteStudent: { studentRef: string; displayName: string } | null = null;
 
   function saveBusyKey(kind: string, ...parts: Array<string | number>): string {
@@ -622,6 +623,7 @@
   function showHome() {
     selectedStudentRef = null;
     shellMode = 'home';
+    activeIntakeFilename = null;
   }
 
   function showIntake() {
@@ -964,8 +966,11 @@
             Back to workflow
           </DesktopButton>
         </div>
-        <div class="flex-1 text-center text-base font-semibold text-workspace-text-primary">
-          Student Intake Processor
+        <div
+          class="min-w-0 flex-1 truncate text-center text-base font-semibold text-workspace-text-primary"
+          title={activeIntakeFilename ? `Student Intake - ${activeIntakeFilename}` : 'Student Intake Processor'}
+        >
+          {activeIntakeFilename ? `Student Intake - ${activeIntakeFilename}` : 'Student Intake Processor'}
         </div>
         <div class="w-40"></div>
       </div>
@@ -980,6 +985,9 @@
         onEnsureRosterCache={ensureSharedRosterCache}
         existingIntakeItems={intakeItems}
         {onFinalizeSubmission}
+        onActiveFileChange={(filename) => {
+          activeIntakeFilename = filename;
+        }}
         onSubmissionCompleted={async ({ studentRef }) => {
           selectedStudentRef = studentRef;
           await loadRosterCacheState();

@@ -904,6 +904,14 @@ impl AppState {
         event_sink: Arc<dyn RuntimeEventSink>,
     ) -> HostResult<String> {
         let inner = Arc::clone(&self.inner);
+        {
+            let app = inner.lock();
+            if app.scheduler.has_active_jobs() {
+                return Err(HostError::Conflict(
+                    "A desktop job is already active in this session.".into(),
+                ));
+            }
+        }
         Ok(host_workflow::start_host_workflow_job(
             Arc::clone(&inner),
             "begin_student_workflow",

@@ -311,6 +311,7 @@
     if (
       event.eventType === 'workflow_state_updated' &&
       busyAction === 'studentWorkflow' &&
+      activeWorkspaceJobId === null &&
       event.workerStatus === 'ready' &&
       event.payload.workflowStatus !== 'running'
     ) {
@@ -452,10 +453,16 @@
         if (shouldEnsureAutomaticRubricsAfterTerminalJob(event)) {
           scheduleAutomaticRubricEnsureAfterUiPaint(true);
         }
+        if (deferredStudentWorkflowContinuation) {
+          void runDeferredStudentWorkflowContinuation();
+        }
       },
       onFailed: (event) => {
         if (shouldRefreshWorkspaceAfterTerminalJob(event)) {
           requestWorkspaceRefresh(true, true);
+        }
+        if (deferredStudentWorkflowContinuation) {
+          void runDeferredStudentWorkflowContinuation();
         }
       }
     });
@@ -737,16 +744,33 @@
       return;
     }
     deferredStudentWorkflowContinuation = true;
-    if (busyAction !== 'studentWorkflow') {
+    if (!studentWorkflowCommandInFlight()) {
       void runDeferredStudentWorkflowContinuation();
     }
+  }
+
+  function desktopRuntimeHasQueuedOrActiveJob(): boolean {
+    return (
+      (($shellState.workerActivity?.activeJobs.length ?? 0) > 0) ||
+      (($shellState.workerActivity?.pendingJobCount ?? 0) > 0)
+    );
+  }
+
+  function studentWorkflowCommandInFlight(): boolean {
+    return (
+      busyAction === 'studentWorkflow' ||
+      activeWorkspaceJobId !== null ||
+      desktopRuntimeHasQueuedOrActiveJob()
+    );
   }
 
   async function runDeferredStudentWorkflowContinuation(): Promise<void> {
     if (
       !deferredStudentWorkflowContinuation ||
       studentWorkflowContinuationQueued ||
-      busyAction !== null
+      busyAction !== null ||
+      activeWorkspaceJobId !== null ||
+      desktopRuntimeHasQueuedOrActiveJob()
     ) {
       return;
     }
@@ -1772,7 +1796,7 @@
     studentRef: string,
     pages: import('$lib/types').StudentWorkflowAlignmentPage[]
   ) {
-    if (busyAction === 'studentWorkflow') {
+    if (studentWorkflowCommandInFlight()) {
       const key = studentReviewSaveKey('alignment', studentRef);
       setStudentReviewSaveBusy(key, true);
       actionError = null;
@@ -1800,7 +1824,7 @@
     questionId: string,
     correctedText: string
   ) {
-    if (busyAction === 'studentWorkflow') {
+    if (studentWorkflowCommandInFlight()) {
       const key = studentReviewSaveKey('parse', studentRef, questionId);
       setStudentReviewSaveBusy(key, true);
       actionError = null;
@@ -1833,7 +1857,7 @@
     studentRef: string,
     resolutions: import('$lib/types').StudentWorkflowDetectReviewResolutionInput[]
   ) {
-    if (busyAction === 'studentWorkflow') {
+    if (studentWorkflowCommandInFlight()) {
       const key = studentReviewSaveKey('detect', studentRef);
       setStudentReviewSaveBusy(key, true);
       actionError = null;
@@ -1876,7 +1900,7 @@
         pointsAwarded
       });
       applyWorkspaceState(next, false);
-      if (busyAction === 'studentWorkflow') {
+      if (studentWorkflowCommandInFlight()) {
         markDeferredStudentWorkflowContinuation(next);
       }
     } catch (error) {
