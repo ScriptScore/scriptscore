@@ -433,6 +433,19 @@ pub fn begin_student_workflow(
 }
 
 #[tauri::command]
+pub fn regrade_question_answers(
+    question_id: String,
+    settings: AppSettings,
+    state: State<'_, AppState>,
+    app: AppHandle,
+) -> Result<String, String> {
+    let event_sink = Arc::new(AppHandleRuntimeEventSink::new(app));
+    state
+        .start_regrade_question_answers_job(question_id, settings, event_sink)
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
 pub fn confirm_student_alignment(
     input: StudentWorkflowAlignmentUpdateInput,
     settings: AppSettings,

@@ -230,6 +230,24 @@ impl AppStateInner {
         student_workflow::begin_student_workflow(self, &project_path, settings, event_sink)
     }
 
+    pub(crate) fn regrade_question_answers(
+        self: &Arc<Self>,
+        question_id: &str,
+        settings: &AppSettings,
+        event_sink: &dyn RuntimeEventSink,
+    ) -> HostResult<ExamWorkspaceState> {
+        let app = self.lock();
+        let project_path = app.current_project_path()?;
+        drop(app);
+        student_workflow::regrade_question_answers(
+            self,
+            &project_path,
+            question_id,
+            settings,
+            event_sink,
+        )
+    }
+
     pub(crate) fn confirm_student_alignment(
         self: &Arc<Self>,
         input: student_workflow::StudentWorkflowAlignmentUpdateInput,
@@ -920,6 +938,37 @@ impl AppState {
             Arc::clone(&event_sink),
             move || {
                 let workspace = inner.begin_student_workflow(&settings, &*event_sink)?;
+                let mut app = inner.lock();
+                app.current_project = Some(workspace.project.clone());
+                Ok(workspace)
+            },
+        ))
+    }
+
+    pub fn start_regrade_question_answers_job(
+        &self,
+        question_id: String,
+        settings: AppSettings,
+        event_sink: Arc<dyn RuntimeEventSink>,
+    ) -> HostResult<String> {
+        let inner = Arc::clone(&self.inner);
+        {
+            let app = inner.lock();
+            if app.scheduler.has_active_jobs() {
+                return Err(HostError::Conflict(
+                    "A desktop job is already active in this session.".into(),
+                ));
+            }
+        }
+        Ok(host_workflow::start_host_workflow_job(
+            Arc::clone(&inner),
+            "regrade_question_answers",
+            host_workflow::HostWorkflowResultKind::Workspace,
+            true,
+            Arc::clone(&event_sink),
+            move || {
+                let workspace =
+                    inner.regrade_question_answers(&question_id, &settings, &*event_sink)?;
                 let mut app = inner.lock();
                 app.current_project = Some(workspace.project.clone());
                 Ok(workspace)

@@ -46,9 +46,15 @@ pub(crate) fn prepare_generate_rubric_for_job(
     )?)?;
     let question = workspace
         .questions
-        .into_iter()
+        .iter()
         .find(|item| item.question_id == question_id)
+        .cloned()
         .ok_or_else(|| HostError::Validation(format!("Question '{question_id}' was not found.")))?;
+    if question_moderation_accepted(&workspace, question_id) {
+        return Err(HostError::Validation(
+            "This question has been accepted in moderation. Undo moderation acceptance before changing its rubric.".into(),
+        ));
+    }
     let analysis = question.analysis.clone();
     let question_text_clean = analysis.question_text_clean.clone().ok_or_else(|| {
         HostError::Validation("Question analysis is required before rubric generation.".into())
@@ -164,6 +170,11 @@ pub(crate) fn save_rubric_update(
         .ok_or_else(|| {
             HostError::Validation(format!("Question '{}' was not found.", input.question_id))
         })?;
+    if question_moderation_accepted(&workspace, &input.question_id) {
+        return Err(HostError::Validation(
+            "This question has been accepted in moderation. Undo moderation acceptance before changing its rubric.".into(),
+        ));
+    }
     if input.approve {
         validate_rubric_approve_points_sum(question.max_points, &input.criteria)?;
     }
@@ -210,6 +221,14 @@ pub(crate) fn save_rubric_update(
     }
     project_store::save_rubric_state(project_path, &input.question_id, &next)?;
     project_store::load_exam_workspace_state(project_path)
+}
+
+fn question_moderation_accepted(workspace: &ExamWorkspaceState, question_id: &str) -> bool {
+    workspace
+        .moderation_state
+        .question_reviews
+        .iter()
+        .any(|review| review.question_id == question_id)
 }
 
 fn rubric_save_disposition(
@@ -406,8 +425,9 @@ mod tests {
         validate_rubric_approve_points_sum,
     };
     use crate::models::{
-        RubricApprovalBasis, RubricCriterion, RubricState, RubricUpdateInput,
-        StudentWorkflowAnswer, StudentWorkflowState, StudentWorkflowSubmission, WorkspaceWarning,
+        ModerationQuestionReview, ModerationState, RubricApprovalBasis, RubricCriterion,
+        RubricState, RubricUpdateInput, StudentWorkflowAnswer, StudentWorkflowState,
+        StudentWorkflowSubmission, WorkspaceWarning,
     };
     use crate::project_store;
     use rusqlite::Connection;
@@ -654,6 +674,84 @@ mod tests {
         let workflow = project_store::load_student_workflow_state(&project_path)
             .expect("workflow should load");
         assert!(workflow.submissions[0].answers[0].stale);
+
+        drop(connection);
+        std::fs::remove_dir_all(&project_path).expect("project dir should clean up");
+    }
+
+    #[test]
+    fn accepted_moderation_question_rejects_rubric_update() {
+        let project_path = std::env::temp_dir().join(format!(
+            "scriptscore-rubric-accepted-lock-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or(Duration::from_secs(0))
+                .as_millis()
+        ));
+        std::fs::create_dir_all(&project_path).expect("project dir should exist");
+        let connection = Connection::open(project_store::schema::project_db_path(&project_path))
+            .expect("project db should open");
+        project_store::schema::initialize_schema(&connection).expect("schema should initialize");
+        connection
+            .execute(
+                "INSERT INTO project (
+                    project_id, display_name, redaction_required, instructor_profile_json, trace_refs_json
+                ) VALUES ('project_1', 'Project', 0, '{}', '{}')",
+                [],
+            )
+            .expect("project should insert");
+        connection
+            .execute(
+                "INSERT INTO question (
+                    question_id, question_number, page_number, max_points, prompt_text, baseline_pdf_text
+                ) VALUES ('question_1', 1, 1, 5, 'Original prompt', 'Original prompt')",
+                [],
+            )
+            .expect("question should insert");
+
+        let criterion = sample_criterion(5);
+        project_store::save_rubric_state(
+            &project_path,
+            "question_1",
+            &RubricState {
+                status: "approved".into(),
+                criteria: vec![criterion.clone()],
+                warnings: vec![],
+                approved_at: Some("1".into()),
+                latest_job_id: None,
+                approval_basis: Some(RubricApprovalBasis {
+                    question_text: "Original prompt".into(),
+                    question_context: "".into(),
+                    max_points: Some(5),
+                    criteria: vec![criterion.clone()],
+                }),
+            },
+        )
+        .expect("rubric should save");
+        project_store::save_moderation_state(
+            &project_path,
+            &ModerationState {
+                question_reviews: vec![ModerationQuestionReview {
+                    question_id: "question_1".into(),
+                    reviewed_at: "1".into(),
+                }],
+                ..ModerationState::default()
+            },
+        )
+        .expect("moderation state should save");
+
+        let err = save_rubric_update(
+            &project_path,
+            RubricUpdateInput {
+                question_id: "question_1".into(),
+                criteria: vec![criterion],
+                approve: false,
+                rubric_edit_impact: Some("grading".into()),
+            },
+        )
+        .expect_err("accepted moderation question should reject rubric edits");
+
+        assert!(err.to_string().contains("accepted in moderation"));
 
         drop(connection);
         std::fs::remove_dir_all(&project_path).expect("project dir should clean up");

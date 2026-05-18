@@ -201,6 +201,11 @@ fn derive_results_lms_rows(
             )
         })
         .collect::<HashMap<_, _>>();
+    let reviewed_question_ids = moderation_state
+        .question_reviews
+        .iter()
+        .map(|review| review.question_id.as_str())
+        .collect::<HashSet<_>>();
     let finalizations_by_student = results_lms_state
         .finalization_records
         .iter()
@@ -217,6 +222,7 @@ fn derive_results_lms_rows(
                 questions,
                 &score_overrides,
                 &feedback_overrides,
+                &reviewed_question_ids,
                 &finalizations_by_student,
                 results_lms_state,
             )
@@ -332,6 +338,7 @@ fn build_results_lms_row(
     questions: &[QuestionRecord],
     score_overrides: &HashMap<(&str, &str), i64>,
     feedback_overrides: &HashMap<(&str, &str), &str>,
+    reviewed_question_ids: &HashSet<&str>,
     finalizations_by_student: &HashMap<&str, &ResultFinalizationRecord>,
     results_lms_state: &ResultsLmsState,
 ) -> ResultStudentRow {
@@ -351,6 +358,7 @@ fn build_results_lms_row(
                     .copied(),
                 score_overrides,
                 feedback_overrides,
+                reviewed_question_ids,
             )
         })
         .fold(
@@ -410,25 +418,10 @@ fn build_result_question_row(
     answer: Option<&StudentWorkflowAnswer>,
     score_overrides: &HashMap<(&str, &str), i64>,
     feedback_overrides: &HashMap<(&str, &str), &str>,
+    reviewed_question_ids: &HashSet<&str>,
 ) -> ResultQuestionOutcome {
     let Some(answer) = answer else {
-        let message = format!(
-            "Question {} is missing from this graded submission.",
-            question.question_number
-        );
-        return ResultQuestionOutcome {
-            row: ResultQuestionRow {
-                question_id: question.question_id.clone(),
-                question_number: question.question_number,
-                max_points: question.max_points,
-                effective_total_points: None,
-                effective_feedback_text: String::new(),
-                uses_moderated_total: false,
-                uses_moderated_feedback: false,
-                blocked_reason: Some(message.clone()),
-            },
-            blocked_reason: Some(message),
-        };
+        return missing_result_question_row(question);
     };
 
     let override_key = (
@@ -436,13 +429,15 @@ fn build_result_question_row(
         question.question_id.as_str(),
     );
     let moderated_total = score_overrides.get(&override_key).copied();
-    let effective_total_points = moderated_total.or(answer.total_points_awarded);
-    let blocked_reason = effective_total_points.is_none().then(|| {
-        format!(
-            "Question {} has no effective score yet.",
-            question.question_number
-        )
-    });
+    let accepted_in_moderation = reviewed_question_ids.contains(question.question_id.as_str());
+    let effective_total_points =
+        effective_question_total(answer, moderated_total, accepted_in_moderation);
+    let blocked_reason = result_question_blocked_reason(
+        question,
+        answer,
+        accepted_in_moderation,
+        effective_total_points,
+    );
 
     ResultQuestionOutcome {
         row: ResultQuestionRow {
@@ -461,6 +456,59 @@ fn build_result_question_row(
         },
         blocked_reason,
     }
+}
+
+fn missing_result_question_row(question: &QuestionRecord) -> ResultQuestionOutcome {
+    let message = format!(
+        "Question {} is missing from this graded submission.",
+        question.question_number
+    );
+    ResultQuestionOutcome {
+        row: ResultQuestionRow {
+            question_id: question.question_id.clone(),
+            question_number: question.question_number,
+            max_points: question.max_points,
+            effective_total_points: None,
+            effective_feedback_text: String::new(),
+            uses_moderated_total: false,
+            uses_moderated_feedback: false,
+            blocked_reason: Some(message.clone()),
+        },
+        blocked_reason: Some(message),
+    }
+}
+
+fn effective_question_total(
+    answer: &StudentWorkflowAnswer,
+    moderated_total: Option<i64>,
+    accepted_in_moderation: bool,
+) -> Option<i64> {
+    if answer.stale && !accepted_in_moderation {
+        None
+    } else {
+        moderated_total.or(answer.total_points_awarded)
+    }
+}
+
+fn result_question_blocked_reason(
+    question: &QuestionRecord,
+    answer: &StudentWorkflowAnswer,
+    accepted_in_moderation: bool,
+    effective_total_points: Option<i64>,
+) -> Option<String> {
+    effective_total_points.is_none().then(|| {
+        if answer.stale && !accepted_in_moderation {
+            format!(
+                "Question {} needs regrading after a rubric change.",
+                question.question_number
+            )
+        } else {
+            format!(
+                "Question {} has no effective score yet.",
+                question.question_number
+            )
+        }
+    })
 }
 
 fn is_current_finalization(
@@ -825,10 +873,10 @@ mod tests {
     use super::*;
     use crate::models::{
         LmsUploadAttemptResult, LmsUploadMode, LmsUploadStudentResult, LmsUploadStudentStatus,
-        ModerationFeedbackOverride, ModerationScoreOverride, QuestionRecord,
-        ResultFinalizationRecord, ResultsLmsState, ResultsLmsTarget, RubricCriterion, RubricState,
-        StudentWorkflowAnswer, StudentWorkflowCriterionResult, StudentWorkflowState,
-        StudentWorkflowSubmission,
+        ModerationFeedbackOverride, ModerationQuestionReview, ModerationScoreOverride,
+        QuestionRecord, ResultFinalizationRecord, ResultsLmsState, ResultsLmsTarget,
+        RubricCriterion, RubricState, StudentWorkflowAnswer, StudentWorkflowCriterionResult,
+        StudentWorkflowState, StudentWorkflowSubmission,
     };
 
     fn question_with_rubric() -> QuestionRecord {
@@ -1122,6 +1170,61 @@ mod tests {
         assert!(!rows[0].ready_to_finalize);
         assert_eq!(rows[0].blocked_reasons.len(), 1);
         assert!(rows[0].result_fingerprint.is_none());
+    }
+
+    #[test]
+    fn results_rows_block_stale_non_accepted_answers() {
+        let mut submission =
+            graded_submission_with_answer("student_1", "question_1", Some(3), Some("Automated"));
+        submission.answers[0].stale = true;
+
+        let rows = derive_results_lms_rows(
+            &[result_question("question_1", 1, 5)],
+            &[],
+            &StudentWorkflowState {
+                status: "graded".into(),
+                latest_job_id: None,
+                submissions: vec![submission],
+            },
+            &ModerationState::default(),
+            &ResultsLmsState::default(),
+        );
+
+        assert_eq!(rows.len(), 1);
+        assert!(!rows[0].ready_to_finalize);
+        assert_eq!(
+            rows[0].blocked_reasons,
+            vec!["Question 1 needs regrading after a rubric change."]
+        );
+    }
+
+    #[test]
+    fn results_rows_allow_stale_answers_for_accepted_moderation_questions() {
+        let mut submission =
+            graded_submission_with_answer("student_1", "question_1", Some(3), Some("Automated"));
+        submission.answers[0].stale = true;
+
+        let rows = derive_results_lms_rows(
+            &[result_question("question_1", 1, 5)],
+            &[],
+            &StudentWorkflowState {
+                status: "graded".into(),
+                latest_job_id: None,
+                submissions: vec![submission],
+            },
+            &ModerationState {
+                question_reviews: vec![ModerationQuestionReview {
+                    question_id: "question_1".into(),
+                    reviewed_at: "1".into(),
+                }],
+                ..ModerationState::default()
+            },
+            &ResultsLmsState::default(),
+        );
+
+        assert_eq!(rows.len(), 1);
+        assert!(rows[0].ready_to_finalize);
+        assert_eq!(rows[0].aggregate_total, 3);
     }
 
     #[test]

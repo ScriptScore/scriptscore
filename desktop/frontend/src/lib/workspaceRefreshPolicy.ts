@@ -4,6 +4,7 @@ import type { RuntimeJobEvent } from '$lib/types';
 export function isWorkflowRuntimeCommand(commandName: string): boolean {
   return (
     commandName === 'begin_student_workflow' ||
+    commandName === 'regrade_question_answers' ||
     commandName === 'confirm_student_alignment' ||
     commandName === 'confirm_student_detect_review' ||
     commandName === 'confirm_student_parse_review' ||

@@ -47,6 +47,7 @@
     exportStampedTemplatePdf,
     replaceTemplatePdf,
     reanalyzeQuestion,
+    regradeQuestionAnswers,
     runSmokePing,
     runResultsExport,
     runResultsLmsUpload,
@@ -254,6 +255,32 @@
     rubric: ExamWorkspaceState['questions'][number]['rubric'] | null | undefined
   ): boolean {
     return rubric?.status === 'approved' || rubric?.approvedAt != null;
+  }
+
+  function moderationAcceptedQuestion(
+    state: ExamWorkspaceState | null | undefined,
+    questionId: string
+  ): boolean {
+    return (
+      state?.moderationState?.questionReviews?.some((review) => review.questionId === questionId) ??
+      false
+    );
+  }
+
+  function hasRegradeableStaleAnswers(
+    state: ExamWorkspaceState | null | undefined,
+    questionId: string
+  ): boolean {
+    if (moderationAcceptedQuestion(state, questionId)) {
+      return false;
+    }
+    return (
+      state?.studentWorkflow?.submissions?.some((submission) =>
+        submission.answers?.some(
+          (answer) => answer.questionId === questionId && answer.verified && answer.stale
+        )
+      ) ?? false
+    );
   }
 
   async function confirmOperatorAction(message: string, title = 'Confirm action'): Promise<boolean> {
@@ -1581,6 +1608,14 @@
     }
   }
 
+  async function handleRegradeQuestionAnswers(questionId: string): Promise<void> {
+    await runTrackedWorkspaceCommand({
+      busy: 'studentWorkflow',
+      start: () => regradeQuestionAnswers(questionId, structuredClone($appSettings)),
+      resetQuestions: false
+    });
+  }
+
   async function handleSaveRubric(
     questionId: string,
     criteria: RubricCriterion[],
@@ -1597,7 +1632,12 @@
         ...(rubricEditImpact ? { rubricEditImpact } : {})
       });
       applyWorkspaceState(next, false);
-      notifications.pushSuccess(approve ? 'Approved rubric saved' : 'Rubric saved');
+      if (approve && hasRegradeableStaleAnswers(next, questionId)) {
+        notifications.pushSuccess('Approved rubric saved; regrading stale answers');
+        await handleRegradeQuestionAnswers(questionId);
+      } else {
+        notifications.pushSuccess(approve ? 'Approved rubric saved' : 'Rubric saved');
+      }
     } catch (error) {
       actionError = String(error);
     } finally {

@@ -54,6 +54,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
     }),
     retryResultsLmsUpload: vi.fn(),
     reanalyzeQuestion: vi.fn(),
+    regradeQuestionAnswers: vi.fn(),
     exportStampedTemplatePdf: vi.fn(),
     replaceTemplatePdf: vi.fn(),
   finalizeReadyResults: vi.fn(),
@@ -1439,6 +1440,116 @@ describe('desktop route shell', () => {
     expect(within(questionOneButton).getByLabelText('Rubric approved')).toBeTruthy();
     expect(screen.getByText('Approved rubric saved')).toBeTruthy();
     expect(get(notifications).some((toast) => toast.message === 'Approved rubric saved')).toBe(true);
+  });
+
+  it('starts student workflow regrade after approving a rubric with stale answers', async () => {
+    let runtimeHandler: ((event: RuntimeJobEvent) => void) | null = null;
+    const initialWorkspace = analyzedWorkspaceState();
+    initialWorkspace.questions[0]!.rubric = {
+      status: 'draft',
+      criteria: [
+        {
+          criterionId: 'c1',
+          label: 'Correctness',
+          points: 5,
+          partialCreditGuidance: 'Award up to 5 points.',
+          source: 'manual'
+        }
+      ],
+      warnings: [],
+      approvedAt: null,
+      latestJobId: 'job_rubric_1'
+    };
+    const savedWorkspace = structuredClone(initialWorkspace);
+    savedWorkspace.questions[0]!.rubric = {
+      ...initialWorkspace.questions[0]!.rubric!,
+      status: 'approved',
+      approvedAt: '2026-04-08T00:00:00Z'
+    };
+    savedWorkspace.studentWorkflow = {
+      status: 'graded',
+      latestJobId: 'grade_job',
+      submissions: [
+        {
+          studentRef: 'student_1',
+          canonicalPdfPath: '/tmp/student.pdf',
+          pageCount: 1,
+          stage: 'graded',
+          latestJobId: 'grade_job',
+          failureMessage: null,
+          warnings: [],
+          pageArtifacts: [],
+          alignmentPages: [],
+          detectReview: null,
+          answers: [
+            {
+              questionId: 'question_1',
+              questionNumber: 1,
+              cropImagePath: null,
+              manualGradingRequired: false,
+              manualGradingReason: null,
+              moderationEligible: true,
+              parseStatus: 'ok',
+              parseConfidence: 'high',
+              parseConfidenceSource: 'combined',
+              rawParsedText: 'answer',
+              verifiedText: 'answer',
+              reviewRequired: false,
+              verified: true,
+              stale: true,
+              gradingStatus: 'draft_ready',
+              gradingConfidence: null,
+              gradingConfidenceReason: null,
+              questionMaxPoints: 5,
+              totalPointsAwarded: 4,
+              feedbackText: 'Old feedback',
+              criterionResults: [],
+              highlights: [],
+              warnings: []
+            }
+          ]
+        }
+      ]
+    };
+
+    desktopMocks.isDesktopHost.mockReturnValue(true);
+    desktopMocks.getShellState.mockResolvedValue({
+      currentProject: projectSummary(),
+      workerStatus: 'ready',
+      lastRuntimeError: null
+    });
+    desktopMocks.getExamWorkspaceState.mockResolvedValue(initialWorkspace);
+    desktopMocks.saveRubricUpdate.mockResolvedValue(savedWorkspace);
+    desktopMocks.regradeQuestionAnswers.mockResolvedValue('job_regrade_1');
+    desktopMocks.listenRuntimeJobEvents.mockImplementation(async (handler) => {
+      runtimeHandler = handler as (event: RuntimeJobEvent) => void;
+      return vi.fn();
+    });
+
+    render(Page);
+
+    expect(await screen.findByText('Question review in progress')).toBeTruthy();
+    await selectTemplateSetupSubstep('Review');
+    await fireEvent.click(screen.getByRole('button', { name: 'Approve rubric' }));
+
+    await waitFor(() => {
+      expect(desktopMocks.regradeQuestionAnswers).toHaveBeenCalledWith('question_1', expect.any(Object));
+    });
+    if (runtimeHandler === null) {
+      throw new Error('runtime handler should be registered');
+    }
+    const emitRuntimeEvent: (event: RuntimeJobEvent) => void = runtimeHandler;
+    emitRuntimeEvent(
+      runtimeJobEvent({
+        commandName: 'regrade_question_answers',
+        jobId: 'job_regrade_1',
+        payload: hostWorkflowPayload('workspace', savedWorkspace)
+      })
+    );
+
+    await waitFor(() => {
+      expect(get(notifications).some((toast) => toast.message.includes('regrading stale answers'))).toBe(true);
+    });
   });
 
   it('keeps a warning icon after saving an empty rubric response', async () => {

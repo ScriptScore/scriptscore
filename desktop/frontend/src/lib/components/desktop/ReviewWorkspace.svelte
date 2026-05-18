@@ -203,6 +203,13 @@
   $: hasUnsavedReviewChanges = hasUnsavedQuestionEdits || hasUnsavedRubricEdits;
   $: selectedRubricApproved =
     selectedRubric.status === 'approved' || selectedRubric.approvedAt != null;
+  $: selectedQuestionModerationAccepted =
+    selectedQuestionDraft != null &&
+    (workspaceState.moderationState?.questionReviews?.some(
+      (review) => review.questionId === selectedQuestionDraft?.questionId
+    ) ??
+      false);
+  $: rubricImpactingEditsLocked = selectedRubricApproved && selectedQuestionModerationAccepted;
   $: selectedQuestionBasisChanged =
     selectedQuestionDraft != null &&
     selectedQuestionRecord != null &&
@@ -569,7 +576,7 @@
                 min="0"
                 step="1"
                 value={selectedQuestionDraft.maxPoints ?? ''}
-                disabled={!selectedAnalysisComplete}
+                disabled={!selectedAnalysisComplete || rubricImpactingEditsLocked}
                 oninput={(event: Event) => {
                   const raw = (event.currentTarget as HTMLInputElement).value.trim();
                   const parsed = raw === '' ? null : Number.parseInt(raw, 10);
@@ -607,6 +614,15 @@
           </div>
         {/if}
 
+        {#if rubricImpactingEditsLocked}
+          <div class="mt-6">
+            <InlineMessage
+              tone="info"
+              message="This question has been accepted in moderation. Undo moderation acceptance before changing rubric-impacting details."
+            />
+          </div>
+        {/if}
+
 <div class="mt-8">
           <div class="flex flex-wrap items-start gap-3">
             <div class="min-w-[15rem] flex-1 basis-[15rem]">
@@ -632,7 +648,7 @@
                 controlClass="min-h-44 rounded-xl bg-surface-card-control px-5 py-4 text-lg"
                 aria-labelledby="review-question-text-heading"
                 value={selectedQuestionDraft.text}
-                disabled={!selectedAnalysisComplete}
+                disabled={!selectedAnalysisComplete || rubricImpactingEditsLocked}
                 oninput={(event: Event) =>
                   onUpdateQuestion?.(selectedQuestionDraft.questionId, {
                     text: (event.currentTarget as HTMLTextAreaElement).value
@@ -677,6 +693,7 @@
                   controlClass="min-h-44 rounded-xl bg-surface-card-control px-5 py-4 text-lg"
                   aria-labelledby="review-question-context-heading"
                   value={selectedQuestionDraft.questionContext}
+                  disabled={rubricImpactingEditsLocked}
                   oninput={(event: Event) =>
                     patchQuestionContext(
                       selectedQuestionDraft.questionId,
@@ -747,7 +764,7 @@
                 <DesktopButton
                   class="shrink-0"
                   size="compact"
-                  disabled={selectedRubricGenerationActive}
+                  disabled={selectedRubricGenerationActive || rubricImpactingEditsLocked}
                   onclick={addCriterion}
                 >
                   + add criterion
@@ -839,6 +856,7 @@
                       controlClass="min-h-12 rounded-xl bg-surface-card-control text-base font-medium"
                       value={selectedCriterion.label}
                       placeholder="Criterion label"
+                      disabled={rubricImpactingEditsLocked}
                       oninput={(event: Event) =>
                         updateCriterion(selectedCriterionIndex, {
                           label: (event.currentTarget as HTMLInputElement).value
@@ -850,6 +868,7 @@
                     class="size-14 rounded-2xl"
                     ariaLabel="Remove criterion"
                     title="Remove criterion"
+                    disabled={rubricImpactingEditsLocked}
                     onclick={() => requestRemoveCriterion(selectedCriterionIndex)}
                   >
                     <HugeiconsIcon icon={Delete02Icon} size={28} strokeWidth={1.8} aria-hidden="true" />
@@ -870,6 +889,7 @@
                     controlClass="min-h-36 rounded-xl bg-surface-card-control px-4 py-3 text-sm"
                     placeholder="Partial credit guidance"
                     value={selectedCriterion.partialCreditGuidance}
+                    disabled={rubricImpactingEditsLocked}
                     oninput={(event: Event) =>
                       updateCriterion(selectedCriterionIndex, {
                         partialCreditGuidance: (event.currentTarget as HTMLTextAreaElement).value
@@ -890,6 +910,7 @@
                           aria-label={`${pointValue} point${pointValue !== 1 ? 's' : ''}`}
                           title={`${pointValue} point${pointValue !== 1 ? 's' : ''}`}
                           aria-pressed={pointValue === selectedCriterion.points}
+                          disabled={rubricImpactingEditsLocked}
                           onclick={() => updateCriterion(selectedCriterionIndex, { points: pointValue })}
                         >
                           {pointValue}
@@ -916,7 +937,12 @@
           {#if !selectedRubricApproved}
             <DesktopButton
               size="large"
-              disabled={busyAction !== null || selectedAnalysisInProgress || hasUnsavedQuestionEdits}
+              disabled={
+                busyAction !== null ||
+                selectedAnalysisInProgress ||
+                hasUnsavedQuestionEdits ||
+                rubricImpactingEditsLocked
+              }
               onclick={() => void onReAnalyze?.(selectedQuestionDraft.questionId)}
             >
               {selectedAnalysisInProgress ? 'Re-analyzing…' : 'Re Analyze'}
@@ -926,7 +952,8 @@
               disabled={
                 busyAction === 'generateRubric' ||
                 selectedRubricGenerationActive ||
-                !selectedAnalysisComplete
+                !selectedAnalysisComplete ||
+                rubricImpactingEditsLocked
               }
               onclick={() => void onGenerateRubric?.(selectedQuestionDraft.questionId)}
             >
@@ -942,7 +969,8 @@
                 busyAction !== null ||
                 !onSaveReviewChanges ||
                 hasUnsavedReviewChanges ||
-                !workspaceState.canApproveRubric
+                !workspaceState.canApproveRubric ||
+                rubricImpactingEditsLocked
               }
               onclick={rescindApprovedRubric}
             >
@@ -955,7 +983,8 @@
               busyAction !== null ||
               !onSaveReviewChanges ||
               !hasUnsavedReviewChanges ||
-              (hasUnsavedRubricEdits && !workspaceState.canApproveRubric)
+              (hasUnsavedRubricEdits && !workspaceState.canApproveRubric) ||
+              rubricImpactingEditsLocked
             }
             onclick={requestSaveReviewChanges}
           >
@@ -966,7 +995,10 @@
               size="large"
               variant="primary"
               disabled={
-                busyAction !== null || !workspaceState.canApproveRubric || hasUnsavedQuestionEdits
+                busyAction !== null ||
+                !workspaceState.canApproveRubric ||
+                hasUnsavedQuestionEdits ||
+                rubricImpactingEditsLocked
               }
               onclick={() => void approveRubricAndAdvance()}
             >

@@ -24,6 +24,7 @@ export {
   skipTemplateRedaction,
   generateQuestionRubric,
   reanalyzeQuestion,
+  regradeQuestionAnswers,
   saveRubricUpdate,
   replaceTemplatePdf,
   exportStampedTemplatePdf

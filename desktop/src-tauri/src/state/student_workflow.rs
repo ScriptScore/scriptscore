@@ -26,8 +26,8 @@ mod shared;
 
 use pipeline::{
     continue_after_alignment_review, continue_after_detect_review, ensure_submission_row,
-    intake_map, process_submissions_batched, run_grading_for_submission, save_workflow_state,
-    BatchWorkflowInputs,
+    intake_map, process_submissions_batched, regrade_stale_question_answers,
+    run_grading_for_submission, save_workflow_state, BatchWorkflowInputs,
 };
 #[cfg(test)]
 use results::{
@@ -129,6 +129,27 @@ pub(crate) fn begin_student_workflow(
         },
     )?;
 
+    project_store::load_exam_workspace_state(project_path)
+}
+
+pub(crate) fn regrade_question_answers(
+    state: &Arc<AppStateInner>,
+    project_path: &Path,
+    question_id: &str,
+    settings: &AppSettings,
+    event_sink: &dyn RuntimeEventSink,
+) -> HostResult<ExamWorkspaceState> {
+    let workspace = project_store::load_exam_workspace_state(project_path)?;
+    let mut workflow_state = project_store::load_student_workflow_state(project_path)?;
+    regrade_stale_question_answers(
+        state,
+        project_path,
+        settings,
+        event_sink,
+        &workspace,
+        &mut workflow_state,
+        question_id,
+    )?;
     project_store::load_exam_workspace_state(project_path)
 }
 

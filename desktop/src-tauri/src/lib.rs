@@ -71,6 +71,7 @@ pub fn run() {
             commands::save_student_intake_page_order,
             commands::delete_student_submission,
             commands::begin_student_workflow,
+            commands::regrade_question_answers,
             commands::confirm_student_alignment,
             commands::save_student_alignment_review,
             commands::confirm_student_detect_review,
