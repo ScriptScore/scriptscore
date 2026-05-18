@@ -51,8 +51,6 @@ export function stageLabel(stage: string): string {
       return 'alignment review';
     case 'canonicalize':
       return 'canonicalizing';
-    case 'transform':
-      return 'transforming';
     case 'detect':
       return 'detecting';
     case 'detect_review':
@@ -87,8 +85,6 @@ export function stageProgressRange(stage: string): StageProgressRange {
     case 'alignment_review':
       return { start: 12, end: 12 };
     case 'canonicalize':
-      return { start: 12, end: 25 };
-    case 'transform':
       return { start: 12, end: 25 };
     case 'detect':
       return { start: 25, end: 35 };
@@ -154,8 +150,6 @@ export function commandProgressRange(
       return { start: 0, end: 12 };
     case 'scans.canonicalize':
       return { start: 12, end: 25 };
-    case 'scans.transform':
-      return { start: 12, end: 25 };
     case 'scans.detect':
       return { start: 25, end: 35 };
     case 'scans.crop':
@@ -181,8 +175,6 @@ export function commandWorkflowStage(commandName: string): string | null {
       return 'alignment';
     case 'scans.canonicalize':
       return 'canonicalize';
-    case 'scans.transform':
-      return 'transform';
     case 'scans.detect':
       return 'detect';
     case 'scans.crop':
@@ -333,7 +325,6 @@ export function stageViewForSubmission(
     case 'detect_review':
       return 'detectReview';
     case 'canonicalize':
-    case 'transform':
     case 'detect':
     case 'crop':
     case 'pii':

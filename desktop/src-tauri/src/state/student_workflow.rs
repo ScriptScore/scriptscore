@@ -566,23 +566,265 @@ mod tests {
         feedback_request_json,
     };
     use super::{
-        aggregate_preliminary_confidence, final_rows_from_preliminary,
+        aggregate_preliminary_confidence, confirm_student_alignment, confirm_student_detect_review,
+        confirm_student_parse_review, final_rows_from_preliminary,
         local_pii_trigger_words_by_student_ref, parse_review_required,
         pii_trigger_words_for_roster_row, stage_is_workflow_eligible, submission_runtime_context,
+        StudentWorkflowAlignmentUpdateInput, StudentWorkflowDetectReviewInput,
+        StudentWorkflowDetectReviewResolutionInput, StudentWorkflowParseReviewInput,
     };
     use crate::lms::LmsRosterRow;
     use crate::models::{
         AppSettings, ExamWorkspaceState, ProjectConfig, ProjectSummary, QuestionAnalysisState,
         QuestionRecord, RubricCriterion, RubricState, StudentIntakeState, StudentIntakeSummary,
-        StudentWorkflowAnswer, StudentWorkflowPiiPrescreen, StudentWorkflowSubmission,
+        StudentWorkflowAlignmentPage, StudentWorkflowAnswer, StudentWorkflowDetectRegion,
+        StudentWorkflowDetectReview, StudentWorkflowDetectReviewRow, StudentWorkflowPiiPrescreen,
+        StudentWorkflowState, StudentWorkflowSubmission, StudentWorkflowTransform,
         WorkspaceWarning,
     };
+    use crate::project_store;
+    use crate::project_store::schema::{initialize_schema, project_db_path};
     use serde_json::json;
     use std::collections::HashMap;
+    use std::path::PathBuf;
+    use std::sync::Arc;
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+    struct NoopEventSink;
+
+    impl crate::state::RuntimeEventSink for NoopEventSink {
+        fn emit_runtime_event(&self, _event: crate::models::RuntimeJobEvent) {}
+    }
+
+    fn temp_root(prefix: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "{prefix}-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or(Duration::from_secs(0))
+                .as_millis()
+        ))
+    }
+
+    fn bootstrap_project(project_path: &std::path::Path) {
+        std::fs::create_dir_all(project_path).expect("project root should exist");
+        let connection =
+            rusqlite::Connection::open(project_db_path(project_path)).expect("project db opens");
+        initialize_schema(&connection).expect("schema should initialize");
+        connection
+            .execute(
+                "INSERT INTO project (
+                    project_id,
+                    display_name,
+                    subject,
+                    course_code,
+                    lms_course_id,
+                    redaction_required,
+                    instructor_profile_json,
+                    trace_refs_json,
+                    created_at,
+                    updated_at
+                ) VALUES (?1, ?2, NULL, NULL, NULL, ?3, '{}', '{}', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+                rusqlite::params!["proj_test", "Workflow Review Test", true],
+            )
+            .expect("project should insert");
+    }
+
+    fn app_state_inner_with_active_job() -> Arc<crate::state::AppStateInner> {
+        let state =
+            crate::state::AppState::bootstrap_with_args([std::ffi::OsString::from("scriptscore")]);
+        let inner = state.clone_inner();
+        inner.lock().scheduler.__test_set_active_jobs(true);
+        inner
+    }
+
+    fn save_single_submission(
+        project_path: &std::path::Path,
+        submission: StudentWorkflowSubmission,
+    ) {
+        project_store::save_student_workflow_state(
+            project_path,
+            &StudentWorkflowState {
+                status: "attention".into(),
+                latest_job_id: None,
+                submissions: vec![submission],
+            },
+        )
+        .expect("workflow state should save");
+    }
+
+    fn workflow_submission(student_ref: &str, stage: &str) -> StudentWorkflowSubmission {
+        StudentWorkflowSubmission {
+            student_ref: student_ref.into(),
+            canonical_pdf_path: format!("/tmp/{student_ref}.pdf"),
+            page_count: 1,
+            stage: stage.into(),
+            latest_job_id: None,
+            failure_message: None,
+            warnings: Vec::new(),
+            page_artifacts: Vec::new(),
+            alignment_pages: Vec::new(),
+            detect_review: None,
+            answers: Vec::new(),
+        }
+    }
+
+    fn alignment_page() -> StudentWorkflowAlignmentPage {
+        StudentWorkflowAlignmentPage {
+            page_number: 1,
+            confidence: Some(0.99),
+            low_confidence: false,
+            review_exempt: false,
+            review_exempt_reason: None,
+            question_count: 1,
+            transform: StudentWorkflowTransform {
+                rotation: 0.0,
+                scale: 1.0,
+                translate_x: 0.0,
+                translate_y: 0.0,
+            },
+            warnings: Vec::new(),
+        }
+    }
+
+    fn detect_region() -> StudentWorkflowDetectRegion {
+        StudentWorkflowDetectRegion {
+            x: 1,
+            y: 2,
+            width: 30,
+            height: 40,
+            units: "rendered_page_pixels".into(),
+        }
+    }
 
     #[test]
     fn stopped_stage_is_workflow_eligible() {
         assert!(stage_is_workflow_eligible("stopped"));
+    }
+
+    #[test]
+    fn confirm_alignment_with_active_runtime_job_saves_without_continuing() {
+        let _guard = crate::test_support::lock_env_vars();
+        let project_path = temp_root("scriptscore-confirm-alignment-active-save");
+        bootstrap_project(&project_path);
+        let mut submission = workflow_submission("student_1", "alignment_review");
+        submission.alignment_pages = vec![alignment_page()];
+        save_single_submission(&project_path, submission);
+
+        confirm_student_alignment(
+            &app_state_inner_with_active_job(),
+            &project_path,
+            StudentWorkflowAlignmentUpdateInput {
+                student_ref: "student_1".into(),
+                pages: vec![alignment_page()],
+            },
+            &AppSettings::default(),
+            &NoopEventSink,
+        )
+        .expect("active job should fall back to save-only alignment review");
+
+        let loaded =
+            project_store::load_student_workflow_state(&project_path).expect("workflow loads");
+        assert_eq!(loaded.submissions[0].stage, "canonicalize");
+        assert_eq!(loaded.submissions[0].latest_job_id, None);
+    }
+
+    #[test]
+    fn confirm_detect_review_with_active_runtime_job_saves_without_continuing() {
+        let _guard = crate::test_support::lock_env_vars();
+        let project_path = temp_root("scriptscore-confirm-detect-active-save");
+        bootstrap_project(&project_path);
+        let mut submission = workflow_submission("student_1", "detect_review");
+        submission.detect_review = Some(StudentWorkflowDetectReview {
+            pending_rows: vec![StudentWorkflowDetectReviewRow {
+                question_id: "question_1".into(),
+                page_number: 1,
+                source_page_image_path: "/tmp/student_1_p1.png".into(),
+                template_region: detect_region(),
+                warnings: Vec::new(),
+                resolved_region: None,
+            }],
+            trusted_crop_targets: Vec::new(),
+        });
+        save_single_submission(&project_path, submission);
+
+        confirm_student_detect_review(
+            &app_state_inner_with_active_job(),
+            &project_path,
+            StudentWorkflowDetectReviewInput {
+                student_ref: "student_1".into(),
+                resolutions: vec![StudentWorkflowDetectReviewResolutionInput {
+                    question_id: "question_1".into(),
+                    page_number: 1,
+                    region: detect_region(),
+                }],
+            },
+            &AppSettings::default(),
+            &NoopEventSink,
+        )
+        .expect("active job should fall back to save-only detect review");
+
+        let loaded =
+            project_store::load_student_workflow_state(&project_path).expect("workflow loads");
+        assert_eq!(loaded.submissions[0].stage, "crop");
+        assert_eq!(loaded.submissions[0].latest_job_id, None);
+    }
+
+    #[test]
+    fn confirm_parse_review_with_active_runtime_job_saves_without_continuing() {
+        let _guard = crate::test_support::lock_env_vars();
+        let project_path = temp_root("scriptscore-confirm-parse-active-save");
+        bootstrap_project(&project_path);
+        let mut submission = workflow_submission("student_1", "parse_review");
+        submission.answers = vec![StudentWorkflowAnswer {
+            question_id: "question_1".into(),
+            question_number: 1,
+            crop_image_path: Some("/tmp/q1.png".into()),
+            pii_prescreen: None,
+            manual_grading_required: false,
+            manual_grading_reason: None,
+            moderation_eligible: true,
+            parse_status: "warning".into(),
+            parse_confidence: Some("low".into()),
+            parse_confidence_source: Some("combined".into()),
+            raw_parsed_text: Some("raw answer".into()),
+            verified_text: Some("raw answer".into()),
+            review_required: true,
+            verified: false,
+            stale: false,
+            grading_status: "not_started".into(),
+            grading_confidence: None,
+            grading_confidence_reason: None,
+            question_max_points: Some(5),
+            total_points_awarded: None,
+            feedback_text: None,
+            criterion_results: Vec::new(),
+            highlights: Vec::new(),
+            warnings: Vec::new(),
+        }];
+        save_single_submission(&project_path, submission);
+
+        confirm_student_parse_review(
+            &app_state_inner_with_active_job(),
+            &project_path,
+            StudentWorkflowParseReviewInput {
+                student_ref: "student_1".into(),
+                question_id: "question_1".into(),
+                corrected_text: "corrected answer".into(),
+            },
+            &AppSettings::default(),
+            &NoopEventSink,
+        )
+        .expect("active job should fall back to save-only parse review");
+
+        let loaded =
+            project_store::load_student_workflow_state(&project_path).expect("workflow loads");
+        assert_eq!(loaded.submissions[0].stage, "grading");
+        assert_eq!(loaded.submissions[0].latest_job_id, None);
+        assert_eq!(
+            loaded.submissions[0].answers[0].verified_text.as_deref(),
+            Some("corrected answer")
+        );
     }
 
     #[test]

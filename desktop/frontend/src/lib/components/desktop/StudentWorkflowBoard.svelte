@@ -94,8 +94,6 @@
         return 'Alignment';
       case 'canonicalizing':
         return 'Canonicalizing';
-      case 'transforming':
-        return 'Transforming';
       case 'detecting':
         return 'Detecting';
       case 'region review':

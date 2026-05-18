@@ -1520,6 +1520,78 @@ mod tests {
     }
 
     #[test]
+    fn start_student_workflow_job_conflicts_before_mutating_workflow_state() {
+        use std::path::PathBuf;
+        use std::sync::Arc;
+        use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+        let _guard = crate::test_support::lock_env_vars();
+        let test_root = std::env::temp_dir().join(format!(
+            "scriptscore-start-workflow-conflict-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or(Duration::from_secs(0))
+                .as_millis()
+        ));
+        let _projects_root =
+            crate::test_support::EnvVarGuard::set("SCRIPTSCORE_PROJECTS_ROOT", &test_root);
+        let created = crate::project_store::create_project(
+            "Workflow Conflict Test",
+            None,
+            None,
+            None,
+            &crate::models::InstructorProfile::default(),
+        )
+        .expect("project should be created");
+        let project_path = PathBuf::from(&created.project_path);
+        crate::project_store::save_student_workflow_state(
+            &project_path,
+            &crate::models::StudentWorkflowState {
+                status: "ready".into(),
+                latest_job_id: None,
+                submissions: vec![crate::models::StudentWorkflowSubmission {
+                    student_ref: "student_1".into(),
+                    canonical_pdf_path: "/tmp/student_1.pdf".into(),
+                    page_count: 1,
+                    stage: "intake_ready".into(),
+                    latest_job_id: None,
+                    failure_message: None,
+                    warnings: Vec::new(),
+                    page_artifacts: Vec::new(),
+                    alignment_pages: Vec::new(),
+                    detect_review: None,
+                    answers: Vec::new(),
+                }],
+            },
+        )
+        .expect("workflow state should save");
+
+        let state = AppState::bootstrap_with_args([std::ffi::OsString::from("scriptscore")]);
+        let settings = crate::models::AppSettings::default();
+        state
+            .open_project(project_path.clone(), &settings)
+            .expect("project should open");
+        state
+            .clone_inner()
+            .lock()
+            .scheduler
+            .__test_set_active_jobs(true);
+
+        let error = state
+            .start_student_workflow_job(settings, Arc::new(NoopEventSink))
+            .expect_err("active scheduler job should conflict");
+        assert!(
+            error
+                .to_string()
+                .contains("A desktop job is already active in this session."),
+            "unexpected error: {error}"
+        );
+        let loaded = crate::project_store::load_student_workflow_state(&project_path)
+            .expect("workflow should load");
+        assert_eq!(loaded.submissions[0].stage, "intake_ready");
+    }
+
+    #[test]
     fn resolve_lms_student_ref_uses_persisted_student_roster() {
         use std::path::Path;
         use std::path::PathBuf;

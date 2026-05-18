@@ -34,6 +34,8 @@ pub(crate) struct RuntimeScheduler {
     pending_jobs: VecDeque<QueuedRuntimeJob>,
     active_jobs: Vec<ActiveRuntimeJob>,
     max_concurrent_jobs: usize,
+    #[cfg(test)]
+    test_active_jobs: bool,
 }
 
 impl Default for RuntimeScheduler {
@@ -42,6 +44,8 @@ impl Default for RuntimeScheduler {
             pending_jobs: VecDeque::new(),
             active_jobs: Vec::new(),
             max_concurrent_jobs: 1,
+            #[cfg(test)]
+            test_active_jobs: false,
         }
     }
 }
@@ -122,7 +126,16 @@ impl RuntimeScheduler {
     }
 
     pub fn has_active_jobs(&self) -> bool {
+        #[cfg(test)]
+        if self.test_active_jobs {
+            return true;
+        }
         !self.active_jobs.is_empty()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn __test_set_active_jobs(&mut self, active: bool) {
+        self.test_active_jobs = active;
     }
 
     pub fn worker_status(&self) -> WorkerStatus {

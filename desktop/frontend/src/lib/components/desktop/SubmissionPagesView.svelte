@@ -37,7 +37,7 @@
   $: stageText = stageLabel(submission?.stage ?? 'intake_ready');
   $: stage = submission?.stage ?? 'intake_ready';
   $: stageTone = stageProgressTone(stage);
-  $: stageActive = ['alignment', 'canonicalize', 'transform', 'detect', 'crop', 'parse', 'grading'].includes(stage);
+  $: stageActive = ['alignment', 'canonicalize', 'detect', 'crop', 'parse', 'grading'].includes(stage);
   $: hasPageMismatch = expectedPageCount > 0 && pageCount !== expectedPageCount;
   $: hasExtraPages = expectedPageCount > 0 && pageCount > expectedPageCount;
   $: pageOrderEditable = ['intake_ready', 'failed'].includes(stage);

@@ -96,7 +96,6 @@
   const activeAutomationStages = new Set([
     'alignment',
     'canonicalize',
-    'transform',
     'detect',
     'crop',
     'pii',
@@ -287,7 +286,7 @@
     ['alignment_review', 'detect_review', 'parse_review', 'manual_grading', 'failed'].includes(submission.stage)
   );
   $: processingCount = workflowSubmissions.filter((submission) =>
-      ['alignment', 'canonicalize', 'transform', 'detect', 'crop', 'pii', 'parse', 'grading'].includes(
+      ['alignment', 'canonicalize', 'detect', 'crop', 'pii', 'parse', 'grading'].includes(
       submission.stage
     )
   ).length;
