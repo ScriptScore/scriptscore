@@ -524,7 +524,7 @@ describe('StudentWorkflowWorkspace review and detail panes', () => {
       expect(v).toBeGreaterThan(79);
     });
 
-    await fireEvent.click(screen.getByRole('button', { name: 'Review Unknown student' }));
+    await fireEvent.click(screen.getByRole('button', { name: /Review (?:Unknown|Loading) student/ }));
     expect(await screen.findByText('42% confidence')).toBeTruthy();
     expect(screen.getByText('42%')).toBeTruthy();
     expect(screen.getByText('75%')).toBeTruthy();
@@ -1252,7 +1252,7 @@ describe('StudentWorkflowWorkspace review and detail panes', () => {
     await fireEvent.click(screen.getByRole('button', { name: /Q2/ }));
     expect(screen.getByRole('button', { name: /Q2/ }).textContent).toContain('✓');
 
-    await fireEvent.click(screen.getByRole('button', { name: 'Grace Hopper Review' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Grace Hopper Manual' }));
 
     expect(screen.getByRole('button', { name: /Q1 manual/ }).textContent).toContain('manual');
     expect(screen.getByText('Privacy check result')).toBeTruthy();
@@ -1335,7 +1335,7 @@ describe('StudentWorkflowWorkspace review and detail panes', () => {
     });
 
     expect(await screen.findByText('Course Roster')).toBeTruthy();
-    await fireEvent.click(screen.getByRole('button', { name: 'Review Unknown student' }));
+    await fireEvent.click(screen.getByRole('button', { name: /Review (?:Unknown|Loading) student/ }));
     expect(
       await screen.findByText('low confidence recognized text needs review before grading can continue.')
     ).toBeTruthy();
@@ -1447,7 +1447,7 @@ describe('StudentWorkflowWorkspace review and detail panes', () => {
     });
 
     expect(await screen.findByText('Course Roster')).toBeTruthy();
-    await fireEvent.click(screen.getByRole('button', { name: 'Review Unknown student' }));
+    await fireEvent.click(screen.getByRole('button', { name: /Review (?:Unknown|Loading) student/ }));
     expect(
       await screen.findByText('low confidence recognized text needs review before grading can continue.')
     ).toBeTruthy();
@@ -1631,7 +1631,7 @@ describe('StudentWorkflowWorkspace review and detail panes', () => {
 
     expect(await screen.findByText('Course Roster')).toBeTruthy();
     const sidebar = screen.getByRole('region', { name: 'Student roster and submission upload' });
-    await fireEvent.click(within(sidebar).getByRole('button', { name: /Unknown student/i }));
+    await fireEvent.click(within(sidebar).getByRole('button', { name: /(?:Unknown|Loading) student/i }));
 
     expect(await screen.findByText('Criterion results')).toBeTruthy();
     expect(screen.getByText('verified answer text')).toBeTruthy();
@@ -1742,6 +1742,155 @@ describe('StudentWorkflowWorkspace review and detail panes', () => {
     await waitFor(() => {
       expect(screen.getByRole('progressbar', { name: 'Parsing' }).getAttribute('aria-valuenow')).toBe('63');
     });
+  });
+
+  it('shows scoped detect question progress on the matching student workflow card', async () => {
+    let runtimeHandler: ((event: RuntimeJobEvent) => void) | null = null;
+    shellMocks.onRuntimeJobEvent.mockImplementation((handler: (event: RuntimeJobEvent) => void) => {
+      runtimeHandler = handler;
+      return () => {};
+    });
+    desktopMocks.listCanvasCourseRoster.mockResolvedValue([
+      { userId: 'canvas_1', displayName: 'Ada Lovelace', sortKey: 'lovelace, ada' }
+    ]);
+    desktopMocks.computeLmsBindingToken.mockResolvedValue('token_1');
+
+    render(StudentWorkflowWorkspace, {
+      workspaceState: baseWorkspaceState({
+        questions: [
+          {
+            questionId: 'question_1',
+            questionNumber: 1,
+            pageNumber: 1,
+            maxPoints: 5,
+            text: 'Question 1',
+            baselinePdfText: 'Question 1',
+            sourceArtifactId: null,
+            analysis: {
+              status: 'ok',
+              questionTextClean: 'Question 1',
+              questionContext: '',
+              warnings: [],
+              latestJobId: 'job_analyze_1'
+            }
+          },
+          {
+            questionId: 'question_2',
+            questionNumber: 2,
+            pageNumber: 1,
+            maxPoints: 5,
+            text: 'Question 2',
+            baselinePdfText: 'Question 2',
+            sourceArtifactId: null,
+            analysis: {
+              status: 'ok',
+              questionTextClean: 'Question 2',
+              questionContext: '',
+              warnings: [],
+              latestJobId: 'job_analyze_2'
+            }
+          }
+        ],
+        studentRoster: [{ studentRef: 'student_1', bindingTokenHex: 'token_1' }],
+        studentIntake: {
+          status: 'ready',
+          latestJobId: null,
+          unresolvedCount: 0,
+          items: [
+            {
+              studentRef: 'student_1',
+              canonicalPdfPath: '/tmp/student_1.pdf',
+              ingestStatus: 'ok',
+              pageCount: 2,
+              examPagePaths: ['/tmp/student_1_p1.png'],
+              warnings: []
+            }
+          ]
+        },
+        studentWorkflow: {
+          status: 'running',
+          latestJobId: 'job_workflow_detect',
+          submissions: [
+            {
+              studentRef: 'student_1',
+              canonicalPdfPath: '/tmp/student_1.pdf',
+              pageCount: 2,
+              stage: 'detect',
+              latestJobId: 'job_detect_1',
+              failureMessage: null,
+              warnings: [],
+              pageArtifacts: [],
+              alignmentPages: [],
+              answers: []
+            }
+          ]
+        }
+      }),
+      prerequisitesMet: true,
+      lmsCourseId: 'persisted-course-id',
+      busyAction: null,
+      onFinalizeSubmission: vi.fn(),
+      onBeginWorkflow: vi.fn(),
+      onConfirmAlignment: vi.fn(),
+      onConfirmParseReview: vi.fn()
+    });
+
+    expect(await screen.findByText('Course Roster')).toBeTruthy();
+    expect(screen.getByRole('progressbar', { name: 'Detecting' }).getAttribute('aria-valuenow')).toBe('25');
+
+    const emitRuntimeEvent = requireRuntimeHandler(runtimeHandler);
+    emitRuntimeEvent(
+      runtimeEventWithPayload(
+        'job_progress',
+        'scans.detect',
+        {
+          event: 'item_started',
+          progress: { completed: 0, total: 16 },
+          scope: { student_ref: 'student_1', question_id: 'question_1' }
+        },
+        { jobId: 'job_detect_1' }
+      )
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole('progressbar', { name: 'Detecting' }).getAttribute('aria-valuenow')).toBe('25');
+    });
+    emitRuntimeEvent(
+      runtimeEventWithPayload(
+        'job_progress',
+        'scans.detect',
+        {
+          event: 'item_completed',
+          progress: { completed: 1, total: 16 },
+          scope: { student_ref: 'student_1', question_id: 'question_1' }
+        },
+        { jobId: 'job_detect_1' }
+      )
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole('progressbar', { name: 'Detecting' }).getAttribute('aria-valuenow')).toBe('30');
+    });
+    emitRuntimeEvent(
+      runtimeEventWithPayload(
+        'job_progress',
+        'scans.detect',
+        {
+          event: 'item_started',
+          progress: { completed: 1, total: 16 },
+          scope: { student_ref: 'student_1', question_id: 'question_2' }
+        },
+        { jobId: 'job_detect_1' }
+      )
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole('progressbar', { name: 'Detecting' })).toBeTruthy();
+    });
+    expect(screen.getByRole('progressbar', { name: 'Detecting' }).getAttribute('aria-valuenow')).toBe('30');
+    expect(
+      screen.getByTitle('detecting · 1/2 questions complete · active question Q2 (question_2)')
+    ).toBeTruthy();
   });
 
   it('does not reset grading bar to stage baseline when workflow_state_updated repeats the same stage', async () => {
@@ -2231,7 +2380,7 @@ describe('StudentWorkflowWorkspace review and detail panes', () => {
 
     expect(await screen.findByText('Course Roster')).toBeTruthy();
     const sidebar = screen.getByRole('region', { name: 'Student roster and submission upload' });
-    await fireEvent.click(within(sidebar).getByRole('button', { name: /Unknown student/i }));
+    await fireEvent.click(within(sidebar).getByRole('button', { name: /(?:Unknown|Loading) student/i }));
 
     expect(screen.getByRole('progressbar', { name: 'manual grading' }).getAttribute('aria-valuenow')).toBe('99');
     expect(screen.getByRole('button', { name: /q1/i })).toBeTruthy();
@@ -2334,7 +2483,7 @@ describe('StudentWorkflowWorkspace review and detail panes', () => {
     });
 
     const sidebar = screen.getByRole('region', { name: 'Student roster and submission upload' });
-    await fireEvent.click(within(sidebar).getByRole('button', { name: /Unknown student/i }));
+    await fireEvent.click(within(sidebar).getByRole('button', { name: /(?:Unknown|Loading) student/i }));
     await fireEvent.click(screen.getByRole('button', { name: /q1/i }));
 
     expect(

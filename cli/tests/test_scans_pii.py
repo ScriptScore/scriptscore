@@ -7,6 +7,7 @@ import os
 import time
 from collections.abc import Callable
 from pathlib import Path
+from threading import Event, Lock
 
 import pytest
 from pydantic import ValidationError
@@ -16,6 +17,7 @@ from scriptscore.contracts import (
     CommandErrorEnvelope,
     CommandSuccessEnvelope,
     ParseDraft,
+    ProgressEvent,
     ScansParseRequest,
     ScansPiiRequest,
 )
@@ -233,6 +235,158 @@ def test_scans_pii_parallel_workers_preserve_result_order(
     assert isinstance(result.envelope, CommandSuccessEnvelope)
     rows = result.envelope.data["pii_results"]
     assert [row["question_id"] for row in rows] == ["q1", "q2"]
+
+
+def test_scans_pii_progress_starts_items_when_analysis_reaches_them(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    q1 = make_rgb_page(tmp_path / "scan_001" / "q1.png")
+    q2 = make_rgb_page(tmp_path / "scan_001" / "q2.png")
+    events: list[ProgressEvent] = []
+
+    monkeypatch.setattr("scriptscore.commands.scans_pii.verify_model_root", lambda _path: None)
+    monkeypatch.setattr("scriptscore.commands.scans_pii.create_reader", lambda _path: object())
+    monkeypatch.setattr(
+        "scriptscore.commands.scans_pii.inspect_student_crop",
+        lambda path, *_args, **_kwargs: ScanFinding(
+            image_path=str(path),
+            handwriting_state="true",
+            handwriting_score=0.91,
+            pii_present=False,
+            pii_kinds=[],
+            reasons=["synthetic test result"],
+            duration_seconds=0.01,
+            metrics={"backend_name": "paddleocr_test_override"},
+        ),
+    )
+
+    result = _runner().run(
+        "scans.pii",
+        {
+            "students": [
+                {
+                    "student_ref": "scan_001",
+                    "pii_trigger_words": ["Alice Smith"],
+                    "pii_targets": [
+                        {"question_id": "q1", "question_crop_path": str(q1)},
+                        {"question_id": "q2", "question_crop_path": str(q2)},
+                    ],
+                }
+            ],
+            "output_artifacts_dir": str((tmp_path / "pii_progress_out").resolve()),
+            "pii_runtime_config": {
+                "paddle_model_dir": str((tmp_path / "models").resolve()),
+            },
+        },
+        event_sink=events.append,
+    )
+
+    assert result.exit_code == 0
+    assert isinstance(result.envelope, CommandSuccessEnvelope)
+    item_events = [event for event in events if event.event in {"item_started", "item_completed"}]
+    assert [
+        (
+            event.event,
+            event.scope,
+            None if event.progress is None else event.progress.completed,
+            None if event.progress is None else event.progress.total,
+        )
+        for event in item_events
+    ] == [
+        ("item_started", {"student_ref": "scan_001", "question_id": "q1"}, 0, 2),
+        ("item_completed", {"student_ref": "scan_001", "question_id": "q1"}, 1, 2),
+        ("item_started", {"student_ref": "scan_001", "question_id": "q2"}, 1, 2),
+        ("item_completed", {"student_ref": "scan_001", "question_id": "q2"}, 2, 2),
+    ]
+
+
+def test_scans_pii_parallel_progress_is_not_front_loaded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    crops = [make_rgb_page(tmp_path / "scan_001" / f"q{index}.png") for index in range(1, 5)]
+    events: list[ProgressEvent] = []
+    first_wave_started = Event()
+    release_slow_worker = Event()
+    inspected_initial: set[str] = set()
+    lock = Lock()
+
+    monkeypatch.setattr("scriptscore.commands.scans_pii.verify_model_root", lambda _path: None)
+    monkeypatch.setattr("scriptscore.commands.scans_pii.create_reader", lambda _path: object())
+
+    def inspect(path: Path, *_args: object, **_kwargs: object) -> ScanFinding:
+        question = path.stem
+        if question in {"q1", "q2"}:
+            with lock:
+                inspected_initial.add(question)
+                if inspected_initial == {"q1", "q2"}:
+                    first_wave_started.set()
+            assert first_wave_started.wait(timeout=1.0)
+        if question == "q1":
+            assert release_slow_worker.wait(timeout=1.0)
+        elif question == "q4":
+            release_slow_worker.set()
+        return ScanFinding(
+            image_path=str(path),
+            handwriting_state="true",
+            handwriting_score=0.91,
+            pii_present=False,
+            pii_kinds=[],
+            reasons=["synthetic test result"],
+            duration_seconds=0.01,
+            metrics={"backend_name": "paddleocr_test_override"},
+        )
+
+    monkeypatch.setattr("scriptscore.commands.scans_pii.inspect_student_crop", inspect)
+
+    result = _runner().run(
+        "scans.pii",
+        {
+            "students": [
+                {
+                    "student_ref": "scan_001",
+                    "pii_trigger_words": ["Alice Smith"],
+                    "pii_targets": [
+                        {"question_id": f"q{index}", "question_crop_path": str(crop)}
+                        for index, crop in enumerate(crops, start=1)
+                    ],
+                }
+            ],
+            "output_artifacts_dir": str((tmp_path / "pii_parallel_progress_out").resolve()),
+            "pii_runtime_config": {
+                "paddle_model_dir": str((tmp_path / "models").resolve()),
+                "max_workers": 2,
+            },
+        },
+        event_sink=events.append,
+    )
+
+    assert result.exit_code == 0
+    assert isinstance(result.envelope, CommandSuccessEnvelope)
+    item_events = [event for event in events if event.event in {"item_started", "item_completed"}]
+    first_completed_index = next(
+        index for index, event in enumerate(item_events) if event.event == "item_completed"
+    )
+    starts_before_first_completion = [
+        event for event in item_events[:first_completed_index] if event.event == "item_started"
+    ]
+    assert len(starts_before_first_completion) <= 2
+    assert any(
+        event.event == "item_started"
+        and event.scope == {"student_ref": "scan_001", "question_id": "q4"}
+        for event in item_events[first_completed_index + 1 :]
+    )
+    completed_counts = []
+    for event in item_events:
+        if event.event == "item_completed":
+            assert event.progress is not None
+            completed_counts.append(event.progress.completed)
+    assert completed_counts == [1, 2, 3, 4]
+    assert [row["question_id"] for row in result.envelope.data["pii_results"]] == [
+        "q1",
+        "q2",
+        "q3",
+        "q4",
+    ]
 
 
 def test_scans_pii_request_rejects_too_many_workers(tmp_path: Path) -> None:

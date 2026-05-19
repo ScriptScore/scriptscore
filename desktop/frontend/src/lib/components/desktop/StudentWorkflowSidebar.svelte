@@ -53,10 +53,12 @@
   }> = [
     { value: 'all', label: 'All' },
     { value: 'needsReview', label: 'Needs review' },
+    { value: 'manual', label: 'Manual' },
     { value: 'processing', label: 'Processing' },
     { value: 'ready', label: 'Ready' },
     { value: 'graded', label: 'Graded' },
-    { value: 'failedStopped', label: 'Failed/stopped' },
+    { value: 'failed', label: 'Failed' },
+    { value: 'stopped', label: 'Stopped' },
     { value: 'noSubmission', label: 'No submission' }
   ];
   const sortOptions: Array<{ value: SortMode; label: string }> = [
@@ -66,11 +68,13 @@
   ];
   const statusRank: Record<SidebarStudentEntry['statusGroup'], number> = {
     needsReview: 0,
-    processing: 1,
-    ready: 2,
-    graded: 3,
-    failedStopped: 4,
-    noSubmission: 5
+    manual: 1,
+    processing: 2,
+    stopped: 3,
+    failed: 4,
+    ready: 5,
+    graded: 6,
+    noSubmission: 7
   };
   const statusPresentation: Record<
     SidebarStudentEntry['statusGroup'],
@@ -80,7 +84,9 @@
     ready: { label: 'Ready', tone: 'warning' },
     processing: { label: 'Processing', tone: 'info' },
     needsReview: { label: 'Review', tone: 'warning' },
-    failedStopped: { label: 'Blocked', tone: 'error' },
+    manual: { label: 'Manual', tone: 'warning' },
+    failed: { label: 'Failed', tone: 'error' },
+    stopped: { label: 'Stopped', tone: 'warning' },
     noSubmission: { label: 'Missing', tone: 'muted' }
   };
   const controlIconSize = 20;

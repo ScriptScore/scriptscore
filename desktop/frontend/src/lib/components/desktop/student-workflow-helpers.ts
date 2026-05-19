@@ -31,10 +31,12 @@ export interface SidebarStudentEntry {
   debugLine: string;
   statusGroup:
     | 'needsReview'
+    | 'manual'
     | 'processing'
     | 'ready'
     | 'graded'
-    | 'failedStopped'
+    | 'failed'
+    | 'stopped'
     | 'noSubmission';
   progress: number;
 }
@@ -73,6 +75,43 @@ export function stageLabel(stage: string): string {
       return 'failed';
     default:
       return stage || waitingStageLabel;
+  }
+}
+
+export function compactStageLabel(stageText: string): string {
+  switch (stageText) {
+    case 'waiting':
+      return 'Waiting';
+    case 'stopped':
+      return 'Stopped';
+    case 'aligning':
+      return 'Aligning';
+    case 'alignment review':
+      return 'Alignment';
+    case 'canonicalizing':
+      return 'Canonicalizing';
+    case 'detecting':
+      return 'Detecting';
+    case 'region review':
+      return 'Regions';
+    case 'cropping':
+      return 'Cropping';
+    case 'screening PII':
+      return 'Screening';
+    case 'parsing':
+      return 'Parsing';
+    case 'parse review':
+      return 'Parse';
+    case 'grading':
+      return 'Grading';
+    case 'manual grading':
+      return 'Manual';
+    case 'draft grading ready':
+      return 'Graded';
+    case 'failed':
+      return 'Failed';
+    default:
+      return stageText || 'Waiting';
   }
 }
 
@@ -201,6 +240,9 @@ export function stageProgressTone(stage: string): ProgressTone {
   }
   if (stage === 'failed') {
     return 'error';
+  }
+  if (stage === 'stopped') {
+    return 'warning';
   }
   if (stage !== 'intake_ready' && stage !== 'stopped') {
     return 'info';

@@ -3,7 +3,10 @@
   import { AlertCircleIcon, PlayIcon } from '@hugeicons/core-free-icons';
   import { HugeiconsIcon } from '@hugeicons/svelte';
   import type { StudentIntakeSummary, StudentWorkflowSubmission } from '$lib/types';
-  import type { ProgressTone } from '$lib/components/desktop/student-workflow-helpers';
+  import {
+    compactStageLabel,
+    type ProgressTone
+  } from '$lib/components/desktop/student-workflow-helpers';
   import HorizontalProgressBar from '$lib/components/desktop/HorizontalProgressBar.svelte';
   import { DesktopButton, IconButton, StatusBadge } from './ui';
 
@@ -26,6 +29,7 @@
     item: StudentIntakeSummary;
     workflowSubmission: StudentWorkflowSubmission | null;
     stageText: string;
+    stageTitle?: string;
     stageProgress: number;
     stageTone: ProgressTone;
     stageComplete: boolean;
@@ -50,6 +54,7 @@
     displayName: string;
     stageText: string;
     stageDisplayText: string;
+    stageTitle: string;
     stageProgress: number;
     stageTone: ProgressTone;
     stageComplete: boolean;
@@ -66,6 +71,7 @@
         displayName: entry.displayName,
         stageText: entry.stageText,
         stageDisplayText: compactStageLabel(entry.stageText),
+        stageTitle: entry.stageTitle ?? entry.stageText,
         stageProgress: entry.stageProgress,
         stageTone: entry.stageTone,
         stageComplete: entry.stageComplete,
@@ -80,43 +86,6 @@
 
   function handleSelectStudent(studentRef: string) {
     onSelectStudent(studentRef);
-  }
-
-  function compactStageLabel(stageText: string): string {
-    switch (stageText) {
-      case 'waiting':
-        return 'Waiting';
-      case 'stopped':
-        return 'Stopped';
-      case 'aligning':
-        return 'Aligning';
-      case 'alignment review':
-        return 'Alignment';
-      case 'canonicalizing':
-        return 'Canonicalizing';
-      case 'detecting':
-        return 'Detecting';
-      case 'region review':
-        return 'Regions';
-      case 'cropping':
-        return 'Cropping';
-      case 'screening PII':
-        return 'Screening';
-      case 'parsing':
-        return 'Parsing';
-      case 'parse review':
-        return 'Parse';
-      case 'grading':
-        return 'Grading';
-      case 'manual grading':
-        return 'Manual';
-      case 'draft grading ready':
-        return 'Graded';
-      case 'failed':
-        return 'Failed';
-      default:
-        return stageText || 'Waiting';
-    }
   }
 
   $: workflowStartDisabled =
@@ -263,7 +232,7 @@
                 <div class="mt-2">
                   <HorizontalProgressBar
                     label={row.stageDisplayText}
-                    title={row.stageText}
+                    title={row.stageTitle}
                     progress={row.stageProgress}
                     tone={row.stageTone}
                     active={row.stageActive}

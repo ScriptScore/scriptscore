@@ -4,10 +4,11 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from queue import Empty, Queue
 from typing import Literal, cast
 
 from scriptscore.artifacts import write_trace_artifact
@@ -52,6 +53,15 @@ class _PiiWorkItem:
 class _PiiCompletedItem:
     work_item: _PiiWorkItem
     finding: ScanFinding
+    warnings: list[WarningObject]
+    status: Literal["ok", "warning", "error"]
+
+
+@dataclass(frozen=True)
+class _PiiProgressUpdate:
+    event: Literal["item_started", "item_completed"]
+    work_item: _PiiWorkItem
+    completed_item: _PiiCompletedItem | None = None
 
 
 def _scrub_message(message: str, *, trigger_words: list[str]) -> str:
@@ -134,24 +144,86 @@ def _timing_window(duration_seconds: float) -> tuple[datetime, datetime]:
     return started, finished
 
 
+def _inspect_work_item(
+    work_item: _PiiWorkItem,
+    *,
+    options: ScanRuntimeOptions,
+    reader: TokenReader,
+) -> _PiiCompletedItem:
+    finding = inspect_student_crop(
+        work_item.question_crop_path,
+        trigger_words=work_item.trigger_words,
+        options=options,
+        reader=reader,
+    )
+    row_warnings = _row_warnings(
+        student_ref=work_item.student_ref,
+        question_id=work_item.question_id,
+        trigger_words=work_item.trigger_words,
+        backend_warnings=finding.backend_warnings,
+        handwriting_state=finding.handwriting_state,
+        fatal_error=finding.fatal_error,
+    )
+    return _PiiCompletedItem(
+        work_item=work_item,
+        finding=finding,
+        warnings=row_warnings,
+        status=_row_status(warnings=row_warnings, fatal_error=finding.fatal_error),
+    )
+
+
 def _inspect_work_items(
     work_items: list[_PiiWorkItem],
     *,
     options: ScanRuntimeOptions,
     reader: TokenReader,
+    progress_queue: Queue[_PiiProgressUpdate] | None = None,
 ) -> list[_PiiCompletedItem]:
-    return [
-        _PiiCompletedItem(
-            work_item=work_item,
-            finding=inspect_student_crop(
-                work_item.question_crop_path,
-                trigger_words=work_item.trigger_words,
-                options=options,
-                reader=reader,
-            ),
-        )
-        for work_item in work_items
-    ]
+    completed_items = []
+    for work_item in work_items:
+        if progress_queue is not None:
+            progress_queue.put(_PiiProgressUpdate(event="item_started", work_item=work_item))
+        completed_item = _inspect_work_item(work_item, options=options, reader=reader)
+        completed_items.append(completed_item)
+        if progress_queue is not None:
+            progress_queue.put(
+                _PiiProgressUpdate(
+                    event="item_completed",
+                    work_item=work_item,
+                    completed_item=completed_item,
+                )
+            )
+    return completed_items
+
+
+def _emit_pii_item_started(
+    ctx: CommandContext,
+    work_item: _PiiWorkItem,
+    *,
+    completed_count: int,
+    total: int,
+) -> None:
+    ctx.emit(
+        event="item_started",
+        progress=progress(completed=completed_count, total=total),
+        scope={"student_ref": work_item.student_ref, "question_id": work_item.question_id},
+    )
+
+
+def _emit_pii_item_completed(
+    ctx: CommandContext,
+    completed_item: _PiiCompletedItem,
+    *,
+    completed_count: int,
+    total: int,
+) -> None:
+    item = completed_item.work_item
+    ctx.emit(
+        event="item_completed",
+        progress=progress(completed=completed_count, total=total),
+        scope={"student_ref": item.student_ref, "question_id": item.question_id},
+        data={"status": completed_item.status},
+    )
 
 
 def _completed_items(
@@ -161,35 +233,83 @@ def _completed_items(
     options: ScanRuntimeOptions,
     readers: Sequence[TokenReader],
 ) -> list[_PiiCompletedItem]:
+    total = len(work_items)
     if len(readers) == 1:
         completed_items = []
-        for item in work_items:
+        for completed_count, item in enumerate(work_items, start=1):
             ctx.check_cancelled()
-            completed_items.append(
-                _PiiCompletedItem(
-                    work_item=item,
-                    finding=inspect_student_crop(
-                        item.question_crop_path,
-                        trigger_words=item.trigger_words,
-                        options=options,
-                        reader=readers[0],
-                    ),
-                )
+            _emit_pii_item_started(ctx, item, completed_count=completed_count - 1, total=total)
+            completed_item = _inspect_work_item(item, options=options, reader=readers[0])
+            completed_items.append(completed_item)
+            _emit_pii_item_completed(
+                ctx,
+                completed_item,
+                completed_count=completed_count,
+                total=total,
             )
         return completed_items
 
     completed_by_index: dict[int, _PiiCompletedItem] = {}
+    completed_count = 0
+    progress_queue: Queue[_PiiProgressUpdate] = Queue()
     chunks = [work_items[index :: len(readers)] for index in range(len(readers))]
     with ThreadPoolExecutor(max_workers=len(readers), thread_name_prefix="scriptscore-pii") as pool:
-        futures = [
-            pool.submit(_inspect_work_items, chunk, options=options, reader=reader)
+        futures = {
+            pool.submit(
+                _inspect_work_items,
+                chunk,
+                options=options,
+                reader=reader,
+                progress_queue=progress_queue,
+            )
             for chunk, reader in zip(chunks, readers, strict=True)
             if chunk
-        ]
-        for future in as_completed(futures):
+        }
+        while futures:
             ctx.check_cancelled()
-            for completed_item in future.result():
-                completed_by_index[completed_item.work_item.index] = completed_item
+            try:
+                update = progress_queue.get(timeout=0.05)
+            except Empty:
+                update = None
+            if update is not None:
+                if update.event == "item_started":
+                    _emit_pii_item_started(
+                        ctx,
+                        update.work_item,
+                        completed_count=completed_count,
+                        total=total,
+                    )
+                elif update.completed_item is not None:
+                    completed_count += 1
+                    completed_by_index[update.work_item.index] = update.completed_item
+                    _emit_pii_item_completed(
+                        ctx,
+                        update.completed_item,
+                        completed_count=completed_count,
+                        total=total,
+                    )
+            done = {future for future in futures if future.done()}
+            for future in done:
+                futures.remove(future)
+                future.result()
+        while not progress_queue.empty():
+            update = progress_queue.get_nowait()
+            if update.event == "item_started":
+                _emit_pii_item_started(
+                    ctx,
+                    update.work_item,
+                    completed_count=completed_count,
+                    total=total,
+                )
+            elif update.completed_item is not None:
+                completed_count += 1
+                completed_by_index[update.work_item.index] = update.completed_item
+                _emit_pii_item_completed(
+                    ctx,
+                    update.completed_item,
+                    completed_count=completed_count,
+                    total=total,
+                )
     return [completed_by_index[item.index] for item in work_items]
 
 
@@ -259,13 +379,6 @@ def handle_scans_pii(ctx: CommandContext, request: ScansPiiRequest) -> CommandOu
     else:
         ctx.emit(event="started", data={"result_row_count": 0, "total_stages": 1})
 
-    for index, target in enumerate(all_targets, start=1):
-        ctx.emit(
-            event="item_started",
-            progress=progress(completed=index - 1, total=total),
-            scope={"student_ref": target.student_ref, "question_id": target.question_id},
-        )
-
     completed_items = _completed_items(
         ctx=ctx,
         work_items=all_targets,
@@ -273,7 +386,7 @@ def handle_scans_pii(ctx: CommandContext, request: ScansPiiRequest) -> CommandOu
         readers=readers,
     )
 
-    for index, completed_item in enumerate(completed_items, start=1):
+    for completed_item in completed_items:
         ctx.check_cancelled()
         item = completed_item.work_item
         finding = completed_item.finding
@@ -281,15 +394,8 @@ def handle_scans_pii(ctx: CommandContext, request: ScansPiiRequest) -> CommandOu
             "student_ref": item.student_ref,
             "question_id": item.question_id,
         }
-        row_warnings = _row_warnings(
-            student_ref=item.student_ref,
-            question_id=item.question_id,
-            trigger_words=item.trigger_words,
-            backend_warnings=finding.backend_warnings,
-            handwriting_state=finding.handwriting_state,
-            fatal_error=finding.fatal_error,
-        )
-        status = _row_status(warnings=row_warnings, fatal_error=finding.fatal_error)
+        row_warnings = completed_item.warnings
+        status = completed_item.status
         result = PiiResult(
             student_ref=item.student_ref,
             question_id=item.question_id,
@@ -336,13 +442,6 @@ def handle_scans_pii(ctx: CommandContext, request: ScansPiiRequest) -> CommandOu
                 timing=timing_info(started=trace_started, finished=trace_finished),
             )
         )
-        ctx.emit(
-            event="item_completed",
-            progress=progress(completed=index, total=total),
-            scope=scope,
-            data={"status": status},
-        )
-
     if total > 0:
         ctx.emit(
             event="completed",

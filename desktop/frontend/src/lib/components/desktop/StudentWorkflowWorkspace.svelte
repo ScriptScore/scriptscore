@@ -91,6 +91,12 @@
     totalStages: number;
     currentStage: number;
   };
+  type WorkflowScopedQuestionProgressEntry = {
+    stage: string;
+    activeQuestionId: string | null;
+    completedQuestionIds: string[];
+    totalQuestionCount: number;
+  };
 
   const stageProgressRangeEpsilon = 0.01;
   const activeAutomationStages = new Set([
@@ -121,6 +127,7 @@
   let rosterActionDisabled = false;
   let rosterVerificationError: string | null = null;
   let rosterRows: RosterRowWithBinding[] = [];
+  let rosterBindingKeyInFlight: string | null = null;
   let lastRosterBindingKey = '';
   let lastRosterPreloadKey = '';
 
@@ -130,6 +137,10 @@
   /** Bumps when per-student CLI progress changes so `$:` blocks re-run (Map mutations are not tracked). */
   let workflowProgressRevision = 0;
   let workflowCommandProgressByJobId = new Map<string, WorkflowCommandProgressEntry>();
+  let workflowScopedQuestionProgressByStudentRef = new Map<
+    string,
+    WorkflowScopedQuestionProgressEntry
+  >();
   let workflowStudentRefByJobId = new Map<string, string>();
   let latestWorkflowStudentRefByStage = new Map<string, string>();
   let activeIntakeFilename: string | null = null;
@@ -158,6 +169,7 @@
         : 'Retry';
   $: rosterActionDisabled =
     !lmsRosterEnabled || rosterCacheState.status === 'loading' || rosterCacheState.status === 'ready';
+  $: rosterBindingsLoading = rosterBindingKeyInFlight !== null;
   $: rosterPreloadKey = [
     workspaceState?.project?.projectPath ?? '',
     resolvedLmsCourseId ?? '',
@@ -230,7 +242,7 @@
     const workflowSubmission = intakeItem
       ? workflowByStudentRef.get(intakeItem.studentRef) ?? null
       : null;
-    const displayName = liveRow?.displayName ?? 'Unknown student';
+    const displayName = liveRow?.displayName ?? rosterDisplayNameFallback();
     return {
       student,
       liveRow,
@@ -326,6 +338,9 @@
         stageText: entry.workflowSubmission
           ? stageLabel(entry.workflowSubmission.stage)
           : 'waiting',
+        stageTitle: entry.workflowSubmission
+          ? progressTitleForSubmission(entry.workflowSubmission)
+          : undefined,
         stageProgress: entry.workflowSubmission
           ? progressForSubmission(entry.workflowSubmission)
           : 0,
@@ -366,10 +381,12 @@
     workflowSubmission: StudentWorkflowSubmission | null
   ):
     | 'needsReview'
+    | 'manual'
     | 'processing'
     | 'ready'
     | 'graded'
-    | 'failedStopped'
+    | 'failed'
+    | 'stopped'
     | 'noSubmission' {
     if (!intakeItem) {
       return 'noSubmission';
@@ -377,12 +394,18 @@
     if (workflowSubmission?.stage === 'graded') {
       return 'graded';
     }
-    if (workflowSubmission?.stage === 'failed' || workflowSubmission?.stage === 'stopped') {
-      return 'failedStopped';
+    if (workflowSubmission?.stage === 'failed') {
+      return 'failed';
+    }
+    if (workflowSubmission?.stage === 'stopped') {
+      return 'stopped';
+    }
+    if (workflowSubmission?.stage === 'manual_grading') {
+      return 'manual';
     }
     if (
       workflowSubmission &&
-      ['alignment_review', 'detect_review', 'parse_review', 'manual_grading'].includes(workflowSubmission.stage)
+      ['alignment_review', 'detect_review', 'parse_review'].includes(workflowSubmission.stage)
     ) {
       return 'needsReview';
     }
@@ -402,6 +425,63 @@
   function progressForSubmission(submission: StudentWorkflowSubmission): number {
     return workflowProgressByStudentRef.get(submission.studentRef)?.progress ??
       stageProgressValue(submission.stage);
+  }
+
+  function rosterDisplayNameFallback(): string {
+    return lmsRosterEnabled &&
+      (rosterCacheState.status === 'idle' || rosterCacheState.status === 'loading' || rosterBindingsLoading)
+      ? 'Loading student'
+      : 'Unknown student';
+  }
+
+  function scopedQuestionProgressForSubmission(
+    submission: StudentWorkflowSubmission
+  ): WorkflowScopedQuestionProgressEntry | null {
+    const scopedProgress = workflowScopedQuestionProgressByStudentRef.get(submission.studentRef);
+    if (!scopedProgress || scopedProgress.stage !== submission.stage) {
+      return null;
+    }
+    return scopedProgress;
+  }
+
+  function questionOrdinal(questionId: string | null): number | null {
+    if (!questionId) {
+      return null;
+    }
+    const question = questionById.get(questionId);
+    if (question && Number.isFinite(question.questionNumber) && question.questionNumber > 0) {
+      return question.questionNumber;
+    }
+    const sortedQuestionIds = [...questionById.values()]
+      .sort((a, b) => a.questionNumber - b.questionNumber)
+      .map((item) => item.questionId);
+    const index = sortedQuestionIds.indexOf(questionId);
+    return index >= 0 ? index + 1 : null;
+  }
+
+  function progressTitleForSubmission(submission: StudentWorkflowSubmission): string {
+    const baseLabel = stageLabel(submission.stage);
+    const scopedProgress = scopedQuestionProgressForSubmission(submission);
+    if (!scopedProgress) {
+      return baseLabel;
+    }
+    const completed = Math.min(
+      scopedProgress.completedQuestionIds.length,
+      scopedProgress.totalQuestionCount
+    );
+    const parts = [
+      baseLabel,
+      `${completed}/${scopedProgress.totalQuestionCount} questions complete`
+    ];
+    if (scopedProgress.activeQuestionId) {
+      const ordinal = questionOrdinal(scopedProgress.activeQuestionId);
+      parts.push(
+        ordinal !== null
+          ? `active question Q${ordinal} (${scopedProgress.activeQuestionId})`
+          : `active question ${scopedProgress.activeQuestionId}`
+      );
+    }
+    return parts.join(' · ');
   }
 
   function workflowProgressMetrics(studentRef: string): { criterionCount: number; questionCount: number } | null {
@@ -469,6 +549,30 @@
       workflowProgressByStudentRef = next;
       workflowProgressRevision += 1;
     }
+    syncScopedQuestionProgress(submissions);
+  }
+
+  function syncScopedQuestionProgress(submissions: StudentWorkflowSubmission[]): void {
+    if (workflowScopedQuestionProgressByStudentRef.size === 0) {
+      return;
+    }
+    const activeStagesByStudentRef = new Map(
+      submissions
+        .filter((submission) => submission.stage === 'detect' || submission.stage === 'pii')
+        .map((submission) => [submission.studentRef, submission.stage] as const)
+    );
+    const next = new Map(workflowScopedQuestionProgressByStudentRef);
+    let changed = false;
+    for (const [studentRef, scopedProgress] of next) {
+      if (activeStagesByStudentRef.get(studentRef) !== scopedProgress.stage) {
+        next.delete(studentRef);
+        changed = true;
+      }
+    }
+    if (changed) {
+      workflowScopedQuestionProgressByStudentRef = next;
+      workflowProgressRevision += 1;
+    }
   }
 
   function readEventStudentRef(event: RuntimeJobEvent): string | null {
@@ -484,6 +588,29 @@
       }
     }
     return null;
+  }
+
+  function readEventQuestionId(event: RuntimeJobEvent): string | null {
+    const direct = event.payload.questionId ?? event.payload.question_id;
+    if (typeof direct === 'string' && direct.trim().length > 0) {
+      return direct.trim();
+    }
+    const scope = event.payload.scope;
+    if (isRecord(scope)) {
+      const scoped = scope.questionId ?? scope.question_id;
+      if (typeof scoped === 'string' && scoped.trim().length > 0) {
+        return scoped.trim();
+      }
+    }
+    return null;
+  }
+
+  function defaultQuestionCountForStudent(studentRef: string): number {
+    const submission = workflowByStudentRef.get(studentRef);
+    if (submission && submission.answers.length > 0) {
+      return submission.answers.length;
+    }
+    return Math.max(1, workspaceState?.questions?.length ?? 0);
   }
 
   function singleSubmissionInStage(stage: string): string | null {
@@ -544,6 +671,65 @@
     }
   }
 
+  function clearScopedQuestionProgress(studentRef: string, stage: string): void {
+    const existing = workflowScopedQuestionProgressByStudentRef.get(studentRef);
+    if (!existing || existing.stage !== stage) {
+      return;
+    }
+    const next = new Map(workflowScopedQuestionProgressByStudentRef);
+    next.delete(studentRef);
+    workflowScopedQuestionProgressByStudentRef = next;
+    workflowProgressRevision += 1;
+  }
+
+  function applyScopedQuestionProgress(
+    event: RuntimeJobEvent,
+    studentRef: string,
+    stage: string
+  ): void {
+    if (stage !== 'detect' && stage !== 'pii') {
+      return;
+    }
+    const innerEvent = event.payload.event;
+    if (innerEvent !== 'item_started' && innerEvent !== 'item_completed') {
+      return;
+    }
+    const questionId = readEventQuestionId(event);
+    if (!questionId) {
+      return;
+    }
+    const existing = workflowScopedQuestionProgressByStudentRef.get(studentRef);
+    const completedQuestionIds = new Set(
+      existing?.stage === stage ? existing.completedQuestionIds : []
+    );
+    if (innerEvent === 'item_completed') {
+      completedQuestionIds.add(questionId);
+    }
+    const totalQuestionCount = Math.max(
+      existing?.totalQuestionCount ?? defaultQuestionCountForStudent(studentRef),
+      completedQuestionIds.size,
+      1
+    );
+    const next = new Map(workflowScopedQuestionProgressByStudentRef);
+    next.set(studentRef, {
+      stage,
+      activeQuestionId: innerEvent === 'item_started' ? questionId : null,
+      completedQuestionIds: [...completedQuestionIds],
+      totalQuestionCount
+    });
+    workflowScopedQuestionProgressByStudentRef = next;
+    workflowProgressRevision += 1;
+  }
+
+  function scopedQuestionInnerPercent(studentRef: string, stage: string): number | null {
+    const scopedProgress = workflowScopedQuestionProgressByStudentRef.get(studentRef);
+    if (!scopedProgress || scopedProgress.stage !== stage) {
+      return null;
+    }
+    const total = Math.max(1, scopedProgress.totalQuestionCount);
+    return Math.trunc((Math.min(scopedProgress.completedQuestionIds.length, total) / total) * 100);
+  }
+
   function handleWorkflowStateUpdated(event: RuntimeJobEvent): boolean {
     if (event.eventType !== 'workflow_state_updated') {
       return false;
@@ -588,12 +774,14 @@
       return;
     }
     if (event.eventType === 'job_progress') {
+      applyScopedQuestionProgress(event, studentRef, commandStage);
       const prevState =
         workflowCommandProgressByJobId.get(progressStateKey) ?? null;
       const nextState = updateWorkflowCommandProgressState(prevState, event.payload);
       workflowCommandProgressByJobId.set(progressStateKey, nextState);
       const payload = event.payload;
-      const innerPercent = readCliProgressPercent(payload);
+      const innerPercent =
+        scopedQuestionInnerPercent(studentRef, commandStage) ?? readCliProgressPercent(payload);
       if (innerPercent !== null) {
         setWorkflowProgress(
           studentRef,
@@ -611,11 +799,13 @@
     }
     if (event.eventType === 'job_finished') {
       clearWorkflowCommandTracking(event, progressStateKey);
+      clearScopedQuestionProgress(studentRef, commandStage);
       setWorkflowProgress(studentRef, commandStage, range.end);
       return;
     }
     if (event.eventType === 'job_failed' || event.eventType === 'job_cancelled') {
       clearWorkflowCommandTracking(event, progressStateKey);
+      clearScopedQuestionProgress(studentRef, commandStage);
     }
   }
 
@@ -689,22 +879,14 @@
     }
   }
 
-  async function hydrateRosterBindings(
+  async function buildRosterBindings(
     rawRows: LmsRosterRow[],
-    courseId: string | null,
-    expectedKey: string
-  ) {
-    if (expectedKey !== lastRosterBindingKey) {
-      return;
-    }
+    courseId: string | null
+  ): Promise<RosterRowWithBinding[]> {
     if (!courseId) {
-      if (expectedKey !== lastRosterBindingKey) {
-        return;
-      }
-      rosterRows = rawRows.map((row) => ({ ...row, bindingTokenHex: null }));
-      return;
+      return rawRows.map((row) => ({ ...row, bindingTokenHex: null }));
     }
-    const bindings = await Promise.all(
+    return Promise.all(
       rawRows.map(async (row) => {
         try {
           const bindingTokenHex = await computeLmsBindingToken(courseId, row.userId);
@@ -714,16 +896,11 @@
         }
       })
     );
-    if (expectedKey !== lastRosterBindingKey) {
-      return;
-    }
-    rosterRows = bindings;
   }
 
-  function syncRosterVerification(bindings: RosterRowWithBinding[]): void {
+  function rosterVerificationMessage(bindings: RosterRowWithBinding[]): string | null {
     if (studentRoster.length === 0) {
-      rosterVerificationError = null;
-      return;
+      return null;
     }
     const missingVerificationTokens = bindings.filter((row) => !normalizedRosterBindingToken(row))
       .length;
@@ -734,15 +911,12 @@
     );
     const persistedTokens = new Set(studentRoster.map((row) => row.bindingTokenHex));
     if (missingVerificationTokens > 0) {
-      rosterVerificationError = rosterVerificationUnavailableMessage(missingVerificationTokens);
-      return;
+      return rosterVerificationUnavailableMessage(missingVerificationTokens);
     }
     const mismatch =
       liveTokens.size !== persistedTokens.size ||
       [...persistedTokens].some((tokenValue) => !liveTokens.has(tokenValue));
-    rosterVerificationError = mismatch
-      ? rosterMismatchMessage(studentRoster, liveTokens, persistedTokens)
-      : null;
+    return mismatch ? rosterMismatchMessage(studentRoster, liveTokens, persistedTokens) : null;
   }
 
   function rosterMismatchMessage(
@@ -915,6 +1089,7 @@
   $: if (rosterCacheState.status !== 'ready') {
     rosterRows = [];
     lastRosterBindingKey = '';
+    rosterBindingKeyInFlight = null;
     rosterVerificationError = null;
   }
 
@@ -925,12 +1100,21 @@
     });
     if (bindingKey !== lastRosterBindingKey) {
       lastRosterBindingKey = bindingKey;
-      void hydrateRosterBindings(rosterCacheState.rows, rosterCacheState.courseId, bindingKey);
+      rosterBindingKeyInFlight = rosterCacheState.rows.length > 0 ? bindingKey : null;
+      void buildRosterBindings(rosterCacheState.rows, rosterCacheState.courseId).then((bindings) => {
+        if (bindingKey !== lastRosterBindingKey) {
+          return;
+        }
+        // eslint-disable-next-line svelte/infinite-reactive-loop -- guarded by bindingKey; applies only the newest async roster snapshot.
+        rosterRows = bindings;
+        // eslint-disable-next-line svelte/infinite-reactive-loop -- guarded by bindingKey; clears loading for the same roster snapshot.
+        rosterBindingKeyInFlight = null;
+      });
     }
   }
 
-  $: if (rosterCacheState.status === 'ready') {
-    syncRosterVerification(rosterRows);
+  $: if (rosterCacheState.status === 'ready' && !rosterBindingsLoading) {
+    rosterVerificationError = rosterVerificationMessage(rosterRows);
   }
 
   $: syncWorkflowProgress(workflowSubmissions);
