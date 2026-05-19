@@ -78,6 +78,7 @@
   function commandLabel(commandName: string): string {
     const labels: Record<string, string> = {
       'create_project': 'Create project',
+      'regrade_question_answers': 'Regrade answers',
       'exam.analyze': 'Analyze exam',
       'exam.generate-rubric': 'Generate rubric',
       'grading.score-preliminary': 'Grade answers',

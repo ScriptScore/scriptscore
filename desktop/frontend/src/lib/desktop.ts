@@ -4,6 +4,7 @@ export {
   isDesktopHost,
   toDesktopAssetUrl
 } from './desktop/shared';
+export { checkAppUpdate, getAppVersion, openExternalUrl } from './desktop/app';
 export {
   createProject,
   getDefaultProjectsRoot,
@@ -23,6 +24,7 @@ export {
   skipTemplateRedaction,
   generateQuestionRubric,
   reanalyzeQuestion,
+  regradeQuestionAnswers,
   saveRubricUpdate,
   replaceTemplatePdf,
   exportStampedTemplatePdf
@@ -55,6 +57,7 @@ export {
   saveStudentParseReview,
   deleteStudentSubmission,
   intakeDefaultPdfRectsFromTemplate,
+  recoverInterruptedStudentWorkflow,
   runStudentIntake,
   saveCriterionScore,
   saveModeratedFeedback,

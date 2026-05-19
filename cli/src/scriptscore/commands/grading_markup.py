@@ -6,12 +6,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, Field
-
 from scriptscore.commands.common import batch_outcome, progress, warning
 from scriptscore.commands.grading_shared import (
     answer_is_effectively_blank,
     assessment_xml,
+    parse_tagged_highlights,
     question_context_xml,
     synthetic_llm_trace_artifact,
 )
@@ -30,16 +29,8 @@ from scriptscore.contracts import (
     MarkupRequest,
     ScriptscoreError,
 )
-from scriptscore.prompts import PromptResponseError, parse_json_model
+from scriptscore.prompts import PromptResponseError
 from scriptscore.runtime import CommandContext, CommandOutcome, CommandSpec
-
-
-class MarkupPayload(BaseModel):
-    """Strict provider response payload for markup generation."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    incorrect_segments: list[str] = Field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -75,52 +66,6 @@ def _prompt_variables(request_row: MarkupRequest) -> dict[str, str]:
             question_max_points=request_row.question_max_points,
         ),
     }
-
-
-def _validated_structured_highlights(raw_text: str, *, student_answer: str) -> list[HighlightSpan]:
-    payload = parse_json_model(raw_text, MarkupPayload)
-
-    used_ranges: list[tuple[int, int]] = []
-    highlights: list[HighlightSpan] = []
-    for highlighted_text in payload.incorrect_segments[:4]:
-        match_range = _first_unused_substring_range(
-            student_answer=student_answer,
-            highlighted_text=highlighted_text,
-            used_ranges=used_ranges,
-        )
-        if match_range is None:
-            continue
-        start_char, end_char = match_range
-        used_ranges.append(match_range)
-        highlights.append(
-            HighlightSpan(
-                kind="incorrect",
-                start_char=start_char,
-                end_char=end_char,
-                text=student_answer[start_char:end_char],
-            )
-        )
-    highlights.sort(key=lambda highlight: (highlight.start_char, highlight.end_char))
-    return highlights
-
-
-def _first_unused_substring_range(
-    *,
-    student_answer: str,
-    highlighted_text: str,
-    used_ranges: list[tuple[int, int]],
-) -> tuple[int, int] | None:
-    search_from = 0
-    while True:
-        start_char = student_answer.find(highlighted_text, search_from)
-        if start_char == -1:
-            return None
-        end_char = start_char + len(highlighted_text)
-        if all(
-            end_char <= used_start or start_char >= used_end for used_start, used_end in used_ranges
-        ):
-            return (start_char, end_char)
-        search_from = start_char + 1
 
 
 def _run_markup_prompt(
@@ -192,7 +137,7 @@ def _run_markup_prompt(
 
     raw_response = attempt.execution.provider_response.raw_text
     try:
-        highlights = _validated_structured_highlights(raw_response, student_answer=student_answer)
+        highlights = parse_tagged_highlights(raw_response, student_answer=student_answer)
     except PromptResponseError as exc:
         return MarkupPromptRun(
             highlights=None,

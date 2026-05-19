@@ -1418,15 +1418,26 @@ fn export_stamped_template_job_returns_while_active_runtime_job_finishes_before_
         .create_project(create_project_input(&template_pdf), &event_sink)
         .expect("project should be created");
 
+    let release_marker = test_root.join("release-smoke-ping");
     let slow_state = Arc::clone(&state);
     let slow_events = event_sink.clone();
+    let wait_for_file = release_marker.to_string_lossy().into_owned();
     let slow_handle = thread::spawn(move || {
         slow_state.run_smoke_ping_job(
             &slow_events,
-            json!({"message": "slow", "steps": 10, "sleep_ms": 3_000}),
+            json!({"message": "slow", "steps": 1, "wait_for_file": wait_for_file}),
         )
     });
     event_sink.wait_for("job_started", "smoke.ping");
+    let shell = state.shell_state().expect("shell state should load");
+    assert!(
+        shell
+            .worker_activity
+            .active_jobs
+            .iter()
+            .any(|job| job.command_name == "smoke.ping"),
+        "smoke.ping should remain active until the test releases it"
+    );
 
     let exported_path = test_root
         .join("exports")
@@ -1441,7 +1452,7 @@ fn export_stamped_template_job_returns_while_active_runtime_job_finishes_before_
         !event_sink.snapshot().iter().any(|event| {
             event.command_name == "smoke.ping" && event.event_type == "job_finished"
         }),
-        "template export command should return before the active runtime job finishes"
+        "smoke.ping should not finish before the release marker exists"
     );
     assert!(
         !export_job_id.is_empty(),
@@ -1455,6 +1466,7 @@ fn export_stamped_template_job_returns_while_active_runtime_job_finishes_before_
         "stamp job should not start while another runtime job is active"
     );
 
+    std::fs::write(&release_marker, "release").expect("smoke ping release marker should write");
     slow_handle
         .join()
         .expect("slow job thread should join")

@@ -119,6 +119,12 @@ describe('commandProgressRange grading metrics', () => {
     expect(commandProgressRange('scans.canonicalize')).toEqual({ start: 12, end: 25 });
   });
 
+  it('does not render the unsupported pre-release transform stage as processing', () => {
+    expect(stageLabel('transform')).toBe('transform');
+    expect(commandWorkflowStage('scans.transform')).toBeNull();
+    expect(commandProgressRange('scans.transform')).toBeNull();
+  });
+
   it('maps scans.pii into the dedicated prescreen band', () => {
     expect(stageLabel('pii')).toBe('screening PII');
     expect(commandWorkflowStage('scans.pii')).toBe('pii');

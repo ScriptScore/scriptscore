@@ -34,6 +34,7 @@ pub(crate) use template_setup::{
     persist_template_setup_success, prepare_template_setup, replace_template_pdf_and_pages,
     update_template_aruco_status,
 };
+pub(crate) use workflow_state::mark_interrupted_student_workflow_runs;
 pub use workflow_state::{
     append_generated_rubric, canonical_intake_pdf_path, list_job_traces, load_job_trace,
     load_latest_job_trace_for_command, load_moderation_state, load_results_lms_state,

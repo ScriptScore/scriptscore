@@ -10,6 +10,7 @@ mod protocol;
 mod secrets;
 pub mod state;
 pub mod test_support;
+mod updates;
 mod worker;
 mod worker_runtime;
 mod workflow_status;
@@ -45,12 +46,14 @@ pub fn run() {
             commands::get_default_projects_root,
             commands::project_exists,
             commands::get_legal_disclosure,
+            updates::check_app_update,
             commands::run_smoke_ping,
             commands::list_llm_models,
             commands::validate_llm_model,
             commands::cancel_active_job,
             commands::start_job,
             commands::get_exam_workspace_state,
+            commands::recover_interrupted_student_workflow,
             commands::save_question_edits,
             commands::save_redaction_regions,
             commands::approve_template_setup,
@@ -68,6 +71,7 @@ pub fn run() {
             commands::save_student_intake_page_order,
             commands::delete_student_submission,
             commands::begin_student_workflow,
+            commands::regrade_question_answers,
             commands::confirm_student_alignment,
             commands::save_student_alignment_review,
             commands::confirm_student_detect_review,

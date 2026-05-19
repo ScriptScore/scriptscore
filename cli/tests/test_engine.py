@@ -3,6 +3,9 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+from threading import Thread
+from time import monotonic, sleep
 from typing import Any
 
 from scriptscore.contracts import (
@@ -45,6 +48,37 @@ def test_engine_runs_smoke_ping_successfully() -> None:
     assert result.envelope.command == "smoke.ping"
     assert result.envelope.request_id == "req_engine"
     assert result.envelope.data["message"] == "hello"
+
+
+def test_engine_smoke_ping_waits_for_release_marker(tmp_path: Path) -> None:
+    engine = create_engine(include_builtin_fakes=True)
+    marker = tmp_path / "release-smoke-ping"
+    seen: list[ProgressEvent] = []
+    result_holder: dict[str, Any] = {}
+
+    def run_smoke() -> None:
+        result_holder["result"] = engine.run(
+            "smoke.ping",
+            {"message": "hello", "steps": 1, "wait_for_file": str(marker)},
+            event_sink=seen.append,
+        )
+
+    thread = Thread(target=run_smoke)
+    thread.start()
+    deadline = monotonic() + 5
+    while not seen and monotonic() < deadline:
+        sleep(0.01)
+
+    assert [event.event for event in seen] == ["started"]
+    assert thread.is_alive()
+
+    marker.write_text("release", encoding="utf-8")
+    thread.join(timeout=5)
+
+    assert not thread.is_alive()
+    result = result_holder["result"]
+    assert result.exit_code == 0
+    assert isinstance(result.envelope, CommandSuccessEnvelope)
 
 
 def test_engine_emits_progress_events_via_callback() -> None:

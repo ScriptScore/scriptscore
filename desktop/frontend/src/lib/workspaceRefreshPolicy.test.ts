@@ -29,6 +29,7 @@ describe('workspaceRefreshPolicy', () => {
     expect(isWorkflowRuntimeCommand('scans.parse')).toBe(true);
     expect(isWorkflowRuntimeCommand('grading.score-preliminary')).toBe(true);
     expect(isWorkflowRuntimeCommand('confirm_student_alignment')).toBe(true);
+    expect(isWorkflowRuntimeCommand('regrade_question_answers')).toBe(true);
     expect(isWorkflowRuntimeCommand('results.export')).toBe(false);
     expect(isWorkflowRuntimeCommand('exam.analyze')).toBe(false);
   });

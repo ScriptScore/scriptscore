@@ -17,6 +17,7 @@
   export let activeWorkflowStep: WorkflowStep = 'templateSetup';
   /** When true for a step, show a subtle “needs attention” affordance on that rail icon. */
   export let attentionByStep: Partial<Record<WorkflowStep, boolean>> = {};
+  export let updateAvailable = false;
   export let hasDesktopHost = false;
   export let busy = false;
   export let onOpenProject: (() => void | Promise<void>) | null = null;
@@ -212,7 +213,8 @@
       selected={activeWorkflowStep === 'settings'}
       type="button"
       disabled={busy || !hasDesktopHost}
-      title="Settings"
+      class={updateAvailable ? '!border-message-info-border shadow-[0_0_0_2px_var(--message-info-border)] text-workspace-sidebar-foreground' : ''}
+      title={updateAvailable ? 'Update available' : 'Settings'}
       ariaLabel="Settings"
       onclick={() => {
         onSelectWorkflowStep?.('settings');

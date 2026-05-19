@@ -59,6 +59,7 @@
   export let onSubmissionCompleted:
     | ((payload: SubmissionCompletedPayload) => void | Promise<void>)
     | null = null;
+  export let onActiveFileChange: ((filename: string | null) => void) | null = null;
 
   type SubmissionCompletedPayload = {
     canvasUserId?: string | null;
@@ -184,6 +185,7 @@
   type RectPx = StudentIntakeRedactionRegionInput;
   let showExamView = false;
   let examViewPageNumber = 1;
+  let lastActiveFilename: string | null = null;
   const previewLoadTimeoutMs = 12000;
   // Step 2 can include EasyOCR cold start + network roster fetch; allow a longer per-operation timeout.
   const step2OperationTimeoutMs = 180000;
@@ -390,6 +392,11 @@
     examViewPageNumber <= examPageCount
       ? toDesktopAssetUrl(examPathsForView[examViewPageNumber - 1]!)
       : '';
+  $: activeFilename = activeItem ? basename(activeItem.pdfPath) : null;
+  $: if (activeFilename !== lastActiveFilename) {
+    lastActiveFilename = activeFilename;
+    onActiveFileChange?.(activeFilename);
+  }
 
   function updateQueueItem(id: string, patch: Partial<QueueItem>): void {
     queue = queue.map((item) => (item.id === id ? { ...item, ...patch } : item));

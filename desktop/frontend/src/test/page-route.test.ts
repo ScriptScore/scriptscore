@@ -19,6 +19,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
     closeCurrentProject: vi.fn(),
     computeLmsBindingToken: vi.fn(),
     createProject: vi.fn(),
+    beginStudentWorkflow: vi.fn(),
+    confirmStudentAlignment: vi.fn(),
+    confirmStudentDetectReview: vi.fn(),
+    confirmStudentParseReview: vi.fn(),
+    cancelActiveJob: vi.fn(),
+    recoverInterruptedStudentWorkflow: vi.fn(),
     generateQuestionRubric: vi.fn(),
     getJobTrace: vi.fn(),
     getLmsRosterCacheState: vi.fn().mockResolvedValue({
@@ -48,6 +54,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
     }),
     retryResultsLmsUpload: vi.fn(),
     reanalyzeQuestion: vi.fn(),
+    regradeQuestionAnswers: vi.fn(),
     exportStampedTemplatePdf: vi.fn(),
     replaceTemplatePdf: vi.fn(),
   finalizeReadyResults: vi.fn(),
@@ -367,6 +374,135 @@ function studentsWorkflowWorkspaceState(
   });
 }
 
+function studentWorkflowReviewWorkspaceState(
+  stage: 'alignment_review' | 'detect_review' | 'parse_review'
+): ExamWorkspaceState {
+  return workspaceState({
+    status: 'approved',
+    statusLabel: 'Student workflow review',
+    workflowStage: 'student_workflow_review',
+    workflowLabel: 'Student workflow review',
+    templatePreviewArtifacts: [
+      {
+        artifactId: 'template_page_1',
+        pageNumber: 1,
+        imagePath: '/tmp/template_1.png',
+        label: 'Page 1'
+      }
+    ],
+    studentIntake: {
+      status: 'ok',
+      latestJobId: 'job_intake_1',
+      unresolvedCount: 0,
+      items: [
+        {
+          studentRef: 'student_1',
+          canonicalPdfPath: '/tmp/student_1.pdf',
+          ingestStatus: 'ok',
+          pageCount: 1,
+          examPagePaths: ['/tmp/student_1_p1.png'],
+          warnings: [],
+          bindingTokenHex: 'token_canvas_1'
+        }
+      ]
+    },
+    studentRoster: [
+      {
+        studentRef: 'student_1',
+        bindingTokenHex: 'token_canvas_1'
+      }
+    ],
+    studentWorkflow: {
+      status: 'attention',
+      latestJobId: 'job_workflow_1',
+      submissions: [
+        {
+          studentRef: 'student_1',
+          canonicalPdfPath: '/tmp/student_1.pdf',
+          pageCount: 1,
+          stage,
+          latestJobId: 'job_stage_1',
+          failureMessage: null,
+          warnings: [],
+          pageArtifacts: [],
+          alignmentPages:
+            stage === 'alignment_review'
+              ? [
+                  {
+                    pageNumber: 1,
+                    confidence: 0.99,
+                    lowConfidence: false,
+                    reviewExempt: false,
+                    reviewExemptReason: null,
+                    questionCount: 1,
+                    transform: { rotation: 0, scale: 1, translateX: 0, translateY: 0 },
+                    warnings: []
+                  }
+                ]
+              : [],
+          detectReview:
+            stage === 'detect_review'
+              ? {
+                  pendingRows: [
+                    {
+                      questionId: 'question_1',
+                      pageNumber: 1,
+                      sourcePageImagePath: '/tmp/student_1_p1.png',
+                      templateRegion: {
+                        x: 10,
+                        y: 10,
+                        width: 100,
+                        height: 40,
+                        units: 'rendered_page_pixels'
+                      },
+                      warnings: [],
+                      resolvedRegion: null
+                    }
+                  ],
+                  trustedCropTargets: []
+                }
+              : undefined,
+          answers:
+            stage === 'parse_review'
+              ? [
+                  {
+                    questionId: 'question_1',
+                    questionNumber: 1,
+                    cropImagePath: '/tmp/q1.png',
+                    piiPrescreen: null,
+                    manualGradingRequired: false,
+                    manualGradingReason: null,
+                    moderationEligible: true,
+                    parseStatus: 'warning',
+                    parseConfidence: 'low',
+                    parseConfidenceSource: 'combined',
+                    rawParsedText: 'raww answer',
+                    verifiedText: 'raww answer',
+                    reviewRequired: true,
+                    verified: false,
+                    stale: false,
+                    gradingStatus: 'not_started',
+                    gradingConfidence: null,
+                    gradingConfidenceReason: null,
+                    questionMaxPoints: 5,
+                    totalPointsAwarded: null,
+                    feedbackText: null,
+                    criterionResults: [],
+                    highlights: [],
+                    warnings: []
+                  }
+                ]
+              : []
+        }
+      ]
+    },
+    projectConfig: {
+      ...(workspaceState().projectConfig!),
+      lmsCourseId: 'persisted-course-id'
+    }
+  });
+}
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((res) => {
@@ -504,6 +640,18 @@ describe('desktop route shell', () => {
       await desktopMocks.getLmsRosterCacheState()
     );
     desktopMocks.computeLmsBindingToken.mockResolvedValue('token_canvas_1');
+    desktopMocks.beginStudentWorkflow.mockResolvedValue('job_student_workflow_1');
+    desktopMocks.confirmStudentAlignment.mockResolvedValue('job_confirm_alignment_1');
+    desktopMocks.confirmStudentDetectReview.mockResolvedValue('job_confirm_detect_1');
+    desktopMocks.confirmStudentParseReview.mockResolvedValue('job_confirm_parse_1');
+    desktopMocks.cancelActiveJob.mockResolvedValue({
+      currentProject: projectSummary(),
+      workerStatus: 'ready',
+      workerActivity: { activeJobs: [], pendingJobCount: 0 },
+      lastRuntimeError: null,
+      debugFeatures: { redactionToggle: false }
+    });
+    desktopMocks.recoverInterruptedStudentWorkflow.mockResolvedValue(studentsWorkflowWorkspaceState('stopped'));
     desktopMocks.runStudentIntake.mockResolvedValue('job_intake_1');
     desktopMocks.resolveLmsStudentRef.mockResolvedValue({
       studentRef: 'student_1',
@@ -1294,6 +1442,116 @@ describe('desktop route shell', () => {
     expect(get(notifications).some((toast) => toast.message === 'Approved rubric saved')).toBe(true);
   });
 
+  it('starts student workflow regrade after approving a rubric with stale answers', async () => {
+    let runtimeHandler: ((event: RuntimeJobEvent) => void) | null = null;
+    const initialWorkspace = analyzedWorkspaceState();
+    initialWorkspace.questions[0]!.rubric = {
+      status: 'draft',
+      criteria: [
+        {
+          criterionId: 'c1',
+          label: 'Correctness',
+          points: 5,
+          partialCreditGuidance: 'Award up to 5 points.',
+          source: 'manual'
+        }
+      ],
+      warnings: [],
+      approvedAt: null,
+      latestJobId: 'job_rubric_1'
+    };
+    const savedWorkspace = structuredClone(initialWorkspace);
+    savedWorkspace.questions[0]!.rubric = {
+      ...initialWorkspace.questions[0]!.rubric!,
+      status: 'approved',
+      approvedAt: '2026-04-08T00:00:00Z'
+    };
+    savedWorkspace.studentWorkflow = {
+      status: 'graded',
+      latestJobId: 'grade_job',
+      submissions: [
+        {
+          studentRef: 'student_1',
+          canonicalPdfPath: '/tmp/student.pdf',
+          pageCount: 1,
+          stage: 'graded',
+          latestJobId: 'grade_job',
+          failureMessage: null,
+          warnings: [],
+          pageArtifacts: [],
+          alignmentPages: [],
+          detectReview: null,
+          answers: [
+            {
+              questionId: 'question_1',
+              questionNumber: 1,
+              cropImagePath: null,
+              manualGradingRequired: false,
+              manualGradingReason: null,
+              moderationEligible: true,
+              parseStatus: 'ok',
+              parseConfidence: 'high',
+              parseConfidenceSource: 'combined',
+              rawParsedText: 'answer',
+              verifiedText: 'answer',
+              reviewRequired: false,
+              verified: true,
+              stale: true,
+              gradingStatus: 'draft_ready',
+              gradingConfidence: null,
+              gradingConfidenceReason: null,
+              questionMaxPoints: 5,
+              totalPointsAwarded: 4,
+              feedbackText: 'Old feedback',
+              criterionResults: [],
+              highlights: [],
+              warnings: []
+            }
+          ]
+        }
+      ]
+    };
+
+    desktopMocks.isDesktopHost.mockReturnValue(true);
+    desktopMocks.getShellState.mockResolvedValue({
+      currentProject: projectSummary(),
+      workerStatus: 'ready',
+      lastRuntimeError: null
+    });
+    desktopMocks.getExamWorkspaceState.mockResolvedValue(initialWorkspace);
+    desktopMocks.saveRubricUpdate.mockResolvedValue(savedWorkspace);
+    desktopMocks.regradeQuestionAnswers.mockResolvedValue('job_regrade_1');
+    desktopMocks.listenRuntimeJobEvents.mockImplementation(async (handler) => {
+      runtimeHandler = handler as (event: RuntimeJobEvent) => void;
+      return vi.fn();
+    });
+
+    render(Page);
+
+    expect(await screen.findByText('Question review in progress')).toBeTruthy();
+    await selectTemplateSetupSubstep('Review');
+    await fireEvent.click(screen.getByRole('button', { name: 'Approve rubric' }));
+
+    await waitFor(() => {
+      expect(desktopMocks.regradeQuestionAnswers).toHaveBeenCalledWith('question_1', expect.any(Object));
+    });
+    if (runtimeHandler === null) {
+      throw new Error('runtime handler should be registered');
+    }
+    const emitRuntimeEvent: (event: RuntimeJobEvent) => void = runtimeHandler;
+    emitRuntimeEvent(
+      runtimeJobEvent({
+        commandName: 'regrade_question_answers',
+        jobId: 'job_regrade_1',
+        payload: hostWorkflowPayload('workspace', savedWorkspace)
+      })
+    );
+
+    await waitFor(() => {
+      expect(get(notifications).some((toast) => toast.message.includes('regrading stale answers'))).toBe(true);
+    });
+  });
+
   it('keeps a warning icon after saving an empty rubric response', async () => {
     const initialWorkspace = analyzedWorkspaceState();
     initialWorkspace.questions[0]!.rubric = {
@@ -1757,6 +2015,168 @@ describe('desktop route shell', () => {
     });
     await waitFor(() => {
       expect(bar().getAttribute('aria-valuenow')).toBe('63');
+    });
+  });
+
+  it.each([
+    {
+      stage: 'alignment_review' as const,
+      confirm: async () => {
+        await fireEvent.click(screen.getByRole('button', { name: 'Confirm alignment → continue' }));
+      },
+      saveMock: () => desktopMocks.saveStudentAlignmentReview,
+      confirmMock: () => desktopMocks.confirmStudentAlignment
+    },
+    {
+      stage: 'detect_review' as const,
+      confirm: async () => {
+        await fireEvent.click(screen.getByRole('button', { name: 'Confirm Regions' }));
+      },
+      saveMock: () => desktopMocks.saveStudentDetectReview,
+      confirmMock: () => desktopMocks.confirmStudentDetectReview
+    },
+    {
+      stage: 'parse_review' as const,
+      confirm: async () => {
+        await fireEvent.input(screen.getByRole('textbox'), { target: { value: 'raw answer' } });
+        await fireEvent.click(screen.getByRole('button', { name: 'Confirm answer → continue' }));
+      },
+      saveMock: () => desktopMocks.saveStudentParseReview,
+      confirmMock: () => desktopMocks.confirmStudentParseReview
+    }
+  ])(
+    'saves $stage review changes while a tracked student workflow host job is active',
+    async ({ stage, confirm, saveMock, confirmMock }) => {
+      let runtimeHandler: ((event: RuntimeJobEvent) => void) | null = null;
+      appSettings.save(configuredCanvasSettings());
+      desktopMocks.isDesktopHost.mockReturnValue(true);
+      desktopMocks.getShellState.mockResolvedValue({
+        currentProject: projectSummary(),
+        workerStatus: 'ready',
+        workerActivity: { activeJobs: [], pendingJobCount: 0 },
+        lastRuntimeError: null,
+        debugFeatures: { redactionToggle: false }
+      });
+      desktopMocks.getExamWorkspaceState.mockResolvedValue(studentWorkflowReviewWorkspaceState(stage));
+      desktopMocks.listenRuntimeJobEvents.mockImplementation(async (handler) => {
+        runtimeHandler = handler as (event: RuntimeJobEvent) => void;
+        return vi.fn();
+      });
+
+      render(Page);
+
+      expect(await screen.findByText('Student workflow review')).toBeTruthy();
+      await fireEvent.click(screen.getByRole('button', { name: 'Students' }));
+      expect(await screen.findByText('Exam Workflow')).toBeTruthy();
+      await fireEvent.click(screen.getByRole('button', { name: 'Begin Workflow' }));
+      await waitFor(() => {
+        expect(desktopMocks.beginStudentWorkflow).toHaveBeenCalledTimes(1);
+      });
+
+      if (runtimeHandler === null) {
+        throw new Error('runtime handler should be registered');
+      }
+      const emitRuntimeEvent: (event: RuntimeJobEvent) => void = runtimeHandler;
+      emitRuntimeEvent(
+        runtimeJobEvent({
+          eventType: 'workflow_state_updated',
+          commandName: 'student.workflow',
+          workerStatus: 'ready',
+          jobId: 'job_workflow_state_1',
+          payload: {
+            workflowStateUpdated: true,
+            workflowStatus: 'ready'
+          }
+        })
+      );
+      expect(screen.getByRole('button', { name: 'Stop Workflow' })).toBeTruthy();
+
+      await fireEvent.click(await screen.findByRole('button', { name: 'Review Jordan Rivera' }));
+      await confirm();
+
+      await waitFor(() => {
+        expect(saveMock()).toHaveBeenCalledTimes(1);
+      });
+      expect(confirmMock()).not.toHaveBeenCalled();
+    }
+  );
+
+  it('defers saved review continuation until active and pending desktop jobs drain', async () => {
+    let runtimeHandler: ((event: RuntimeJobEvent) => void) | null = null;
+    appSettings.save(configuredCanvasSettings());
+    desktopMocks.isDesktopHost.mockReturnValue(true);
+    desktopMocks.getShellState.mockResolvedValue({
+      currentProject: projectSummary(),
+      workerStatus: 'busy',
+      workerActivity: {
+        activeJobs: [
+          {
+            jobId: 'job_active_1',
+            commandName: 'grading.score-preliminary',
+            startedAt: '2026-04-02T00:00:01Z'
+          }
+        ],
+        pendingJobCount: 1
+      },
+      lastRuntimeError: null,
+      debugFeatures: { redactionToggle: false }
+    });
+    desktopMocks.getExamWorkspaceState
+      .mockResolvedValueOnce(studentWorkflowReviewWorkspaceState('detect_review'))
+      .mockResolvedValue(studentsWorkflowWorkspaceState('crop'));
+    desktopMocks.saveStudentDetectReview.mockResolvedValue(studentsWorkflowWorkspaceState('crop'));
+    desktopMocks.listenRuntimeJobEvents.mockImplementation(async (handler) => {
+      runtimeHandler = handler as (event: RuntimeJobEvent) => void;
+      return vi.fn();
+    });
+
+    render(Page);
+
+    expect(await screen.findByText('Student workflow review')).toBeTruthy();
+    await fireEvent.click(screen.getByRole('button', { name: 'Students' }));
+    await fireEvent.click(await screen.findByRole('button', { name: 'Review Jordan Rivera' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Confirm Regions' }));
+
+    await waitFor(() => {
+      expect(desktopMocks.saveStudentDetectReview).toHaveBeenCalledTimes(1);
+    });
+    expect(desktopMocks.beginStudentWorkflow).not.toHaveBeenCalled();
+
+    if (runtimeHandler === null) {
+      throw new Error('runtime handler should be registered');
+    }
+    const emitRuntimeEvent: (event: RuntimeJobEvent) => void = runtimeHandler;
+    emitRuntimeEvent(
+      runtimeJobEvent({
+        eventType: 'job_finished',
+        commandName: 'grading.score-preliminary',
+        workerStatus: 'busy',
+        jobId: 'job_active_1',
+        payload: {
+          schedulerActiveJobDetails: [],
+          schedulerPendingJobs: 1
+        }
+      })
+    );
+
+    await tick();
+    expect(desktopMocks.beginStudentWorkflow).not.toHaveBeenCalled();
+
+    emitRuntimeEvent(
+      runtimeJobEvent({
+        eventType: 'job_finished',
+        commandName: 'grading.draft-feedback',
+        workerStatus: 'ready',
+        jobId: 'job_pending_1',
+        payload: {
+          schedulerActiveJobDetails: [],
+          schedulerPendingJobs: 0
+        }
+      })
+    );
+
+    await waitFor(() => {
+      expect(desktopMocks.beginStudentWorkflow).toHaveBeenCalledTimes(1);
     });
   });
 

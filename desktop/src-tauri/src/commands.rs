@@ -227,6 +227,15 @@ pub fn get_exam_workspace_state(state: State<'_, AppState>) -> Result<ExamWorksp
 }
 
 #[tauri::command]
+pub fn recover_interrupted_student_workflow(
+    state: State<'_, AppState>,
+) -> Result<ExamWorkspaceState, String> {
+    state
+        .recover_interrupted_student_workflow()
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
 pub fn save_question_edits(
     edits: Vec<QuestionEdit>,
     state: State<'_, AppState>,
@@ -420,6 +429,19 @@ pub fn begin_student_workflow(
     let event_sink = Arc::new(AppHandleRuntimeEventSink::new(app));
     state
         .start_student_workflow_job(settings, event_sink)
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub fn regrade_question_answers(
+    question_id: String,
+    settings: AppSettings,
+    state: State<'_, AppState>,
+    app: AppHandle,
+) -> Result<String, String> {
+    let event_sink = Arc::new(AppHandleRuntimeEventSink::new(app));
+    state
+        .start_regrade_question_answers_job(question_id, settings, event_sink)
         .map_err(|err| err.to_string())
 }
 

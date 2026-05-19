@@ -10,9 +10,21 @@ TARGET="${SCRIPTSCORE_DESKTOP_TARGET:-}"
 AUTO_PORTABLE_PYTHON="${SCRIPTSCORE_DESKTOP_AUTO_PORTABLE_PYTHON:-1}"
 PORTABLE_PYTHON_DIR="${SCRIPTSCORE_DESKTOP_PORTABLE_PYTHON_DIR:-${DESKTOP_ROOT}/dist/portable-python}"
 TAURI_CONFIG="${SCRIPTSCORE_DESKTOP_TAURI_CONFIG:-${DESKTOP_ROOT}/src-tauri/tauri.conf.json}"
+PYTHON_BIN="${SCRIPTSCORE_DESKTOP_PYTHON:-}"
 
 if [[ $# -gt 0 ]]; then
   BUNDLES=$1
+fi
+
+if [[ -z "${PYTHON_BIN}" ]]; then
+  if command -v python3 >/dev/null 2>&1; then
+    PYTHON_BIN=python3
+  elif command -v python >/dev/null 2>&1; then
+    PYTHON_BIN=python
+  else
+    echo "error: python is required to prepare desktop release versions." >&2
+    exit 1
+  fi
 fi
 
 bundle_selection_includes() {
@@ -43,6 +55,34 @@ bundle_selection_requires_portable_runtime() {
     fi
   done
   return 1
+}
+
+bundle_selection_without() {
+  local selected=$1
+  local excluded=$2
+  local bundle
+  local -a selected_bundles
+  local kept=()
+
+  if [[ -z "${selected}" || "${selected}" == "${excluded}" ]]; then
+    return 0
+  fi
+
+  if [[ "${selected}" == "all" ]]; then
+    selected="app,appimage,deb,dmg,msi,nsis,rpm"
+  fi
+
+  selected="${selected// /}"
+  IFS=',' read -r -a selected_bundles <<<"${selected}"
+  for bundle in "${selected_bundles[@]}"; do
+    [[ -n "${bundle}" && "${bundle}" != "${excluded}" ]] || continue
+    kept+=("${bundle}")
+  done
+
+  local old_ifs=${IFS}
+  IFS=,
+  echo "${kept[*]}"
+  IFS=${old_ifs}
 }
 
 detach_macos_dmg_interstitials() {
@@ -200,19 +240,19 @@ if [[ "$(uname -s)" == "Linux" ]] && bundle_selection_includes "${BUNDLES}" "app
   fi
 fi
 
-run_tauri_build() {
-  local selected_bundles=$1
-  local config_path=$2
-  local build_cmd=(
+build_desktop_packages() {
+  local config=$1
+  local bundles=$2
+  local -a build_cmd=(
     cargo
     tauri
     build
     --config
-    "${config_path}"
+    "${config}"
   )
 
-  if [[ -n "${selected_bundles}" ]]; then
-    build_cmd+=(--bundles "${selected_bundles}")
+  if [[ -n "${bundles}" ]]; then
+    build_cmd+=(--bundles "${bundles}")
   fi
 
   if [[ -n "${TARGET}" ]]; then
@@ -223,41 +263,8 @@ run_tauri_build() {
     build_cmd+=(--verbose)
   fi
 
+  set +e
   "${build_cmd[@]}"
-}
-
-append_bundle_selection() {
-  local current=$1
-  local bundle=$2
-  if [[ -z "${current}" ]]; then
-    printf '%s' "${bundle}"
-  else
-    printf '%s,%s' "${current}" "${bundle}"
-  fi
-}
-
-build_status=0
-if bundle_selection_includes "${BUNDLES}" "msi" && [[ -n "${SCRIPTSCORE_DESKTOP_MSI_TAURI_CONFIG:-}" ]]; then
-  non_msi_bundles=""
-  for bundle in appimage deb dmg nsis rpm; do
-    if bundle_selection_includes "${BUNDLES}" "${bundle}"; then
-      non_msi_bundles=$(append_bundle_selection "${non_msi_bundles}" "${bundle}")
-    fi
-  done
-
-  set +e
-  if [[ -n "${non_msi_bundles}" ]]; then
-    run_tauri_build "${non_msi_bundles}" "${TAURI_CONFIG}"
-    build_status=$?
-  fi
-  if [[ ${build_status} -eq 0 ]]; then
-    run_tauri_build "msi" "${SCRIPTSCORE_DESKTOP_MSI_TAURI_CONFIG}"
-    build_status=$?
-  fi
-  set -e
-else
-  set +e
-  run_tauri_build "${BUNDLES}" "${TAURI_CONFIG}"
   build_status=$?
   set -e
 
@@ -266,10 +273,53 @@ else
       build_status=0
     fi
   fi
-fi
 
-if [[ ${build_status} -ne 0 ]]; then
-  exit "${build_status}"
+  if [[ ${build_status} -ne 0 ]]; then
+    exit "${build_status}"
+  fi
+}
+
+if bundle_selection_includes "${BUNDLES}" "msi"; then
+  non_msi_bundles=$(bundle_selection_without "${BUNDLES}" "msi")
+
+  if [[ -n "${SCRIPTSCORE_DESKTOP_MSI_TAURI_CONFIG:-}" ]]; then
+    if [[ -n "${non_msi_bundles}" ]]; then
+      echo "Building non-MSI desktop packages with public release config:"
+      echo "  ${non_msi_bundles}"
+      build_desktop_packages "${TAURI_CONFIG}" "${non_msi_bundles}"
+    fi
+
+    echo "Building MSI with generated native version config:"
+    echo "  ${SCRIPTSCORE_DESKTOP_MSI_TAURI_CONFIG}"
+    build_desktop_packages "${SCRIPTSCORE_DESKTOP_MSI_TAURI_CONFIG}" "msi"
+  else
+    public_version=$(
+      "${PYTHON_BIN}" "${SCRIPT_DIR}/project_release_version.py" tauri-version "${TAURI_CONFIG}"
+    )
+    msi_version=$(
+      "${PYTHON_BIN}" "${SCRIPT_DIR}/project_release_version.py" msi-version "${public_version}"
+    )
+
+    if [[ "${msi_version}" != "${public_version}" ]]; then
+      if [[ -n "${non_msi_bundles}" ]]; then
+        echo "Building non-MSI desktop packages with public version ${public_version}:"
+        echo "  ${non_msi_bundles}"
+        build_desktop_packages "${TAURI_CONFIG}" "${non_msi_bundles}"
+      fi
+
+      projected_config="${DESKTOP_ROOT}/src-tauri/.tauri.msi.conf.json"
+      "${PYTHON_BIN}" "${SCRIPT_DIR}/project_release_version.py" write-tauri-config \
+        --source "${TAURI_CONFIG}" \
+        --output "${projected_config}" \
+        --version "${msi_version}"
+      echo "Building MSI with native version projection ${public_version} -> ${msi_version}"
+      build_desktop_packages "${projected_config}" "msi"
+    else
+      build_desktop_packages "${TAURI_CONFIG}" "${BUNDLES}"
+    fi
+  fi
+else
+  build_desktop_packages "${TAURI_CONFIG}" "${BUNDLES}"
 fi
 
 echo "Desktop package build finished"

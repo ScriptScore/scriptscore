@@ -38,7 +38,7 @@
   $: stage = submission?.stage ?? null;
   $: stageText = stageLabel(stage ?? '');
   $: stageTone = stageProgressTone(stage ?? '');
-  $: stageActive = ['alignment', 'canonicalize', 'transform', 'detect', 'crop', 'pii', 'parse', 'grading'].includes(stage ?? '');
+  $: stageActive = ['alignment', 'canonicalize', 'detect', 'crop', 'pii', 'parse', 'grading'].includes(stage ?? '');
   function answerSortKey(answer: StudentWorkflowAnswer): string {
     return `${String(answer.questionNumber).padStart(6, '0')}:${answer.questionId}`;
   }

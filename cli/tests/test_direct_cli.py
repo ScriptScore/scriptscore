@@ -21,6 +21,19 @@ def test_smoke_ping_via_options_returns_success_envelope() -> None:
     assert result.stdout_lines[-1]["data"]["message"] == "hello"
 
 
+def test_smoke_ping_wait_for_file_via_options_returns_success_envelope(tmp_path: Path) -> None:
+    marker = tmp_path / "release-smoke-ping"
+    marker.write_text("release", encoding="utf-8")
+    payload = {"message": "hello", "steps": 1, "wait_for_file": str(marker)}
+
+    result = run_direct_cli(["_smoke", "ping", "--options", json.dumps(payload)])
+
+    assert result.returncode == 0
+    assert result.stdout_lines[-1]["ok"] is True
+    assert result.stdout_lines[-1]["command"] == "smoke.ping"
+    assert result.stdout_lines[-1]["data"]["message"] == "hello"
+
+
 def test_smoke_ping_via_stdin_supports_progress_events() -> None:
     result = run_direct_cli(
         ["_smoke", "ping", "--stdin", "--emit-events", "--request-id", "req_123"],

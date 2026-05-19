@@ -167,6 +167,9 @@ pub(crate) fn save_student_intake_page_order(
     validate_reordered_paths_match_existing(item, &reordered_paths)?;
     let order_changed = item.exam_page_paths != reordered_paths;
     item.exam_page_paths = reordered_paths;
+    item.page_count = i64::try_from(item.exam_page_paths.len()).map_err(|_| {
+        HostError::Validation("Updated intake page count exceeded supported range.".into())
+    })?;
     project_store::save_student_intake_state(project_path, &intake_state)?;
     if order_changed {
         invalidate_workflow_progress_for_intake_reorder(&mut workflow_state, &input.student_ref);
@@ -236,14 +239,23 @@ fn validate_reordered_paths_match_existing(
         ));
     }
 
-    let mut expected = item.exam_page_paths.clone();
-    expected.sort();
-    let mut incoming = reordered_paths.to_vec();
-    incoming.sort();
-    if incoming != expected {
+    let existing = item.exam_page_paths.iter().cloned().collect::<HashSet<_>>();
+    let mut incoming = HashSet::new();
+    for path in reordered_paths {
+        if !incoming.insert(path.clone()) {
+            return Err(HostError::Validation(
+                "exam_page_paths must not contain duplicate paths.".into(),
+            ));
+        }
+        if !existing.contains(path) {
+            return Err(HostError::Validation(
+                "exam_page_paths must contain only existing ingested pages.".into(),
+            ));
+        }
+    }
+    if reordered_paths.is_empty() {
         return Err(HostError::Validation(
-            "exam_page_paths must reorder the existing ingested pages without adding or removing paths."
-                .into(),
+            "exam_page_paths must contain at least one existing ingested page.".into(),
         ));
     }
     Ok(())
@@ -1161,7 +1173,7 @@ mod tests {
     }
 
     #[test]
-    fn reordered_page_paths_must_be_exact_existing_set() {
+    fn reordered_page_paths_may_remove_but_not_add_pages() {
         let item = StudentIntakeSummary {
             exam_page_paths: vec!["/tmp/a.png".into(), "/tmp/b.png".into()],
             ..summary("student_1", "/tmp/student_1.pdf")
@@ -1172,13 +1184,23 @@ mod tests {
             &["/tmp/b.png".to_string(), "/tmp/a.png".to_string()]
         )
         .is_ok());
+        assert!(
+            validate_reordered_paths_match_existing(&item, &["/tmp/b.png".to_string()]).is_ok()
+        );
         assert!(validate_reordered_paths_match_existing(
             &item,
             &["/tmp/b.png".to_string(), "/tmp/c.png".to_string()]
         )
-        .expect_err("different path set should be invalid")
+        .expect_err("added path should be invalid")
         .to_string()
-        .contains("without adding or removing"));
+        .contains("only existing ingested pages"));
+        assert!(validate_reordered_paths_match_existing(
+            &item,
+            &["/tmp/b.png".to_string(), "/tmp/b.png".to_string()]
+        )
+        .expect_err("duplicate path should be invalid")
+        .to_string()
+        .contains("duplicate paths"));
         assert!(validate_reordered_paths_match_existing(
             &item,
             &["/tmp/b.png".to_string(), "".to_string()]
