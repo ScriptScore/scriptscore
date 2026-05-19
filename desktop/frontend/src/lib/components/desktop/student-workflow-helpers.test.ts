@@ -101,7 +101,7 @@ describe('updateWorkflowCommandProgressState', () => {
 describe('commandProgressRange grading metrics', () => {
   it('treats stopped submissions as resumable rather than attention', () => {
     expect(stageLabel('stopped')).toBe('stopped');
-    expect(stageProgressTone('stopped')).toBe('muted');
+    expect(stageProgressTone('stopped')).toBe('warning');
   });
 
   it('splits preliminary band using criterion and question counts', () => {

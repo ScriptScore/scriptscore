@@ -134,6 +134,55 @@ describe('StudentWorkflowWorkspace roster and stage state', () => {
     });
   });
 
+  it('shows a loading student label instead of Unknown student while the roster warms', async () => {
+    desktopMocks.getLmsRosterCacheState.mockResolvedValue({
+      status: 'loading',
+      projectPath: '/tmp/project',
+      lmsProvider: 'canvas',
+      courseId: 'persisted-course-id',
+      rows: [],
+      lastError: null,
+      idleReason: null
+    });
+    desktopMocks.ensureLmsRosterPreload.mockResolvedValue({
+      status: 'loading',
+      projectPath: '/tmp/project',
+      lmsProvider: 'canvas',
+      courseId: 'persisted-course-id',
+      rows: [],
+      lastError: null,
+      idleReason: null
+    });
+
+    render(StudentWorkflowWorkspace, {
+      workspaceState: baseWorkspaceState({
+        studentRoster: [{ studentRef: 'student_1', bindingTokenHex: 'token_42' }],
+        studentIntake: {
+          status: 'ready',
+          latestJobId: null,
+          unresolvedCount: 0,
+          items: [
+            {
+              studentRef: 'student_1',
+              canonicalPdfPath: '/tmp/student_1.pdf',
+              ingestStatus: 'ok',
+              pageCount: 4,
+              examPagePaths: ['/tmp/page_001.png'],
+              warnings: []
+            }
+          ]
+        }
+      }),
+      prerequisitesMet: true,
+      lmsCourseId: 'persisted-course-id',
+      busyAction: null,
+      onFinalizeSubmission: vi.fn()
+    });
+
+    expect((await screen.findAllByText('Loading student')).length).toBeGreaterThan(0);
+    expect(screen.queryByText('Unknown student')).toBeNull();
+  });
+
   it('shows local-only canonical intake rows as workflow eligible', async () => {
     render(StudentWorkflowWorkspace, {
       workspaceState: baseWorkspaceState({
@@ -292,7 +341,7 @@ describe('StudentWorkflowWorkspace roster and stage state', () => {
     });
 
     const sidebar = screen.getByRole('region', { name: 'Student roster and submission upload' });
-    await fireEvent.click(await within(sidebar).findByRole('button', { name: /Unknown student/i }));
+    await fireEvent.click(await within(sidebar).findByRole('button', { name: /(?:Unknown|Loading) student/i }));
 
     expect(screen.getByText('No submission on file for this student.')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Delete submission' })).toBeNull();

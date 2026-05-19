@@ -35,10 +35,11 @@ function entry(
 const entries = [
   entry('student_1', 'Grace Hopper', 'graded', 100, 'draft grading ready'),
   entry('student_2', 'Ada Lovelace', 'needsReview', 70, 'alignment review'),
-  entry('student_3', 'Katherine Johnson', 'processing', 45, 'manual grading'),
+  entry('student_3', 'Katherine Johnson', 'manual', 45, 'manual grading'),
   entry('student_4', 'Dorothy Vaughan', 'ready', 0, 'ready to finalize'),
-  entry('student_5', 'Mary Jackson', 'failedStopped', 12, 'workflow failed'),
-  entry('student_6', 'No Submission', 'noSubmission', 0, 'no submission')
+  entry('student_5', 'Mary Jackson', 'failed', 12, 'workflow failed'),
+  entry('student_6', 'Stop Row', 'stopped', 12, 'workflow stopped'),
+  entry('student_7', 'No Submission', 'noSubmission', 0, 'no submission')
 ];
 
 describe('StudentWorkflowSidebar management controls', () => {
@@ -69,19 +70,23 @@ describe('StudentWorkflowSidebar management controls', () => {
 
     expect(screen.getByText('Graded')).toBeTruthy();
     expect(screen.getByText('Review')).toBeTruthy();
-    expect(screen.getByText('Processing')).toBeTruthy();
+    expect(screen.getByText('Manual')).toBeTruthy();
     expect(screen.getByText('Ready')).toBeTruthy();
-    expect(screen.getByText('Blocked')).toBeTruthy();
+    expect(screen.getByText('Failed')).toBeTruthy();
+    expect(screen.getByText('Stopped')).toBeTruthy();
     expect(screen.getByText('Missing')).toBeTruthy();
 
     expect(screen.getByTitle('draft grading ready').textContent).toContain('Graded');
     expect(screen.getByTitle('alignment review').textContent).toContain('Review');
-    expect(screen.getByTitle('manual grading').textContent).toContain('Processing');
+    expect(screen.getByTitle('manual grading').textContent).toContain('Manual');
     expect(screen.getByTitle('ready to finalize').textContent).toContain('Ready');
-    expect(screen.getByTitle('workflow failed').textContent).toContain('Blocked');
+    expect(screen.getByTitle('workflow failed').textContent).toContain('Failed');
+    expect(screen.getByTitle('workflow stopped').textContent).toContain('Stopped');
     expect(screen.getByTitle('no submission').textContent).toContain('Missing');
 
     expect(screen.queryByText('draft grading ready')).toBeNull();
+    expect(screen.queryByText('Blocked')).toBeNull();
+    expect(screen.queryByText('Failed/stopped')).toBeNull();
   });
 
   it('filters rows by workflow status group', async () => {
@@ -113,6 +118,28 @@ describe('StudentWorkflowSidebar management controls', () => {
 
     expect(screen.getByText('No Submission')).toBeTruthy();
     expect(screen.queryByText('Mary Jackson')).toBeNull();
+    expect(screen.queryByText('Stop Row')).toBeNull();
+  });
+
+  it('filters failed and stopped rows independently', async () => {
+    render(StudentWorkflowSidebar, {
+      entries,
+      selectedStudentRef: null,
+      busyAction: null,
+      rosterBusy: false
+    });
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Filter students by workflow status' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Stopped' }));
+
+    expect(screen.getByText('Stop Row')).toBeTruthy();
+    expect(screen.queryByText('Mary Jackson')).toBeNull();
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Filter students by workflow status' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Failed' }));
+
+    expect(screen.getByText('Mary Jackson')).toBeTruthy();
+    expect(screen.queryByText('Stop Row')).toBeNull();
   });
 
   it('searches rows by student name', async () => {
@@ -181,6 +208,7 @@ describe('StudentWorkflowBoard workflow trigger', () => {
       },
       workflowSubmission: null,
       stageText,
+      stageTitle: undefined,
       stageProgress,
       stageTone: 'muted' as const,
       stageComplete: false,
@@ -275,5 +303,23 @@ describe('StudentWorkflowBoard workflow trigger', () => {
 
     expect(screen.getByTitle('draft grading ready')).toBeTruthy();
     expect(screen.queryByText('draft grading ready')).toBeNull();
+  });
+
+  it('keeps compact labels when scoped progress details are available', () => {
+    renderBoard({
+      canonicalReadyRows: [
+        {
+          ...workflowRow('student_1', 'Student 1', 'detecting', 28),
+          stageTitle: 'detecting · 2/12 questions complete · active question Q3 (question_3)',
+          stageTone: 'info' as const,
+          stageActive: true
+        }
+      ]
+    });
+
+    expect(screen.getByRole('progressbar', { name: 'Detecting' })).toBeTruthy();
+    expect(
+      screen.getByTitle('detecting · 2/12 questions complete · active question Q3 (question_3)')
+    ).toBeTruthy();
   });
 });
