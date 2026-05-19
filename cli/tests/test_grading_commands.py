@@ -734,8 +734,8 @@ def test_grading_markup_blank_and_fallback_paths(tmp_path: Path) -> None:
         nonlocal call_count
         call_count += 1
         assert request.prompt_id == "markup"
-        assert request.response_mode == "json_schema"
-        return LlmResponse(raw_text="this is not json")
+        assert request.response_mode == "plain_text"
+        return LlmResponse(raw_text="rewritten answer")
 
     result = _runner(provider_registry=_registry_with_llm(responder)).run(
         "grading.markup",
@@ -787,23 +787,19 @@ def test_grading_markup_blank_and_fallback_paths(tmp_path: Path) -> None:
     assert call_count == 1
 
 
-def test_grading_markup_exact_incorrect_substrings_return_highlights(tmp_path: Path) -> None:
+def test_grading_markup_tagged_spans_return_highlights(tmp_path: Path) -> None:
     def responder(request: LlmRequest) -> LlmResponse:
         assert request.prompt_id == "markup"
-        assert request.response_mode == "json_schema"
-        assert request.response_contract is not None
+        assert request.response_mode == "plain_text"
+        assert request.response_contract is None
         assert request.execution_options["temperature"] == 0.0
         assert request.execution_options["top_p"] == 1
         assert request.execution_options["top_k"] == 1
         assert request.execution_options["repeat_penalty"] == 1.05
         assert request.execution_options["num_predict"] == 512
         return LlmResponse(
-            raw_text=json.dumps(
-                {
-                    "incorrect_segments": [
-                        "xs[1:]",
-                    ]
-                }
+            raw_text=(
+                '<span data-kind="correct">return</span> <span data-kind="incorrect">xs[1:]</span>'
             )
         )
 
@@ -837,20 +833,17 @@ def test_grading_markup_exact_incorrect_substrings_return_highlights(tmp_path: P
     assert row["status"] == "ok"
     assert row["warnings"] == []
     assert row["highlights"] == [
+        {"kind": "correct", "start_char": 0, "end_char": 6, "text": "return"},
         {"kind": "incorrect", "start_char": 7, "end_char": 13, "text": "xs[1:]"},
     ]
 
 
-def test_grading_markup_repeated_substrings_use_first_unused_occurrence(tmp_path: Path) -> None:
+def test_grading_markup_repeated_text_uses_tag_position(tmp_path: Path) -> None:
     def responder(request: LlmRequest) -> LlmResponse:
         return LlmResponse(
-            raw_text=json.dumps(
-                {
-                    "incorrect_segments": [
-                        "return",
-                        "return",
-                    ]
-                }
+            raw_text=(
+                '<span data-kind="incorrect">return</span> xs then '
+                '<span data-kind="correct">return</span> ys'
             )
         )
 
@@ -884,26 +877,61 @@ def test_grading_markup_repeated_substrings_use_first_unused_occurrence(tmp_path
     assert row["status"] == "ok"
     assert row["highlights"] == [
         {"kind": "incorrect", "start_char": 0, "end_char": 6, "text": "return"},
-        {"kind": "incorrect", "start_char": 15, "end_char": 21, "text": "return"},
+        {"kind": "correct", "start_char": 15, "end_char": 21, "text": "return"},
     ]
 
 
-def test_grading_markup_drops_missing_substrings_without_retry(tmp_path: Path) -> None:
+def test_grading_markup_preserves_whitespace_and_literal_angle_brackets(tmp_path: Path) -> None:
+    def responder(request: LlmRequest) -> LlmResponse:
+        return LlmResponse(
+            raw_text=(
+                'if <span data-kind="correct">x < 3</span>:\n'
+                '    <span data-kind="incorrect">return y > 1</span>'
+            )
+        )
+
+    student_answer = "if x < 3:\n    return y > 1"
+    result = _runner(provider_registry=_registry_with_llm(responder)).run(
+        "grading.markup",
+        {
+            "markup_requests": [
+                {
+                    "student_ref": "scan_001",
+                    "question_id": "q1",
+                    "subject": "Python",
+                    "total_points_awarded": 1,
+                    "question_max_points": 1,
+                    "student_answer": student_answer,
+                    "question_text_clean": "Explain list slicing.",
+                    "question_context": "",
+                    "rubric_criteria": [_rubric_criterion(points=1)],
+                    "criterion_results": [
+                        {"criterion_index": 0, "points_awarded": 1, "rationale": "Looks fine."}
+                    ],
+                }
+            ],
+            "output_artifacts_dir": str((tmp_path / "markup_out").resolve()),
+            **llm_request_fields("ollama_native"),
+        },
+    )
+
+    assert result.exit_code == 0
+    assert isinstance(result.envelope, CommandSuccessEnvelope)
+    row = result.envelope.data["highlight_results"][0]
+    assert row["status"] == "ok"
+    assert row["highlights"] == [
+        {"kind": "correct", "start_char": 3, "end_char": 8, "text": "x < 3"},
+        {"kind": "incorrect", "start_char": 14, "end_char": 26, "text": "return y > 1"},
+    ]
+
+
+def test_grading_markup_unsupported_markup_falls_back(tmp_path: Path) -> None:
     call_count = 0
 
     def responder(request: LlmRequest) -> LlmResponse:
         nonlocal call_count
         call_count += 1
-        return LlmResponse(
-            raw_text=json.dumps(
-                {
-                    "incorrect_segments": [
-                        "xs[1:]",
-                        "not copied from answer",
-                    ]
-                }
-            )
-        )
+        return LlmResponse(raw_text="<em>return</em> xs[1:]")
 
     result = _runner(provider_registry=_registry_with_llm(responder)).run(
         "grading.markup",
@@ -931,77 +959,23 @@ def test_grading_markup_drops_missing_substrings_without_retry(tmp_path: Path) -
 
     assert result.exit_code == 0
     assert isinstance(result.envelope, CommandSuccessEnvelope)
+    assert result.envelope.degraded is True
     row = result.envelope.data["highlight_results"][0]
-    assert row["status"] == "ok"
-    assert row["highlights"] == [
-        {"kind": "incorrect", "start_char": 7, "end_char": 13, "text": "xs[1:]"}
-    ]
+    assert row["status"] == "fallback"
+    assert row["highlights"] == []
+    assert row["warnings"][0]["code"] == "markup_fallback"
     assert call_count == 1
-
-
-def test_grading_markup_caps_incorrect_segments_at_four(tmp_path: Path) -> None:
-    def responder(request: LlmRequest) -> LlmResponse:
-        return LlmResponse(
-            raw_text=json.dumps(
-                {
-                    "incorrect_segments": [
-                        "one",
-                        "two",
-                        "three",
-                        "four",
-                        "five",
-                    ]
-                }
-            )
-        )
-
-    result = _runner(provider_registry=_registry_with_llm(responder)).run(
-        "grading.markup",
-        {
-            "markup_requests": [
-                {
-                    "student_ref": "scan_001",
-                    "question_id": "q1",
-                    "subject": "Python",
-                    "total_points_awarded": 1,
-                    "question_max_points": 1,
-                    "student_answer": "one two three four five",
-                    "question_text_clean": "Explain list slicing.",
-                    "question_context": "",
-                    "rubric_criteria": [_rubric_criterion(points=1)],
-                    "criterion_results": [
-                        {"criterion_index": 0, "points_awarded": 1, "rationale": "Looks fine."}
-                    ],
-                }
-            ],
-            "output_artifacts_dir": str((tmp_path / "markup_out").resolve()),
-            **llm_request_fields("ollama_native"),
-        },
-    )
-
-    assert result.exit_code == 0
-    assert isinstance(result.envelope, CommandSuccessEnvelope)
-    row = result.envelope.data["highlight_results"][0]
-    assert row["status"] == "ok"
-    assert [highlight["text"] for highlight in row["highlights"]] == [
-        "one",
-        "two",
-        "three",
-        "four",
-    ]
 
 
 @pytest.mark.parametrize(
     "raw_text",
     [
-        json.dumps({"incorrect_segments": ["not copied from answer"]}),
-        json.dumps({"incorrect_segments": ["missing", "also missing"]}),
-        json.dumps({"incorrect_segments": []}),
+        "rewritten answer",
+        '<span data-kind="incorrect">return xs[1:]',
+        "return xs[1:]",
     ],
 )
-def test_grading_markup_no_valid_incorrect_segments_returns_empty_highlights(
-    tmp_path: Path, raw_text: str
-) -> None:
+def test_grading_markup_invalid_tagged_output_falls_back(tmp_path: Path, raw_text: str) -> None:
     call_count = 0
 
     def responder(request: LlmRequest) -> LlmResponse:
@@ -1035,10 +1009,11 @@ def test_grading_markup_no_valid_incorrect_segments_returns_empty_highlights(
 
     assert result.exit_code == 0
     assert isinstance(result.envelope, CommandSuccessEnvelope)
+    assert result.envelope.degraded is True
     row = result.envelope.data["highlight_results"][0]
-    assert row["status"] == "ok"
+    assert row["status"] == "fallback"
     assert row["highlights"] == []
-    assert row["warnings"] == []
+    assert row["warnings"][0]["code"] == "markup_fallback"
     assert call_count == 1
 
 

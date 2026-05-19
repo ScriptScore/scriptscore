@@ -230,6 +230,24 @@ impl AppStateInner {
         student_workflow::begin_student_workflow(self, &project_path, settings, event_sink)
     }
 
+    pub(crate) fn regrade_question_answers(
+        self: &Arc<Self>,
+        question_id: &str,
+        settings: &AppSettings,
+        event_sink: &dyn RuntimeEventSink,
+    ) -> HostResult<ExamWorkspaceState> {
+        let app = self.lock();
+        let project_path = app.current_project_path()?;
+        drop(app);
+        student_workflow::regrade_question_answers(
+            self,
+            &project_path,
+            question_id,
+            settings,
+            event_sink,
+        )
+    }
+
     pub(crate) fn confirm_student_alignment(
         self: &Arc<Self>,
         input: student_workflow::StudentWorkflowAlignmentUpdateInput,
@@ -549,6 +567,22 @@ impl AppState {
     pub fn workspace_state(&self) -> HostResult<ExamWorkspaceState> {
         let mut app = self.inner.lock();
         let project_path = app.current_project_path()?;
+        let workspace = project_store::load_exam_workspace_state(&project_path)?;
+        app.current_project = Some(workspace.project.clone());
+        Ok(workspace)
+    }
+
+    pub fn recover_interrupted_student_workflow(&self) -> HostResult<ExamWorkspaceState> {
+        let project_path = {
+            let app = self.inner.lock();
+            app.ensure_no_active_job()?;
+            app.current_project_path()?
+        };
+        project_store::mark_interrupted_student_workflow_runs(
+            &project_path,
+            "Workflow was recovered because no desktop job was active. Start workflow again to retry.",
+        )?;
+        let mut app = self.inner.lock();
         let workspace = project_store::load_exam_workspace_state(&project_path)?;
         app.current_project = Some(workspace.project.clone());
         Ok(workspace)
@@ -888,6 +922,14 @@ impl AppState {
         event_sink: Arc<dyn RuntimeEventSink>,
     ) -> HostResult<String> {
         let inner = Arc::clone(&self.inner);
+        {
+            let app = inner.lock();
+            if app.scheduler.has_active_jobs() {
+                return Err(HostError::Conflict(
+                    "A desktop job is already active in this session.".into(),
+                ));
+            }
+        }
         Ok(host_workflow::start_host_workflow_job(
             Arc::clone(&inner),
             "begin_student_workflow",
@@ -896,6 +938,37 @@ impl AppState {
             Arc::clone(&event_sink),
             move || {
                 let workspace = inner.begin_student_workflow(&settings, &*event_sink)?;
+                let mut app = inner.lock();
+                app.current_project = Some(workspace.project.clone());
+                Ok(workspace)
+            },
+        ))
+    }
+
+    pub fn start_regrade_question_answers_job(
+        &self,
+        question_id: String,
+        settings: AppSettings,
+        event_sink: Arc<dyn RuntimeEventSink>,
+    ) -> HostResult<String> {
+        let inner = Arc::clone(&self.inner);
+        {
+            let app = inner.lock();
+            if app.scheduler.has_active_jobs() {
+                return Err(HostError::Conflict(
+                    "A desktop job is already active in this session.".into(),
+                ));
+            }
+        }
+        Ok(host_workflow::start_host_workflow_job(
+            Arc::clone(&inner),
+            "regrade_question_answers",
+            host_workflow::HostWorkflowResultKind::Workspace,
+            true,
+            Arc::clone(&event_sink),
+            move || {
+                let workspace =
+                    inner.regrade_question_answers(&question_id, &settings, &*event_sink)?;
                 let mut app = inner.lock();
                 app.current_project = Some(workspace.project.clone());
                 Ok(workspace)
@@ -1289,13 +1362,35 @@ fn recover_abandoned_project_jobs(project_path: &Path) -> HostResult<Option<Stri
     let workflow_count =
         project_store::mark_abandoned_host_workflows(project_path, &finished_at, message)?;
     let total = runtime_count + workflow_count;
-    if total == 0 {
+    let interrupted_count = project_store::mark_interrupted_student_workflow_runs(
+        project_path,
+        "Workflow was interrupted when the previous app session ended. Start workflow again to retry.",
+    )?;
+    if total == 0 && interrupted_count == 0 {
         return Ok(None);
     }
-    Ok(Some(format!(
-        "Recovered {total} stale desktop job record{} from a prior session.",
-        if total == 1 { "" } else { "s" }
-    )))
+    let job_record_notice = (total > 0).then(|| {
+        format!(
+            "Recovered {total} stale desktop job record{} from a prior session",
+            if total == 1 { "" } else { "s" }
+        )
+    });
+    let workflow_notice = (interrupted_count > 0).then(|| {
+        format!(
+            "marked {interrupted_count} interrupted student workflow{} as stopped",
+            if interrupted_count == 1 { "" } else { "s" }
+        )
+    });
+    Ok(Some(match (job_record_notice, workflow_notice) {
+        (Some(job_record_notice), Some(workflow_notice)) => {
+            format!("{job_record_notice} and {workflow_notice}.")
+        }
+        (Some(job_record_notice), None) => format!("{job_record_notice}."),
+        (None, Some(workflow_notice)) => {
+            format!("Recovered prior session state and {workflow_notice}.")
+        }
+        (None, None) => unreachable!("recovery message requires recovered state"),
+    }))
 }
 
 fn runtime_error_after_project_open(
@@ -1357,6 +1452,7 @@ mod tests {
         let settings = crate::models::AppSettings::default();
 
         assert_no_open_project(state.workspace_state());
+        assert_no_open_project(state.recover_interrupted_student_workflow());
         assert_no_open_project(state.current_project_path_for_commands());
         assert_no_open_project(state.replace_template_pdf("template.pdf".into(), &sink));
         assert_no_open_project(state.export_stamped_template_pdf("template.pdf".into(), &sink));
@@ -1470,6 +1566,78 @@ mod tests {
         state
             .ensure_automatic_rubric_jobs(settings, &sink)
             .expect("no open project should make automatic rubric enqueue a no-op");
+    }
+
+    #[test]
+    fn start_student_workflow_job_conflicts_before_mutating_workflow_state() {
+        use std::path::PathBuf;
+        use std::sync::Arc;
+        use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+        let _guard = crate::test_support::lock_env_vars();
+        let test_root = std::env::temp_dir().join(format!(
+            "scriptscore-start-workflow-conflict-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or(Duration::from_secs(0))
+                .as_millis()
+        ));
+        let _projects_root =
+            crate::test_support::EnvVarGuard::set("SCRIPTSCORE_PROJECTS_ROOT", &test_root);
+        let created = crate::project_store::create_project(
+            "Workflow Conflict Test",
+            None,
+            None,
+            None,
+            &crate::models::InstructorProfile::default(),
+        )
+        .expect("project should be created");
+        let project_path = PathBuf::from(&created.project_path);
+        crate::project_store::save_student_workflow_state(
+            &project_path,
+            &crate::models::StudentWorkflowState {
+                status: "ready".into(),
+                latest_job_id: None,
+                submissions: vec![crate::models::StudentWorkflowSubmission {
+                    student_ref: "student_1".into(),
+                    canonical_pdf_path: "/tmp/student_1.pdf".into(),
+                    page_count: 1,
+                    stage: "intake_ready".into(),
+                    latest_job_id: None,
+                    failure_message: None,
+                    warnings: Vec::new(),
+                    page_artifacts: Vec::new(),
+                    alignment_pages: Vec::new(),
+                    detect_review: None,
+                    answers: Vec::new(),
+                }],
+            },
+        )
+        .expect("workflow state should save");
+
+        let state = AppState::bootstrap_with_args([std::ffi::OsString::from("scriptscore")]);
+        let settings = crate::models::AppSettings::default();
+        state
+            .open_project(project_path.clone(), &settings)
+            .expect("project should open");
+        state
+            .clone_inner()
+            .lock()
+            .scheduler
+            .__test_set_active_jobs(true);
+
+        let error = state
+            .start_student_workflow_job(settings, Arc::new(NoopEventSink))
+            .expect_err("active scheduler job should conflict");
+        assert!(
+            error
+                .to_string()
+                .contains("A desktop job is already active in this session."),
+            "unexpected error: {error}"
+        );
+        let loaded = crate::project_store::load_student_workflow_state(&project_path)
+            .expect("workflow should load");
+        assert_eq!(loaded.submissions[0].stage, "intake_ready");
     }
 
     #[test]

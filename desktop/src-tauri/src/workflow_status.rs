@@ -255,7 +255,6 @@ struct SubmissionStageSummary {
     any_manual_grading: bool,
     any_grading: bool,
     any_processing: bool,
-    any_past_intake: bool,
     all_graded: bool,
 }
 
@@ -283,10 +282,6 @@ impl SubmissionStageSummary {
             },
             |mut summary, submission| {
                 let kind = classify_submission_stage(submission.stage.as_str());
-                summary.any_past_intake |= !matches!(
-                    kind,
-                    SubmissionStageKind::IntakeReady | SubmissionStageKind::Stopped
-                );
                 summary.all_graded &= kind == SubmissionStageKind::Graded;
                 match kind {
                     SubmissionStageKind::IntakeReady | SubmissionStageKind::Stopped => {}
@@ -315,7 +310,7 @@ impl SubmissionStageSummary {
         if self.any_grading {
             return Some(ProjectWorkflowStage::StudentGrading);
         }
-        if self.any_processing || self.any_past_intake {
+        if self.any_processing {
             return Some(ProjectWorkflowStage::StudentWorkflowRunning);
         }
         None
@@ -740,17 +735,27 @@ mod tests {
     #[test]
     fn derive_post_intake_workflow_stage_mixed_intake_ready_and_graded() {
         let state = StudentWorkflowState {
-            status: "running".into(),
+            status: "ready".into(),
             latest_job_id: None,
             submissions: vec![
                 workflow_submission("student_1", "intake_ready"),
                 workflow_submission("student_2", "graded"),
             ],
         };
-        assert_eq!(
-            derive_post_intake_workflow_stage(&state),
-            Some(ProjectWorkflowStage::StudentWorkflowRunning)
-        );
+        assert_eq!(derive_post_intake_workflow_stage(&state), None);
+    }
+
+    #[test]
+    fn derive_post_intake_workflow_stage_mixed_stopped_and_graded_is_resumable_ready() {
+        let state = StudentWorkflowState {
+            status: "ready".into(),
+            latest_job_id: None,
+            submissions: vec![
+                workflow_submission("student_1", "stopped"),
+                workflow_submission("student_2", "graded"),
+            ],
+        };
+        assert_eq!(derive_post_intake_workflow_stage(&state), None);
     }
 
     #[test]

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use rusqlite::{params, Connection};
@@ -23,6 +23,7 @@ pub fn save_question_edits(
 ) -> HostResult<ExamWorkspaceState> {
     validate_question_edits(edits)?;
     let previous = load_exam_workspace_state(project_path)?;
+    validate_accepted_moderation_question_edits(&previous, edits)?;
     let mut connection = Connection::open(project_db_path(project_path))?;
     initialize_schema(&connection)?;
     let project_id = project_id(&connection)?;
@@ -65,6 +66,54 @@ pub fn save_question_edits(
     }
     reconcile_question_edit_rubrics(project_path, &previous, edits)?;
     load_exam_workspace_state(project_path)
+}
+
+fn validate_accepted_moderation_question_edits(
+    previous: &ExamWorkspaceState,
+    edits: &[QuestionEdit],
+) -> HostResult<()> {
+    let reviewed_question_ids = previous
+        .moderation_state
+        .question_reviews
+        .iter()
+        .map(|review| review.question_id.as_str())
+        .collect::<HashSet<_>>();
+    for edit in edits {
+        if let Some(question) =
+            accepted_moderation_question_changed(previous, &reviewed_question_ids, edit)
+        {
+            return Err(HostError::Validation(format!(
+                "Question {} has been accepted in moderation. Undo moderation acceptance before changing rubric-impacting question details.",
+                question.question_number
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn accepted_moderation_question_changed<'a>(
+    previous: &'a ExamWorkspaceState,
+    reviewed_question_ids: &HashSet<&str>,
+    edit: &QuestionEdit,
+) -> Option<&'a QuestionRecord> {
+    let question = previous
+        .questions
+        .iter()
+        .find(|question| question.question_id == edit.question_id)?;
+    (question.rubric.is_approved()
+        && reviewed_question_ids.contains(question.question_id.as_str())
+        && question_edit_changes_approval_basis(question, edit))
+    .then_some(question)
+}
+
+fn question_edit_changes_approval_basis(question: &QuestionRecord, edit: &QuestionEdit) -> bool {
+    question.text != edit.text.trim()
+        || question.max_points != edit.max_points
+        || question_context(question)
+            != edit
+                .question_context
+                .clone()
+                .unwrap_or_else(|| question_context(question))
 }
 
 fn reconcile_question_edit_rubrics(

@@ -294,21 +294,19 @@ def run_plain_text_prompt[T](
 
 
 def parse_tagged_highlights(tagged_text: str, *, student_answer: str) -> list[HighlightSpan]:
-    """Parse tagged markup output into validated highlight spans."""
+    """Parse allowlisted span-tagged markup output into validated highlight spans."""
 
     highlights: list[HighlightSpan] = []
     rebuilt: list[str] = []
     cursor = 0
     source_offset = 0
     while cursor < len(tagged_text):
-        if tagged_text.startswith("<correct>", cursor):
+        if tagged_text.startswith('<span data-kind="correct">', cursor):
             kind: Literal["correct", "incorrect"] = "correct"
-            open_tag = "<correct>"
-            close_tag = "</correct>"
-        elif tagged_text.startswith("<incorrect>", cursor):
+            open_tag = '<span data-kind="correct">'
+        elif tagged_text.startswith('<span data-kind="incorrect">', cursor):
             kind = "incorrect"
-            open_tag = "<incorrect>"
-            close_tag = "</incorrect>"
+            open_tag = '<span data-kind="incorrect">'
         else:
             if tagged_text[cursor] == "<":
                 rebuilt.append("<")
@@ -328,6 +326,7 @@ def parse_tagged_highlights(tagged_text: str, *, student_answer: str) -> list[Hi
             continue
 
         content_start = cursor + len(open_tag)
+        close_tag = "</span>"
         content_end = tagged_text.find(close_tag, content_start)
         if content_end == -1:
             raise PromptResponseError(
@@ -335,6 +334,16 @@ def parse_tagged_highlights(tagged_text: str, *, student_answer: str) -> list[Hi
                 message="Markup output contained an unterminated highlight tag.",
             )
         content = tagged_text[content_start:content_end]
+        if not content:
+            raise PromptResponseError(
+                code="markup_parse_failed",
+                message="Markup output contained an empty highlight span.",
+            )
+        if '<span data-kind="correct">' in content or '<span data-kind="incorrect">' in content:
+            raise PromptResponseError(
+                code="markup_parse_failed",
+                message="Markup output contained nested highlight tags.",
+            )
         rebuilt.append(content)
         highlights.append(
             HighlightSpan(
@@ -355,7 +364,7 @@ def parse_tagged_highlights(tagged_text: str, *, student_answer: str) -> list[Hi
     if student_answer and highlights == []:
         raise PromptResponseError(
             code="markup_parse_failed",
-            message="Markup output did not contain any <correct> or <incorrect> tags.",
+            message="Markup output did not contain any allowed highlight spans.",
         )
     return highlights
 

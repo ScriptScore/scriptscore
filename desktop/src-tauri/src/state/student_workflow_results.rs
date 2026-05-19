@@ -873,6 +873,28 @@ pub(super) fn build_preliminary_answer_score_requests(
     submission: &StudentWorkflowSubmission,
     question_by_id: &HashMap<String, &crate::models::QuestionRecord>,
 ) -> HostResult<Vec<Value>> {
+    build_preliminary_answer_score_requests_where(workspace, submission, question_by_id, |answer| {
+        answer.verified && !answer.stale
+    })
+}
+
+pub(super) fn build_preliminary_answer_score_requests_for_stale_question(
+    workspace: &ExamWorkspaceState,
+    submission: &StudentWorkflowSubmission,
+    question_by_id: &HashMap<String, &crate::models::QuestionRecord>,
+    question_id: &str,
+) -> HostResult<Vec<Value>> {
+    build_preliminary_answer_score_requests_where(workspace, submission, question_by_id, |answer| {
+        answer.question_id == question_id && answer.verified && answer.stale
+    })
+}
+
+fn build_preliminary_answer_score_requests_where(
+    workspace: &ExamWorkspaceState,
+    submission: &StudentWorkflowSubmission,
+    question_by_id: &HashMap<String, &crate::models::QuestionRecord>,
+    include_answer: impl Fn(&crate::models::StudentWorkflowAnswer) -> bool,
+) -> HostResult<Vec<Value>> {
     let subject = workspace
         .project
         .subject
@@ -881,7 +903,7 @@ pub(super) fn build_preliminary_answer_score_requests(
     let profile = cli_instructor_profile_json(&workspace.project_config.instructor_profile);
     let mut requests = Vec::new();
     for answer in &submission.answers {
-        if !answer.verified || answer.stale {
+        if !include_answer(answer) {
             continue;
         }
         let question = question_by_id.get(&answer.question_id).ok_or_else(|| {
@@ -1142,6 +1164,12 @@ pub(super) fn apply_final_grading_rows(
             continue;
         };
         answer.grading_status = "draft_ready".into();
+        answer.stale = false;
+        if let Some(question_max_points) =
+            final_row.get("question_max_points").and_then(Value::as_i64)
+        {
+            answer.question_max_points = Some(question_max_points);
+        }
         answer.total_points_awarded = final_row
             .get("total_points_awarded")
             .and_then(Value::as_i64);
@@ -1174,6 +1202,19 @@ pub(super) fn apply_feedback_and_markup(
     let highlights_by_qid = highlight_rows_by_question(highlight_rows);
     for answer in &mut submission.answers {
         answer.highlights = highlight_spans_from_rows(highlights_by_qid.get(&answer.question_id));
+    }
+    Ok(())
+}
+
+pub(super) fn apply_highlight_rows(
+    submission: &mut StudentWorkflowSubmission,
+    highlight_rows: &[Value],
+) -> HostResult<()> {
+    let highlights_by_qid = highlight_rows_by_question(highlight_rows);
+    for answer in &mut submission.answers {
+        if let Some(rows) = highlights_by_qid.get(&answer.question_id) {
+            answer.highlights = highlight_spans_from_rows(Some(rows));
+        }
     }
     Ok(())
 }
@@ -1829,6 +1870,7 @@ mod tests {
 
         assert_eq!(submission.answers[0].grading_status, "draft_ready");
         assert_eq!(submission.answers[0].total_points_awarded, Some(3));
+        assert_eq!(submission.answers[0].question_max_points, Some(5));
         assert_eq!(submission.answers[0].criterion_results.len(), 2);
         assert_eq!(
             submission.answers[0].feedback_text.as_deref(),

@@ -133,6 +133,13 @@ export function saveRubricUpdate(input: RubricUpdateInput): Promise<ExamWorkspac
   return invokeDesktopHost<ExamWorkspaceState>('save_rubric_update', { input });
 }
 
+export function regradeQuestionAnswers(questionId: string, settings: AppSettings): Promise<string> {
+  return invokeDesktopHost<string>('regrade_question_answers', {
+    questionId,
+    settings
+  });
+}
+
 export function replaceTemplatePdf(templatePdfPath: string): Promise<string> {
   return invokeDesktopHost<string>('replace_template_pdf', { templatePdfPath });
 }

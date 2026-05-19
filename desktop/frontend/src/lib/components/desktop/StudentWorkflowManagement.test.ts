@@ -239,19 +239,18 @@ describe('StudentWorkflowBoard workflow trigger', () => {
         workflowRow('student_3', 'Student 3', 'aligning'),
         workflowRow('student_4', 'Student 4', 'alignment review'),
         workflowRow('student_5', 'Student 5', 'canonicalizing'),
-        workflowRow('student_6', 'Student 6', 'transforming'),
-        workflowRow('student_7', 'Student 7', 'detecting'),
-        workflowRow('student_8', 'Student 8', 'region review'),
-        workflowRow('student_9', 'Student 9', 'cropping'),
-        workflowRow('student_10', 'Student 10', 'screening PII'),
-        workflowRow('student_11', 'Student 11', 'parsing'),
-        workflowRow('student_12', 'Student 12', 'parse review'),
-        workflowRow('student_13', 'Student 13', 'grading'),
-        workflowRow('student_14', 'Student 14', 'manual grading'),
-        workflowRow('student_15', 'Student 15', 'draft grading ready'),
-        workflowRow('student_16', 'Student 16', 'failed')
+        workflowRow('student_6', 'Student 6', 'detecting'),
+        workflowRow('student_7', 'Student 7', 'region review'),
+        workflowRow('student_8', 'Student 8', 'cropping'),
+        workflowRow('student_9', 'Student 9', 'screening PII'),
+        workflowRow('student_10', 'Student 10', 'parsing'),
+        workflowRow('student_11', 'Student 11', 'parse review'),
+        workflowRow('student_12', 'Student 12', 'grading'),
+        workflowRow('student_13', 'Student 13', 'manual grading'),
+        workflowRow('student_14', 'Student 14', 'draft grading ready'),
+        workflowRow('student_15', 'Student 15', 'failed')
       ],
-      canonicalReadyCount: 16
+      canonicalReadyCount: 15
     });
 
     [
@@ -260,7 +259,6 @@ describe('StudentWorkflowBoard workflow trigger', () => {
       'Aligning',
       'Alignment',
       'Canonicalizing',
-      'Transforming',
       'Detecting',
       'Regions',
       'Cropping',

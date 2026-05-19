@@ -59,8 +59,12 @@
   ) => Promise<StudentIntakeFinalizeResult | null>) | null = null;
   export let onBeginWorkflow: (() => Promise<void>) | null = null;
   export let onStopWorkflow: (() => Promise<void>) | null = null;
+  export let onRecoverWorkflow: (() => Promise<void>) | null = null;
   export let onDeleteSubmission:
     | ((studentRef: string, nextSelectedStudentRef: string | null) => Promise<void>)
+    | null = null;
+  export let onSaveStudentIntakePageOrder:
+    | ((studentRef: string, examPagePaths: string[]) => Promise<void>)
     | null = null;
   export let stopWorkflowBusy = false;
   export let onConfirmAlignment:
@@ -92,7 +96,6 @@
   const activeAutomationStages = new Set([
     'alignment',
     'canonicalize',
-    'transform',
     'detect',
     'crop',
     'pii',
@@ -129,6 +132,7 @@
   let workflowCommandProgressByJobId = new Map<string, WorkflowCommandProgressEntry>();
   let workflowStudentRefByJobId = new Map<string, string>();
   let latestWorkflowStudentRefByStage = new Map<string, string>();
+  let activeIntakeFilename: string | null = null;
   let pendingDeleteStudent: { studentRef: string; displayName: string } | null = null;
 
   function saveBusyKey(kind: string, ...parts: Array<string | number>): string {
@@ -193,11 +197,21 @@
   $: workflowAutomationActive = workflowSubmissions.some((submission) =>
     activeAutomationStages.has(submission.stage)
   );
-  $: studentWorkflowRunning =
-    busyAction === 'studentWorkflow' ||
+  $: persistedStudentWorkflowRunning =
     workspaceState?.studentWorkflow?.status === 'running' ||
     workspaceState?.workflowStage === 'student_workflow_running' ||
-    workspaceState?.workflowStage === 'student_grading' ||
+    workspaceState?.workflowStage === 'student_grading';
+  $: desktopRuntimeHasActiveJob =
+    (($shellState.workerActivity?.activeJobs.length ?? 0) > 0) ||
+    (($shellState.workerActivity?.pendingJobCount ?? 0) > 0);
+  $: studentWorkflowRecoveryAvailable =
+    persistedStudentWorkflowRunning &&
+    (busyAction === null || busyAction === 'studentWorkflowRecovery') &&
+    !desktopRuntimeHasActiveJob;
+  $: studentWorkflowRunning =
+    busyAction === 'studentWorkflow' ||
+    busyAction === 'studentWorkflowRecovery' ||
+    persistedStudentWorkflowRunning ||
     (($shellState.workerStatus === 'busy' || $shellState.workerStatus === 'starting') &&
       workflowAutomationActive);
   $: workflowByStudentRef = new Map(
@@ -259,12 +273,20 @@
   $: selectedWorkflowSubmission = selectedRosterEntry?.workflowSubmission ?? null;
   $: selectedDisplayName = selectedRosterEntry?.displayName ?? '';
   $: selectedHasSubmission = selectedIntakeItem !== null || selectedWorkflowSubmission !== null;
+  $: expectedTemplatePageCount = Math.max(
+    0,
+    ...((workspaceState?.templatePreviewArtifacts ?? []).map((page) => page.pageNumber))
+  );
+  $: selectedHasExtraPages =
+    expectedTemplatePageCount > 0 &&
+    (selectedIntakeItem?.examPagePaths?.filter((path) => path.trim().length > 0).length ?? 0) >
+      expectedTemplatePageCount;
 
   $: attentionItems = workflowSubmissions.filter((submission) =>
     ['alignment_review', 'detect_review', 'parse_review', 'manual_grading', 'failed'].includes(submission.stage)
   );
   $: processingCount = workflowSubmissions.filter((submission) =>
-      ['alignment', 'canonicalize', 'transform', 'detect', 'crop', 'pii', 'parse', 'grading'].includes(
+      ['alignment', 'canonicalize', 'detect', 'crop', 'pii', 'parse', 'grading'].includes(
       submission.stage
     )
   ).length;
@@ -280,7 +302,9 @@
   $: currentView = shellMode === 'intake'
     ? 'intake'
     : selectedStudentRef
-      ? stageView ?? 'home'
+      ? selectedWorkflowSubmission?.stage === 'failed' && selectedHasExtraPages
+        ? 'submissionPages'
+        : stageView ?? 'home'
       : 'home';
   $: compactReviewHeader =
     currentView === 'alignmentReview' || currentView === 'detectReview' || currentView === 'questionDetail';
@@ -598,6 +622,7 @@
   function showHome() {
     selectedStudentRef = null;
     shellMode = 'home';
+    activeIntakeFilename = null;
   }
 
   function showIntake() {
@@ -940,8 +965,11 @@
             Back to workflow
           </DesktopButton>
         </div>
-        <div class="flex-1 text-center text-base font-semibold text-workspace-text-primary">
-          Student Intake Processor
+        <div
+          class="min-w-0 flex-1 truncate text-center text-base font-semibold text-workspace-text-primary"
+          title={activeIntakeFilename ? `Student Intake - ${activeIntakeFilename}` : 'Student Intake Processor'}
+        >
+          {activeIntakeFilename ? `Student Intake - ${activeIntakeFilename}` : 'Student Intake Processor'}
         </div>
         <div class="w-40"></div>
       </div>
@@ -956,6 +984,9 @@
         onEnsureRosterCache={ensureSharedRosterCache}
         existingIntakeItems={intakeItems}
         {onFinalizeSubmission}
+        onActiveFileChange={(filename) => {
+          activeIntakeFilename = filename;
+        }}
         onSubmissionCompleted={async ({ studentRef }) => {
           selectedStudentRef = studentRef;
           await loadRosterCacheState();
@@ -982,6 +1013,8 @@
         submission={selectedWorkflowSubmission}
         displayName={selectedDisplayName}
         stageProgress={selectedStageProgress}
+        expectedPageCount={expectedTemplatePageCount}
+        onSavePageOrder={onSaveStudentIntakePageOrder}
         ondelete={onDeleteSubmission && selectedHasSubmission ? requestSelectedDelete : null}
         deleteDisabled={busyAction !== null}
         onback={showHome}
@@ -1025,12 +1058,15 @@
         {readyCount}
         canonicalReadyCount={canonicalReadyRows.length}
         busyActionLabel={studentWorkflowRunning ? 'Running…' : null}
+        recoveryAvailable={studentWorkflowRecoveryAvailable}
+        recoveryBusy={busyAction === 'studentWorkflowRecovery'}
         {stopWorkflowBusy}
         {attentionItems}
         {canonicalReadyRows}
         onSelectStudent={selectStudent}
         onBeginWorkflow={onBeginWorkflow}
         onStopWorkflow={onStopWorkflow}
+        onRecoverWorkflow={onRecoverWorkflow}
       />
     {/if}
   </section>

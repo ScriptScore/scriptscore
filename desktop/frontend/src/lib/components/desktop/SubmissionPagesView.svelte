@@ -14,10 +14,15 @@
   export let stageProgress = 0;
   export let ondelete: (() => void) | null = null;
   export let deleteDisabled = false;
+  export let expectedPageCount = 0;
+  export let onSavePageOrder:
+    | ((studentRef: string, examPagePaths: string[]) => Promise<void>)
+    | null = null;
   export let onback: () => void;
 
   let pageNumber = 1;
   let prevStudentKey = '';
+  let pageOrderBusy = false;
 
   $: examPaths =
     intakeItem?.examPagePaths?.filter(
@@ -32,12 +37,36 @@
   $: stageText = stageLabel(submission?.stage ?? 'intake_ready');
   $: stage = submission?.stage ?? 'intake_ready';
   $: stageTone = stageProgressTone(stage);
-  $: stageActive = ['alignment', 'canonicalize', 'transform', 'detect', 'crop', 'parse', 'grading'].includes(stage);
+  $: stageActive = ['alignment', 'canonicalize', 'detect', 'crop', 'parse', 'grading'].includes(stage);
+  $: hasPageMismatch = expectedPageCount > 0 && pageCount !== expectedPageCount;
+  $: hasExtraPages = expectedPageCount > 0 && pageCount > expectedPageCount;
+  $: pageOrderEditable = ['intake_ready', 'failed'].includes(stage);
+  $: canRemoveCurrentPage =
+    !!intakeItem &&
+    !!onSavePageOrder &&
+    pageOrderEditable &&
+    hasExtraPages &&
+    pageCount > 1 &&
+    !pageOrderBusy;
 
   $: currentKey = `${intakeItem?.studentRef ?? ''}:${submission?.studentRef ?? ''}`;
   $: if (currentKey !== prevStudentKey) {
     pageNumber = 1;
     prevStudentKey = currentKey;
+  }
+
+  async function removeCurrentPage() {
+    if (!intakeItem || !onSavePageOrder || !canRemoveCurrentPage) {
+      return;
+    }
+    const nextPaths = examPaths.filter((_, index) => index !== pageNumber - 1);
+    pageOrderBusy = true;
+    try {
+      await onSavePageOrder(intakeItem.studentRef, nextPaths);
+      pageNumber = Math.min(pageNumber, Math.max(1, nextPaths.length));
+    } finally {
+      pageOrderBusy = false;
+    }
   }
 
 </script>
@@ -77,12 +106,19 @@
 
   <div class="flex min-h-0 flex-1 items-center justify-center px-6 pb-2">
     {#if pageCount > 0 && imageSrc}
-      <PagePreviewFrame
-        src={imageSrc}
-        alt="Exam page {pageNumber}"
-        class="max-h-[calc(100vh-11rem)] w-auto"
-        imageClass="block max-h-[calc(100vh-11rem)] w-auto object-contain"
-      />
+      <div class="flex max-h-full flex-col items-center gap-3">
+        {#if hasPageMismatch}
+          <div class="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-workspace-text-primary">
+            Page count mismatch: this submission has {pageCount} page{pageCount === 1 ? '' : 's'}; the template has {expectedPageCount}.
+          </div>
+        {/if}
+        <PagePreviewFrame
+          src={imageSrc}
+          alt="Exam page {pageNumber}"
+          class="max-h-[calc(100vh-14rem)] w-auto"
+          imageClass="block max-h-[calc(100vh-14rem)] w-auto object-contain"
+        />
+      </div>
     {:else}
       <div class="flex flex-col items-center gap-3 text-center">
         <div class="text-sm text-workspace-text-secondary">
@@ -106,6 +142,15 @@
       <div class="text-sm text-workspace-text-secondary">
         {pageNumber} / {pageCount}
       </div>
+      {#if hasExtraPages && onSavePageOrder}
+        <DesktopButton
+          variant="destructive"
+          disabled={!canRemoveCurrentPage}
+          onclick={removeCurrentPage}
+        >
+          Remove page
+        </DesktopButton>
+      {/if}
       <DesktopButton
         variant="secondary"
         disabled={pageNumber >= pageCount}

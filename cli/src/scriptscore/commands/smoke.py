@@ -3,12 +3,15 @@
 
 from __future__ import annotations
 
-from time import sleep
+from pathlib import Path
+from time import monotonic, sleep
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from scriptscore.contracts import ProgressSummary
 from scriptscore.runtime import CommandContext, CommandOutcome, CommandSpec
+
+WAIT_FOR_FILE_POLL_SECONDS = 0.05
 
 
 class SmokePingRequest(BaseModel):
@@ -19,10 +22,23 @@ class SmokePingRequest(BaseModel):
     message: str = "pong"
     sleep_ms: int = Field(default=0, ge=0, le=10000)
     steps: int = Field(default=1, ge=1, le=50)
+    wait_for_file: str | None = None
+    wait_timeout_ms: int = Field(default=30000, ge=1, le=300000)
 
 
 def _percent(completed: int, total: int) -> int:
     return int((completed / total) * 100)
+
+
+def _wait_for_file(ctx: CommandContext, path: str, timeout_ms: int) -> None:
+    marker_path = Path(path)
+    deadline = monotonic() + (timeout_ms / 1000)
+    while not marker_path.exists():
+        ctx.check_cancelled()
+        if monotonic() >= deadline:
+            raise TimeoutError("Timed out waiting for smoke.ping release marker.")
+        sleep(WAIT_FOR_FILE_POLL_SECONDS)
+    ctx.check_cancelled()
 
 
 def handle_smoke_ping(ctx: CommandContext, request: SmokePingRequest) -> CommandOutcome:
@@ -34,6 +50,8 @@ def handle_smoke_ping(ctx: CommandContext, request: SmokePingRequest) -> Command
         progress=ProgressSummary(completed=0, total=total, percent=0),
         data={"message": request.message, "total_stages": 1},
     )
+    if request.wait_for_file is not None:
+        _wait_for_file(ctx, request.wait_for_file, request.wait_timeout_ms)
     for index in range(total):
         ctx.check_cancelled()
         current_item = index + 1

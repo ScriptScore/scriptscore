@@ -60,6 +60,80 @@ describe('SettingsWorkspace', () => {
     expect(screen.getByRole('heading', { name: 'AI Assistance' })).toBeTruthy();
   });
 
+  it('shows installed version and stable release update actions in About settings', async () => {
+    const onCheckForUpdates = vi.fn();
+    const onDownloadUpdate = vi.fn();
+
+    render(SettingsWorkspace, {
+      settings: structuredClone(defaultAppSettings),
+      appVersion: '0.1.0-rc.1',
+      updateAvailable: true,
+      updateCheck: {
+        installedVersion: '0.1.0-rc.1',
+        latestStableVersion: '0.1.0',
+        latestStableTag: 'v0.1.0',
+        releaseUrl: 'https://github.com/ScriptScore/scriptscore/releases/tag/v0.1.0',
+        updateAvailable: true,
+        status: 'update_available',
+        message: 'A newer stable ScriptScore Desktop release is available.'
+      },
+      onCheckForUpdates,
+      onDownloadUpdate
+    });
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Update Available!' }));
+
+    expect(screen.queryByRole('heading', { name: 'About' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Update Available!' }).className).toContain(
+      'border-message-info-border'
+    );
+    expect(screen.getByText('Version 0.1.0-rc.1')).toBeTruthy();
+    expect(screen.queryByText('Stable update available: 0.1.0')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Check for updates' })).toBeNull();
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Download update' }));
+
+    expect(onCheckForUpdates).not.toHaveBeenCalled();
+    expect(onDownloadUpdate).toHaveBeenCalledWith(
+      'https://github.com/ScriptScore/scriptscore/releases/tag/v0.1.0'
+    );
+  });
+
+  it('shows the About update check as unavailable outside the desktop host', async () => {
+    render(SettingsWorkspace, {
+      settings: structuredClone(defaultAppSettings),
+      hasDesktopHost: false
+    });
+
+    await fireEvent.click(screen.getByRole('button', { name: 'About' }));
+
+    expect(screen.getByText('Version Browser preview')).toBeTruthy();
+    expect((screen.getByRole('button', { name: 'Check for updates' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('keeps the About update state calm when no stable release exists yet', async () => {
+    render(SettingsWorkspace, {
+      settings: structuredClone(defaultAppSettings),
+      appVersion: '0.1.0-rc.1',
+      updateCheck: {
+        installedVersion: '0.1.0-rc.1',
+        latestStableVersion: null,
+        latestStableTag: null,
+        releaseUrl: null,
+        updateAvailable: false,
+        status: 'no_stable_release',
+        message: 'No stable release has been published yet.'
+      }
+    });
+
+    await fireEvent.click(screen.getByRole('button', { name: 'About' }));
+
+    expect(screen.getByRole('button', { name: 'Check for updates' })).toBeTruthy();
+    expect(screen.queryByText('No stable release yet')).toBeNull();
+    expect(screen.queryByText(/GitHub returned 404/i)).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Download update' })).toBeNull();
+  });
+
   it('shows a clear warning when plaintext LMS binding secret fallback is enabled', async () => {
     const settings: AppSettings = {
       ...defaultAppSettings,

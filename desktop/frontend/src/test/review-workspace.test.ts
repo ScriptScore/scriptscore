@@ -283,6 +283,27 @@ describe('ReviewWorkspace', () => {
     expect(screen.queryByRole('button', { name: 'Approve setup' })).toBeNull();
   });
 
+  it('locks rubric-impacting controls for moderation-accepted approved questions', () => {
+    const workspaceState = buildWorkspaceState();
+    workspaceState.moderationState = {
+      scoreOverrides: [],
+      feedbackOverrides: [],
+      questionReviews: [{ questionId: 'question_2', reviewedAt: '2026-04-09T00:00:00Z' }]
+    };
+
+    render(ReviewWorkspace, {
+      workspaceState,
+      questionDrafts: buildQuestionDrafts(),
+      selectedQuestionId: 'question_2',
+      onSaveReviewChanges: vi.fn()
+    });
+
+    expect(screen.getByText(/accepted in moderation/i)).toBeTruthy();
+    expect((screen.getByRole('button', { name: 'Rescind approval' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: 'Remove criterion' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it('enables unified Save for question edits, rubric edits, and combined edits', async () => {
     const onSaveReviewChanges = vi.fn().mockResolvedValue(undefined);
 

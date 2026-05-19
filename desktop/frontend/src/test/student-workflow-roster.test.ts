@@ -299,6 +299,65 @@ describe('StudentWorkflowWorkspace roster and stage state', () => {
     expect(onDeleteSubmission).not.toHaveBeenCalled();
   });
 
+  it('highlights intake page count mismatches and removes extra pages before workflow', async () => {
+    const onSaveStudentIntakePageOrder = vi.fn().mockResolvedValue(undefined);
+    render(StudentWorkflowWorkspace, {
+      workspaceState: baseWorkspaceState({
+        project: {
+          ...baseWorkspaceState().project,
+          lmsCourseId: null
+        },
+        projectConfig: {
+          ...baseWorkspaceState().projectConfig!,
+          lmsCourseId: null
+        },
+        templatePreviewArtifacts: [
+          { artifactId: 'template_1', pageNumber: 1, imagePath: '/tmp/template_1.png', label: 'Page 1' },
+          { artifactId: 'template_2', pageNumber: 2, imagePath: '/tmp/template_2.png', label: 'Page 2' }
+        ],
+        studentRoster: [],
+        studentIntake: {
+          status: 'ok',
+          latestJobId: 'job_intake_1',
+          unresolvedCount: 0,
+          items: [
+            {
+              studentRef: 'student_1',
+              localDisplayName: 'Ada Local',
+              canonicalPdfPath: '/tmp/student_1.pdf',
+              ingestStatus: 'ok',
+              pageCount: 3,
+              examPagePaths: [
+                '/tmp/student_1_p1.png',
+                '/tmp/student_1_p2.png',
+                '/tmp/student_1_p3.png'
+              ],
+              warnings: []
+            }
+          ]
+        }
+      }),
+      prerequisitesMet: true,
+      lmsCourseId: null,
+      busyAction: null,
+      onFinalizeSubmission: vi.fn(),
+      onSaveStudentIntakePageOrder
+    });
+
+    const sidebar = screen.getByRole('region', { name: 'Student roster and submission upload' });
+    await fireEvent.click(within(sidebar).getByRole('button', { name: /Ada Local/i }));
+    expect(screen.getByText('Page count mismatch: this submission has 3 pages; the template has 2.')).toBeTruthy();
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Next →' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Next →' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Remove page' }));
+
+    expect(onSaveStudentIntakePageOrder).toHaveBeenCalledWith('student_1', [
+      '/tmp/student_1_p1.png',
+      '/tmp/student_1_p2.png'
+    ]);
+  });
+
   it('offers a stop workflow action while workflow is running', async () => {
     const onStopWorkflow = vi.fn().mockResolvedValue(undefined);
     render(StudentWorkflowWorkspace, {
@@ -320,6 +379,7 @@ describe('StudentWorkflowWorkspace roster and stage state', () => {
 
   it('disables workflow start controls when a recovered workflow session is still running', async () => {
     const onBeginWorkflow = vi.fn().mockResolvedValue(undefined);
+    const onRecoverWorkflow = vi.fn().mockResolvedValue(undefined);
     render(StudentWorkflowWorkspace, {
       workspaceState: baseWorkspaceState({
         studentIntake: {
@@ -361,18 +421,24 @@ describe('StudentWorkflowWorkspace roster and stage state', () => {
       lmsCourseId: 'persisted-course-id',
       busyAction: null,
       onFinalizeSubmission: vi.fn(),
-      onBeginWorkflow
+      onBeginWorkflow,
+      onRecoverWorkflow
     });
 
     const headerBegin = await screen.findByRole('button', { name: 'Running…' });
     const playBegin = screen.getByRole('button', { name: 'Begin student workflow' });
+    const recover = screen.getByRole('button', { name: 'Recover Workflow' });
 
     expect((headerBegin as HTMLButtonElement).disabled).toBe(true);
     expect((playBegin as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText(/the desktop runtime has no active job/i)).toBeTruthy();
 
     await fireEvent.click(headerBegin);
     await fireEvent.click(playBegin);
     expect(onBeginWorkflow).not.toHaveBeenCalled();
+
+    await fireEvent.click(recover);
+    expect(onRecoverWorkflow).toHaveBeenCalledTimes(1);
   });
 
   it('disables workflow start controls when project workflow stage is actively grading', async () => {

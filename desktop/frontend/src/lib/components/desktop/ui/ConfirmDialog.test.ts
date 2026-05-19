@@ -25,4 +25,18 @@ describe('ConfirmDialog', () => {
     expect(onCancel).toHaveBeenCalledTimes(1);
     expect(onConfirm).toHaveBeenCalledTimes(1);
   });
+
+  it('can render as a one-button acknowledgement dialog', () => {
+    render(ConfirmDialog, {
+      open: true,
+      title: 'No updates',
+      description: 'You are on the current release. No updates are available.',
+      confirmLabel: 'OK',
+      cancelLabel: null
+    });
+
+    expect(screen.getByRole('dialog', { name: 'No updates' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'OK' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Cancel' })).toBeNull();
+  });
 });

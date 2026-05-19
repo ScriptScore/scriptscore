@@ -16,6 +16,8 @@
   export let readyCount: number;
   export let canonicalReadyCount: number;
   export let busyActionLabel: string | null;
+  export let recoveryAvailable = false;
+  export let recoveryBusy = false;
   export let stopWorkflowBusy = false;
   export let attentionItems: StudentWorkflowSubmission[];
   export let canonicalReadyRows: {
@@ -33,6 +35,7 @@
   export let onSelectStudent: (studentRef: string) => void;
   export let onBeginWorkflow: (() => Promise<void>) | null;
   export let onStopWorkflow: (() => Promise<void>) | null = null;
+  export let onRecoverWorkflow: (() => Promise<void>) | null = null;
 
   const attentionStages = new Set([
     'alignment_review',
@@ -91,8 +94,6 @@
         return 'Alignment';
       case 'canonicalizing':
         return 'Canonicalizing';
-      case 'transforming':
-        return 'Transforming';
       case 'detecting':
         return 'Detecting';
       case 'region review':
@@ -118,7 +119,8 @@
     }
   }
 
-  $: workflowStartDisabled = busyActionLabel !== null || canonicalReadyRows.length === 0;
+  $: workflowStartDisabled =
+    busyActionLabel !== null || recoveryAvailable || canonicalReadyRows.length === 0;
 
   function handleBeginWorkflow() {
     if (workflowStartDisabled) {
@@ -136,7 +138,15 @@
     </div>
   </div>
   <div class="flex shrink-0 items-center gap-2">
-    {#if busyActionLabel !== null}
+    {#if recoveryAvailable}
+      <DesktopButton
+        variant="secondary"
+        disabled={recoveryBusy || onRecoverWorkflow === null}
+        onclick={() => void onRecoverWorkflow?.()}
+      >
+        {recoveryBusy ? 'Recovering…' : 'Recover Workflow'}
+      </DesktopButton>
+    {:else if busyActionLabel !== null}
       <DesktopButton
         variant="secondary"
         disabled={stopWorkflowBusy || onStopWorkflow === null}
@@ -154,6 +164,16 @@
     </DesktopButton>
   </div>
 </div>
+
+{#if recoveryAvailable}
+  <div
+    class="mt-4 rounded-xl border border-message-warning-border bg-message-warning-bg px-4 py-3 text-sm text-message-warning-text"
+    role="status"
+  >
+    This workflow is marked running, but the desktop runtime has no active job. Recover it to
+    unlock review and restart controls.
+  </div>
+{/if}
 
 <div class="mt-5 overflow-hidden rounded-3xl border border-workspace-border bg-surface-card-subtle">
   <div class="flex items-stretch">
