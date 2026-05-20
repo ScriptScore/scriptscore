@@ -39,6 +39,8 @@ from scriptscore.pii_scan import (
 from scriptscore.pii_scan.engine import TokenReader
 from scriptscore.runtime import CommandContext, CommandOutcome, CommandSpec
 
+COMMAND_NAME = "scans.pii"
+
 
 @dataclass(frozen=True)
 class _PiiWorkItem:
@@ -331,7 +333,7 @@ def handle_scans_pii(ctx: CommandContext, request: ScansPiiRequest) -> CommandOu
     ]
     ensure_paths_exist(
         [target.question_crop_path for target in all_targets],
-        command="scans.pii",
+        command=COMMAND_NAME,
     )
 
     try:
@@ -417,7 +419,7 @@ def handle_scans_pii(ctx: CommandContext, request: ScansPiiRequest) -> CommandOu
         artifacts.append(
             write_trace_artifact(
                 output_artifacts_dir=request.output_artifacts_dir,
-                command="scans.pii",
+                command=COMMAND_NAME,
                 operation_id=ctx.operation_id,
                 request_id=ctx.request_id,
                 step="pii_analysis",
@@ -467,4 +469,4 @@ def handle_scans_pii(ctx: CommandContext, request: ScansPiiRequest) -> CommandOu
 
 
 def scans_pii_spec() -> CommandSpec:
-    return CommandSpec(name="scans.pii", request_model=ScansPiiRequest, handler=handle_scans_pii)
+    return CommandSpec(name=COMMAND_NAME, request_model=ScansPiiRequest, handler=handle_scans_pii)

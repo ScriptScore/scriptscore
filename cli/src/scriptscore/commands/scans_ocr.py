@@ -25,6 +25,8 @@ from scriptscore.pii_scan.reader import create_reader
 from scriptscore.pii_scan.types import ReadResult
 from scriptscore.runtime import CommandContext, CommandOutcome, CommandSpec
 
+PILLOW_MISSING_MESSAGE = "Pillow is not installed."
+
 
 class ScansOcrRequest(BaseModel):
     """Empty request model; image bytes are provided via stdin."""
@@ -115,7 +117,7 @@ def _png_bytes_to_rgb_numpy(raw: bytes) -> Any:
     except ModuleNotFoundError as exc:
         raise _external_error(
             code="ocr_dependency_unavailable",
-            message="Pillow is not installed.",
+            message=PILLOW_MISSING_MESSAGE,
             details={"missing_module": exc.name},
             retryable=False,
         ) from exc
@@ -150,7 +152,7 @@ def _png_bytes_to_pil_image(raw: bytes) -> Any:
     except ModuleNotFoundError as exc:
         raise _external_error(
             code="ocr_dependency_unavailable",
-            message="Pillow is not installed.",
+            message=PILLOW_MISSING_MESSAGE,
             details={"missing_module": exc.name},
             retryable=False,
         ) from exc
@@ -186,7 +188,7 @@ def _enlarged_image(image: Any) -> Any:
     except ModuleNotFoundError as exc:
         raise _external_error(
             code="ocr_dependency_unavailable",
-            message="Pillow is not installed.",
+            message=PILLOW_MISSING_MESSAGE,
             details={"missing_module": exc.name},
             retryable=False,
         ) from exc
@@ -204,7 +206,7 @@ def _paddle_recognition_candidate_images(raw: bytes) -> list[Any]:
     except ModuleNotFoundError as exc:
         raise _external_error(
             code="ocr_dependency_unavailable",
-            message="Pillow is not installed.",
+            message=PILLOW_MISSING_MESSAGE,
             details={"missing_module": exc.name},
             retryable=False,
         ) from exc

@@ -12,7 +12,7 @@ import tempfile
 import types
 from collections.abc import Iterable, Sequence
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Protocol, cast
 
 import cv2
 import yaml
@@ -243,6 +243,12 @@ class _TestOverrideReader:
         )
 
 
+class TextReader(Protocol):
+    """OCR reader interface shared by production and test-only readers."""
+
+    def read(self, image: object) -> ReadResult: ...
+
+
 class PaddleTextReader:
     """Small adapter around PaddleOCR that returns normalized tokens."""
 
@@ -366,12 +372,12 @@ def _normalize_token(*, text: object, confidence: object, polygon: object) -> Vi
     )
 
 
-def create_reader(model_root: Path) -> PaddleTextReader:
+def create_reader(model_root: Path) -> TextReader:
     """Create the local OCR reader for scans.pii."""
 
     if os.environ.get("SCRIPTSCORE_TEST_PII_OCR_WORDS") is not None:
         verify_model_root(model_root)
-        return _TestOverrideReader()  # type: ignore[return-value]
+        return _TestOverrideReader()
     try:
         return PaddleTextReader(model_root)
     except Exception as exc:

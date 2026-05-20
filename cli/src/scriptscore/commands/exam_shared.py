@@ -22,7 +22,7 @@ from scriptscore.contracts import (
 from scriptscore.prompts import render_xml, xml_node, xml_text
 
 _QUESTION_MARKER_RE = re.compile(
-    r"^\s*(?:Question\s+)?(?P<number>\d+)(?:(?:\s*\(\d+\s*(?:pts?|points?)\))|\s*[\].:)])",
+    r"^\s*(?:Question\s+)?(?P<number>\d+)(?:\s*\(\d+\s*(?:pts?|points?)\)|\s*[\].:)])",
     re.IGNORECASE,
 )
 _QUESTION_PREFIX_RE = re.compile(r"^\s*(?:question\s*)?\d+\s*[\].:)-]*\s*", re.IGNORECASE)

@@ -9,12 +9,173 @@ from scriptscore.commands.scans_shared import ensure_paths_exist
 from scriptscore.contracts import (
     AlignmentResult,
     ErrorCategory,
+    Page,
     ScansAlignAutoRequest,
     ScriptscoreError,
     Transform,
 )
-from scriptscore.providers import AlignmentRequest
+from scriptscore.providers import AlignmentProvider, AlignmentRequest, AlignmentResponse
 from scriptscore.runtime import CommandContext, CommandOutcome, CommandSpec
+
+COMMAND_NAME = "scans.align-auto"
+
+
+def _student_ref(page: Page) -> str:
+    assert page.student_ref is not None
+    return page.student_ref
+
+
+def _alignment_failed_result(
+    *,
+    student_ref: str,
+    page_number: int,
+    code: str,
+    message: str,
+    scope: dict[str, object],
+) -> AlignmentResult:
+    return AlignmentResult(
+        student_ref=student_ref,
+        page_number=page_number,
+        status="failed",
+        warnings=[warning(code=code, message=message, scope=scope)],
+    )
+
+
+def _alignment_transform_result(
+    *,
+    student_page: Page,
+    template_page: Page,
+    provider_result: AlignmentResponse,
+    scope: dict[str, object],
+) -> AlignmentResult:
+    rotation = provider_result.rotation
+    scale = provider_result.scale
+    translate_x = provider_result.translate_x
+    translate_y = provider_result.translate_y
+    student_ref = _student_ref(student_page)
+    page_number = student_page.page_number
+    if None in {rotation, scale, translate_x, translate_y}:
+        return _alignment_failed_result(
+            student_ref=student_ref,
+            page_number=page_number,
+            code="alignment_response_invalid",
+            message="Alignment provider returned an incomplete transform proposal.",
+            scope=scope,
+        )
+    assert rotation is not None
+    assert scale is not None
+    assert translate_x is not None
+    assert translate_y is not None
+    transform = Transform(
+        rotation=rotation,
+        scale=scale,
+        translate_x=translate_x,
+        translate_y=translate_y,
+    )
+    warnings = provider_result.warnings
+    template_image = load_page_image(template_page.image_path)
+    clip_report = transformed_visible_content_clip_report(
+        load_page_image(student_page.image_path),
+        transform,
+        output_width=template_image.width,
+        output_height=template_image.height,
+    )
+    if clip_report.clips_visible_content:
+        warnings = [
+            *provider_result.warnings,
+            warning(
+                code="alignment_transform_clips_content",
+                message=(
+                    "Alignment transform would clip visible page content during canonicalization; "
+                    "canonicalize will normalize the placement before detect."
+                ),
+                scope={**scope, **clip_report.warning_scope()},
+            ),
+        ]
+    return AlignmentResult(
+        student_ref=student_ref,
+        page_number=page_number,
+        status=provider_result.status,
+        confidence=provider_result.confidence,
+        transform=transform,
+        warnings=warnings,
+    )
+
+
+def _alignment_provider_result(
+    *,
+    provider: AlignmentProvider,
+    request: ScansAlignAutoRequest,
+    student_page: Page,
+    template_page: Page,
+    scope: dict[str, object],
+) -> AlignmentResult:
+    provider_result = provider.align(
+        AlignmentRequest(
+            template_page_path=str(template_page.image_path),
+            student_page_path=str(student_page.image_path),
+            mode=request.mode,
+            marker_mode=request.marker_mode,
+        )
+    )
+    if provider_result.status in {"ok", "low_confidence"}:
+        return _alignment_transform_result(
+            student_page=student_page,
+            template_page=template_page,
+            provider_result=provider_result,
+            scope=scope,
+        )
+    return AlignmentResult(
+        student_ref=_student_ref(student_page),
+        page_number=student_page.page_number,
+        status="failed",
+        confidence=provider_result.confidence,
+        warnings=provider_result.warnings,
+    )
+
+
+def _align_student_page(
+    *,
+    provider: AlignmentProvider,
+    request: ScansAlignAutoRequest,
+    student_page: Page,
+    template_page: Page | None,
+    scope: dict[str, object],
+) -> AlignmentResult:
+    if template_page is None:
+        return _alignment_failed_result(
+            student_ref=_student_ref(student_page),
+            page_number=student_page.page_number,
+            code="template_page_missing",
+            message="No matching template page was supplied for this student page number.",
+            scope=scope,
+        )
+    try:
+        return _alignment_provider_result(
+            provider=provider,
+            request=request,
+            student_page=student_page,
+            template_page=template_page,
+            scope=scope,
+        )
+    except ScriptscoreError as exc:
+        if exc.category in {ErrorCategory.CANCELLED, ErrorCategory.PROVIDER}:
+            raise
+        return _alignment_failed_result(
+            student_ref=_student_ref(student_page),
+            page_number=student_page.page_number,
+            code=exc.code,
+            message=exc.message,
+            scope=scope,
+        )
+    except Exception as exc:
+        return _alignment_failed_result(
+            student_ref=_student_ref(student_page),
+            page_number=student_page.page_number,
+            code="alignment_failed",
+            message=str(exc) or "Alignment execution failed.",
+            scope=scope,
+        )
 
 
 def handle_scans_align_auto(ctx: CommandContext, request: ScansAlignAutoRequest) -> CommandOutcome:
@@ -27,7 +188,7 @@ def handle_scans_align_auto(ctx: CommandContext, request: ScansAlignAutoRequest)
     all_input_paths.extend(page.image_path for page in request.student_pages)
     ensure_paths_exist(
         all_input_paths,
-        command="scans.align-auto",
+        command=COMMAND_NAME,
     )
 
     total = len(request.student_pages)
@@ -55,135 +216,15 @@ def handle_scans_align_auto(ctx: CommandContext, request: ScansAlignAutoRequest)
         )
 
         template_page = template_pages_by_number.get(student_page.page_number)
-        if template_page is None:
+        result = _align_student_page(
+            provider=provider,
+            request=request,
+            student_page=student_page,
+            template_page=template_page,
+            scope=scope,
+        )
+        if result.status == "failed":
             failed_count += 1
-            result = AlignmentResult(
-                student_ref=student_page.student_ref,
-                page_number=student_page.page_number,
-                status="failed",
-                warnings=[
-                    warning(
-                        code="template_page_missing",
-                        message="No matching template page was supplied for this student page number.",
-                        scope=scope,
-                    )
-                ],
-            )
-        else:
-            try:
-                provider_result = provider.align(
-                    AlignmentRequest(
-                        template_page_path=str(template_page.image_path),
-                        student_page_path=str(student_page.image_path),
-                        mode=request.mode,
-                        marker_mode=request.marker_mode,
-                    )
-                )
-            except ScriptscoreError as exc:
-                if exc.category in {ErrorCategory.CANCELLED, ErrorCategory.PROVIDER}:
-                    raise
-                failed_count += 1
-                result = AlignmentResult(
-                    student_ref=student_page.student_ref,
-                    page_number=student_page.page_number,
-                    status="failed",
-                    warnings=[
-                        warning(
-                            code=exc.code,
-                            message=exc.message,
-                            scope=scope,
-                        )
-                    ],
-                )
-            except Exception as exc:
-                failed_count += 1
-                result = AlignmentResult(
-                    student_ref=student_page.student_ref,
-                    page_number=student_page.page_number,
-                    status="failed",
-                    warnings=[
-                        warning(
-                            code="alignment_failed",
-                            message=str(exc) or "Alignment execution failed.",
-                            scope=scope,
-                        )
-                    ],
-                )
-            else:
-                if provider_result.status in {"ok", "low_confidence"}:
-                    rotation = provider_result.rotation
-                    scale = provider_result.scale
-                    translate_x = provider_result.translate_x
-                    translate_y = provider_result.translate_y
-                    if None in {rotation, scale, translate_x, translate_y}:
-                        failed_count += 1
-                        result = AlignmentResult(
-                            student_ref=student_page.student_ref,
-                            page_number=student_page.page_number,
-                            status="failed",
-                            warnings=[
-                                warning(
-                                    code="alignment_response_invalid",
-                                    message="Alignment provider returned an incomplete transform proposal.",
-                                    scope=scope,
-                                )
-                            ],
-                        )
-                    else:
-                        assert rotation is not None
-                        assert scale is not None
-                        assert translate_x is not None
-                        assert translate_y is not None
-                        transform = Transform(
-                            rotation=rotation,
-                            scale=scale,
-                            translate_x=translate_x,
-                            translate_y=translate_y,
-                        )
-                        result = AlignmentResult(
-                            student_ref=student_page.student_ref,
-                            page_number=student_page.page_number,
-                            status=provider_result.status,
-                            confidence=provider_result.confidence,
-                            transform=transform,
-                            warnings=provider_result.warnings,
-                        )
-                        template_image = load_page_image(template_page.image_path)
-                        clip_report = transformed_visible_content_clip_report(
-                            load_page_image(student_page.image_path),
-                            transform,
-                            output_width=template_image.width,
-                            output_height=template_image.height,
-                        )
-                        if clip_report.clips_visible_content:
-                            result = AlignmentResult(
-                                student_ref=student_page.student_ref,
-                                page_number=student_page.page_number,
-                                status=provider_result.status,
-                                confidence=provider_result.confidence,
-                                transform=transform,
-                                warnings=[
-                                    *provider_result.warnings,
-                                    warning(
-                                        code="alignment_transform_clips_content",
-                                        message=(
-                                            "Alignment transform would clip visible page content "
-                                            "during canonicalization; canonicalize will normalize "
-                                            "the placement before detect."
-                                        ),
-                                        scope={**scope, **clip_report.warning_scope()},
-                                    ),
-                                ],
-                            )
-                else:
-                    failed_count += 1
-                    result = AlignmentResult(
-                        student_ref=student_page.student_ref,
-                        page_number=student_page.page_number,
-                        status="failed",
-                        confidence=provider_result.confidence,
-                        warnings=provider_result.warnings,
-                    )
 
         results.append(result)
         if any(item.code == "marker_guided_alignment_not_used" for item in result.warnings):
@@ -229,7 +270,7 @@ def handle_scans_align_auto(ctx: CommandContext, request: ScansAlignAutoRequest)
 
 def scans_align_auto_spec() -> CommandSpec:
     return CommandSpec(
-        name="scans.align-auto",
+        name=COMMAND_NAME,
         request_model=ScansAlignAutoRequest,
         handler=handle_scans_align_auto,
     )

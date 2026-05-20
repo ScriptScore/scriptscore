@@ -27,6 +27,9 @@ from scriptscore.contracts import (
 from scriptscore.prompts import parse_json_model
 from scriptscore.runtime import CommandContext, CommandOutcome, CommandSpec
 
+COMMAND_NAME = "scans.parse"
+PII_PROVIDER_NAME = "scans.pii"
+
 
 @dataclass(frozen=True)
 class PrescreenOutcome:
@@ -164,13 +167,13 @@ def _pii_prescreen_reuse(
     started = finished - timedelta(milliseconds=1)
     trace_artifact = write_trace_artifact(
         output_artifacts_dir=request.output_artifacts_dir,
-        command="scans.parse",
+        command=COMMAND_NAME,
         operation_id=ctx.operation_id,
         request_id=ctx.request_id,
         step="pii_prescreen",
         scope={"student_ref": target.student_ref, "question_id": target.question_id},
         provider_capability="local_runtime",
-        provider_name="scans.pii",
+        provider_name=PII_PROVIDER_NAME,
         request_options={
             "source_command": prescreen.source_command,
             "contains_handwriting": prescreen.contains_handwriting,
@@ -388,7 +391,7 @@ def handle_scans_parse(ctx: CommandContext, request: ScansParseRequest) -> Comma
     input_paths = [target.question_crop_path for target in request.parse_targets] + [
         target.template_question_png_path for target in request.parse_targets
     ]
-    ensure_paths_exist(input_paths, command="scans.parse")
+    ensure_paths_exist(input_paths, command=COMMAND_NAME)
 
     total = len(request.parse_targets)
     ctx.emit(
@@ -534,5 +537,5 @@ def handle_scans_parse(ctx: CommandContext, request: ScansParseRequest) -> Comma
 
 def scans_parse_spec() -> CommandSpec:
     return CommandSpec(
-        name="scans.parse", request_model=ScansParseRequest, handler=handle_scans_parse
+        name=COMMAND_NAME, request_model=ScansParseRequest, handler=handle_scans_parse
     )

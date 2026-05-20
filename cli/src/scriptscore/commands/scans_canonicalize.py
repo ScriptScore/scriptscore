@@ -30,6 +30,8 @@ from scriptscore.contracts import (
 )
 from scriptscore.runtime import CommandContext, CommandOutcome, CommandSpec
 
+COMMAND_NAME = "scans.canonicalize"
+
 
 def handle_scans_canonicalize(
     ctx: CommandContext, request: ScansCanonicalizeRequest
@@ -38,11 +40,11 @@ def handle_scans_canonicalize(
 
     ensure_paths_exist(
         [target.page.image_path for target in request.canonicalize_targets],
-        command="scans.canonicalize",
+        command=COMMAND_NAME,
     )
     ensure_paths_exist(
         [target.template_page.image_path for target in request.canonicalize_targets],
-        command="scans.canonicalize",
+        command=COMMAND_NAME,
     )
 
     total = len(request.canonicalize_targets)
@@ -163,7 +165,7 @@ def handle_scans_canonicalize(
 
 def scans_canonicalize_spec() -> CommandSpec:
     return CommandSpec(
-        name="scans.canonicalize",
+        name=COMMAND_NAME,
         request_model=ScansCanonicalizeRequest,
         handler=handle_scans_canonicalize,
     )

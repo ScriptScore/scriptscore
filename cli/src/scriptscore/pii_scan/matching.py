@@ -11,7 +11,7 @@ from scriptscore.pii_scan.images import region_ink_fraction
 from scriptscore.pii_scan.types import RasterBundle, SensitiveHit, VisionToken
 
 EMAIL_PATTERN = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE)
-PHONE_PATTERN = re.compile(r"(?:(?:\+?\d[\d .()/-]{7,}\d))")
+PHONE_PATTERN = re.compile(r"\+?\d[\d .()/-]{7,}\d")
 HANDLE_PATTERN = re.compile(r"\B@[A-Za-z][A-Za-z0-9_.-]{2,31}\b")
 NAME_BLOCKLIST = {
     "question",
@@ -350,152 +350,217 @@ def _sentence_name_hits(context: _ScanContext, lexicon: TriggerLexicon) -> list[
     return _dedupe_hits(hits)
 
 
-def _labeled_hits(context: _ScanContext, lexicon: TriggerLexicon) -> list[SensitiveHit]:
-    hits: list[SensitiveHit] = []
-    lines = _group_token_lines(context.tokens)
-    width, height = context.raster.working_size
-    normalized_words = {_letters_only(token.text) for token in context.tokens}
-    form_header = "score" in normalized_words and (
+def _form_header_present(tokens: list[VisionToken]) -> bool:
+    normalized_words = {_letters_only(token.text) for token in tokens}
+    return "score" in normalized_words and (
         any(word.endswith("uestion") or "question" in word for word in normalized_words)
         or "maximum" in normalized_words
     )
 
-    for line in lines:
-        line_text = " ".join(token.text for token in line)
-        compact_line = _compact_text(line_text)
-        lower_line = compact_line.lower()
 
-        if "email" in lower_line:
-            for match in EMAIL_PATTERN.finditer(compact_line):
-                snippet = match.group(0)
-                if snippet.lower() in lexicon.emails:
-                    hits.append(
-                        SensitiveHit(
-                            kind="email",
-                            snippet=snippet,
-                            confidence=0.98,
-                            reason="email label line contains a provided student email",
-                        )
-                    )
-
-        username_window = _username_label_window(line)
-        if username_window is not None:
-            _, end_index = username_window
-            trailing = [token.text for index, token in enumerate(line) if index > end_index]
-            candidate = _compact_text(" ".join(trailing))
-            if candidate and _normalized_username(candidate) in lexicon.usernames:
-                hits.append(
-                    SensitiveHit(
-                        kind="username",
-                        snippet=candidate,
-                        confidence=0.9,
-                        reason="username label is followed by a provided student identifier",
-                    )
+def _email_label_hits(compact_line: str, lexicon: TriggerLexicon) -> list[SensitiveHit]:
+    if "email" not in compact_line.lower():
+        return []
+    hits: list[SensitiveHit] = []
+    for match in EMAIL_PATTERN.finditer(compact_line):
+        snippet = match.group(0)
+        if snippet.lower() in lexicon.emails:
+            hits.append(
+                SensitiveHit(
+                    kind="email",
+                    snippet=snippet,
+                    confidence=0.98,
+                    reason="email label line contains a provided student email",
                 )
-
-        if any(label in _letters_only(compact_line) for label in ("phone", "telephone", "mobile")):
-            phone_match = PHONE_PATTERN.search(compact_line)
-            if phone_match is not None:
-                snippet = phone_match.group(0).strip()
-                if _normalized_phone(snippet) in lexicon.phones:
-                    hits.append(
-                        SensitiveHit(
-                            kind="phone_number",
-                            snippet=snippet,
-                            confidence=0.92,
-                            reason="phone label line contains a provided student phone number",
-                        )
-                    )
-
-        for index, token in enumerate(line):
-            if _letters_only(token.text) not in {"name", "names"}:
-                continue
-
-            ink_fraction = region_ink_fraction(
-                context.raster.binary_mask,
-                left=token.right + 4,
-                top=max(0, token.top - int(token.height * 1.2)),
-                right=min(width, max(token.right + 16, token.right + int(width * 0.6))),
-                bottom=min(height, token.bottom + int(token.height * 1.2)),
             )
-            trailing_words = [
-                candidate.text
-                for candidate in line[index + 1 :]
-                if any(character.isalpha() for character in candidate.text)
-            ]
-            if trailing_words:
-                snippet = " ".join(trailing_words[:4])
-                if _name_matches_trigger(snippet, lexicon):
-                    hits.append(
-                        SensitiveHit(
-                            kind="name",
-                            snippet=snippet,
-                            confidence=0.88,
-                            reason="name label is followed by text matching a provided student name",
-                        )
-                    )
-                continue
+    return hits
 
-            if ink_fraction > 0.015 and lexicon.has_name_trigger:
-                hits.append(
-                    SensitiveHit(
-                        kind="name",
-                        snippet="",
-                        confidence=0.76,
-                        reason="name label is followed by handwritten ink and a student name trigger exists",
-                    )
-                )
 
-        if form_header and ":" in compact_line:
-            label_fragment = compact_line.split(":", 1)[0].strip().lower()
-            if label_fragment in {"e", "me", "ame"} and lexicon.has_name_trigger:
-                first = line[0]
-                ink_fraction = region_ink_fraction(
-                    context.raster.binary_mask,
-                    left=first.right + 4,
-                    top=max(0, first.top - int(first.height * 1.2)),
-                    right=min(width, max(first.right + 16, first.right + int(width * 0.7))),
-                    bottom=min(height, first.bottom + int(first.height * 1.6)),
-                )
-                if ink_fraction > 0.02:
-                    hits.append(
-                        SensitiveHit(
-                            kind="name",
-                            snippet="",
-                            confidence=0.7,
-                            reason="form-style name label is followed by handwriting",
-                        )
-                    )
+def _username_label_hits(line: list[VisionToken], lexicon: TriggerLexicon) -> list[SensitiveHit]:
+    username_window = _username_label_window(line)
+    if username_window is None:
+        return []
+    _, end_index = username_window
+    trailing = [token.text for index, token in enumerate(line) if index > end_index]
+    candidate = _compact_text(" ".join(trailing))
+    if not candidate or _normalized_username(candidate) not in lexicon.usernames:
+        return []
+    return [
+        SensitiveHit(
+            kind="username",
+            snippet=candidate,
+            confidence=0.9,
+            reason="username label is followed by a provided student identifier",
+        )
+    ]
 
-    if form_header and lexicon.has_name_trigger:
-        header_tokens = [
-            re.sub(r"[^A-Za-z'-]", "", token.text)
-            for token in context.tokens
-            if token.center_y <= context.raster.working_size[1] * 0.45
-            and any(character.isalpha() for character in token.text)
+
+def _phone_label_hits(compact_line: str, lexicon: TriggerLexicon) -> list[SensitiveHit]:
+    if not any(label in _letters_only(compact_line) for label in ("phone", "telephone", "mobile")):
+        return []
+    phone_match = PHONE_PATTERN.search(compact_line)
+    if phone_match is None:
+        return []
+    snippet = phone_match.group(0).strip()
+    if _normalized_phone(snippet) not in lexicon.phones:
+        return []
+    return [
+        SensitiveHit(
+            kind="phone_number",
+            snippet=snippet,
+            confidence=0.92,
+            reason="phone label line contains a provided student phone number",
+        )
+    ]
+
+
+def _name_label_hits(
+    context: _ScanContext,
+    line: list[VisionToken],
+    lexicon: TriggerLexicon,
+) -> list[SensitiveHit]:
+    hits: list[SensitiveHit] = []
+    width, height = context.raster.working_size
+    for index, token in enumerate(line):
+        if _letters_only(token.text) not in {"name", "names"}:
+            continue
+
+        trailing_words = [
+            candidate.text
+            for candidate in line[index + 1 :]
+            if any(character.isalpha() for character in candidate.text)
         ]
-        candidates: list[str] = []
-        for header_token in header_tokens:
-            cleaned = header_token.strip()
-            if len(cleaned) < 4:
-                continue
-            lowered = cleaned.lower()
-            if lowered in NAME_BLOCKLIST:
-                continue
-            if not cleaned[0].isupper():
-                continue
-            candidates.append(cleaned)
-        if candidates:
-            snippet = " ".join(candidates[:2])
+        if trailing_words:
+            snippet = " ".join(trailing_words[:4])
             if _name_matches_trigger(snippet, lexicon):
                 hits.append(
                     SensitiveHit(
                         kind="name",
                         snippet=snippet,
-                        confidence=0.72,
-                        reason="top-of-page handwritten name candidate matches the provided student name",
+                        confidence=0.88,
+                        reason="name label is followed by text matching a provided student name",
                     )
                 )
+            continue
+
+        ink_fraction = region_ink_fraction(
+            context.raster.binary_mask,
+            left=token.right + 4,
+            top=max(0, token.top - int(token.height * 1.2)),
+            right=min(width, max(token.right + 16, token.right + int(width * 0.6))),
+            bottom=min(height, token.bottom + int(token.height * 1.2)),
+        )
+        if ink_fraction > 0.015 and lexicon.has_name_trigger:
+            hits.append(
+                SensitiveHit(
+                    kind="name",
+                    snippet="",
+                    confidence=0.76,
+                    reason="name label is followed by handwritten ink and a student name trigger exists",
+                )
+            )
+    return hits
+
+
+def _form_label_hits(
+    context: _ScanContext,
+    line: list[VisionToken],
+    compact_line: str,
+    lexicon: TriggerLexicon,
+) -> list[SensitiveHit]:
+    if ":" not in compact_line:
+        return []
+    label_fragment = compact_line.split(":", 1)[0].strip().lower()
+    if label_fragment not in {"e", "me", "ame"} or not lexicon.has_name_trigger:
+        return []
+    width, height = context.raster.working_size
+    first = line[0]
+    ink_fraction = region_ink_fraction(
+        context.raster.binary_mask,
+        left=first.right + 4,
+        top=max(0, first.top - int(first.height * 1.2)),
+        right=min(width, max(first.right + 16, first.right + int(width * 0.7))),
+        bottom=min(height, first.bottom + int(first.height * 1.6)),
+    )
+    if ink_fraction <= 0.02:
+        return []
+    return [
+        SensitiveHit(
+            kind="name",
+            snippet="",
+            confidence=0.7,
+            reason="form-style name label is followed by handwriting",
+        )
+    ]
+
+
+def _header_name_candidates(context: _ScanContext) -> list[str]:
+    candidates: list[str] = []
+    for token in context.tokens:
+        if token.center_y > context.raster.working_size[1] * 0.45:
+            continue
+        if not any(character.isalpha() for character in token.text):
+            continue
+        cleaned = re.sub(r"[^A-Za-z'-]", "", token.text).strip()
+        if len(cleaned) < 4 or cleaned.lower() in NAME_BLOCKLIST or not cleaned[0].isupper():
+            continue
+        candidates.append(cleaned)
+    return candidates
+
+
+def _top_header_name_hits(context: _ScanContext, lexicon: TriggerLexicon) -> list[SensitiveHit]:
+    candidates = _header_name_candidates(context)
+    if not candidates:
+        return []
+    snippet = " ".join(candidates[:2])
+    if not _name_matches_trigger(snippet, lexicon):
+        return []
+    return [
+        SensitiveHit(
+            kind="name",
+            snippet=snippet,
+            confidence=0.72,
+            reason="top-of-page handwritten name candidate matches the provided student name",
+        )
+    ]
+
+
+def _standalone_name_candidate(line: list[VisionToken], context: _ScanContext) -> str | None:
+    tokens = [re.sub(r"[^A-Za-z'-]", "", token.text) for token in line]
+    clean_tokens = [token for token in tokens if token]
+    if not 2 <= len(clean_tokens) <= 3:
+        return None
+    if any(token.lower() in NAME_BLOCKLIST for token in clean_tokens):
+        return None
+    if any(len(token) > 14 for token in clean_tokens):
+        return None
+    if sum(len(token) for token in clean_tokens) > 28:
+        return None
+    if not all(token[0].isupper() for token in clean_tokens):
+        return None
+    line_span = max(token.right for token in line) - min(token.left for token in line)
+    if line_span > context.raster.working_size[0] * 0.5:
+        return None
+    return " ".join(clean_tokens)
+
+
+def _labeled_hits(context: _ScanContext, lexicon: TriggerLexicon) -> list[SensitiveHit]:
+    hits: list[SensitiveHit] = []
+    lines = _group_token_lines(context.tokens)
+    form_header = _form_header_present(context.tokens)
+
+    for line in lines:
+        line_text = " ".join(token.text for token in line)
+        compact_line = _compact_text(line_text)
+        hits.extend(_email_label_hits(compact_line, lexicon))
+        hits.extend(_username_label_hits(line, lexicon))
+        hits.extend(_phone_label_hits(compact_line, lexicon))
+        hits.extend(_name_label_hits(context, line, lexicon))
+        if form_header:
+            hits.extend(_form_label_hits(context, line, compact_line, lexicon))
+
+    if form_header and lexicon.has_name_trigger:
+        hits.extend(_top_header_name_hits(context, lexicon))
 
     return _dedupe_hits(hits)
 
@@ -505,22 +570,9 @@ def _standalone_name_hits(context: _ScanContext, lexicon: TriggerLexicon) -> lis
         return []
     hits: list[SensitiveHit] = []
     for line in _group_token_lines(context.tokens):
-        tokens = [re.sub(r"[^A-Za-z'-]", "", token.text) for token in line]
-        clean_tokens = [token for token in tokens if token]
-        if not 2 <= len(clean_tokens) <= 3:
+        snippet = _standalone_name_candidate(line, context)
+        if snippet is None:
             continue
-        if any(token.lower() in NAME_BLOCKLIST for token in clean_tokens):
-            continue
-        if any(len(token) > 14 for token in clean_tokens):
-            continue
-        if sum(len(token) for token in clean_tokens) > 28:
-            continue
-        if not all(token[0].isupper() for token in clean_tokens):
-            continue
-        line_span = max(token.right for token in line) - min(token.left for token in line)
-        if line_span > context.raster.working_size[0] * 0.5:
-            continue
-        snippet = " ".join(clean_tokens)
         if _name_matches_trigger(snippet, lexicon):
             hits.append(
                 SensitiveHit(

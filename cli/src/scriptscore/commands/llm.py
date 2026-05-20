@@ -63,6 +63,14 @@ def execute_prompt_step(
         )
 
 
+def _attempt_raw_text(attempt: PromptStepAttempt, response_raw: str | None) -> str | None:
+    if response_raw is not None:
+        return response_raw
+    if attempt.execution is None:
+        return None
+    return attempt.execution.provider_response.raw_text
+
+
 def prompt_trace_artifact(
     *,
     output_artifacts_dir: Path,
@@ -82,11 +90,7 @@ def prompt_trace_artifact(
     """Write a standard trace artifact for one prompt attempt."""
 
     execution = attempt.execution
-    raw_text = (
-        response_raw
-        if response_raw is not None
-        else (None if execution is None else execution.provider_response.raw_text)
-    )
+    raw_text = _attempt_raw_text(attempt, response_raw)
     resolved_request_options = request_options
     if resolved_request_options is None:
         resolved_request_options = (
