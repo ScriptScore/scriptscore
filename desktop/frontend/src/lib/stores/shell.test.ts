@@ -57,6 +57,21 @@ describe('shell store', () => {
     expect(get(shellState).workerStatus).toBe('ready');
   });
 
+  it('clears recovered worker availability errors from refreshed shell state', async () => {
+    desktopMocks.getShellState.mockResolvedValue({
+      currentProject: null,
+      workerStatus: 'ready',
+      workerActivity: { activeJobs: [], pendingJobCount: 0 },
+      lastRuntimeError: 'Timed out waiting for the desktop worker to connect.',
+      debugFeatures: { redactionToggle: false }
+    });
+
+    await refreshShellState();
+
+    expect(get(shellState).workerStatus).toBe('ready');
+    expect(get(shellState).lastRuntimeError).toBeNull();
+  });
+
   it('does not register the runtime bridge in browser preview mode', async () => {
     desktopMocks.isDesktopHost.mockReturnValue(false);
 
@@ -165,6 +180,79 @@ describe('shell store', () => {
     });
 
     expect(get(shellState).lastRuntimeError).toBeNull();
+    teardownRuntimeJobBridge();
+  });
+
+  it('clears transient worker connection errors after background probes observe recovery', async () => {
+    desktopMocks.isDesktopHost.mockReturnValue(true);
+    let runtimeHandler: ((event: Record<string, unknown>) => void) | null = null;
+    desktopMocks.listenRuntimeJobEvents.mockImplementation(async (handler) => {
+      runtimeHandler = handler as (event: Record<string, unknown>) => void;
+      return vi.fn();
+    });
+
+    await ensureRuntimeJobBridge();
+
+    if (runtimeHandler === null) {
+      throw new Error('runtime handler should be registered');
+    }
+    (runtimeHandler as (event: Record<string, unknown>) => void)({
+      eventType: 'runtime_error',
+      commandName: 'smoke.ping',
+      workerStatus: 'error',
+      requestId: null,
+      jobId: null,
+      payload: { message: 'cannot connect to worker' }
+    });
+    (runtimeHandler as (event: Record<string, unknown>) => void)({
+      eventType: 'job_finished',
+      commandName: 'runtime.list-llm-models',
+      workerStatus: 'ready',
+      requestId: 'req-1',
+      jobId: 'job-1',
+      payload: {}
+    });
+
+    expect(get(shellState).lastRuntimeError).toBeNull();
+    teardownRuntimeJobBridge();
+  });
+
+  it('preserves non-worker runtime errors during recovered background probes', async () => {
+    desktopMocks.isDesktopHost.mockReturnValue(true);
+    let runtimeHandler: ((event: Record<string, unknown>) => void) | null = null;
+    desktopMocks.listenRuntimeJobEvents.mockImplementation(async (handler) => {
+      runtimeHandler = handler as (event: Record<string, unknown>) => void;
+      return vi.fn();
+    });
+
+    await ensureRuntimeJobBridge();
+
+    if (runtimeHandler === null) {
+      throw new Error('runtime handler should be registered');
+    }
+    (runtimeHandler as (event: Record<string, unknown>) => void)({
+      eventType: 'job_failed',
+      commandName: 'exam.analyze',
+      workerStatus: 'ready',
+      requestId: 'req-1',
+      jobId: 'job-1',
+      payload: {
+        error: {
+          message: 'Ollama is unreachable.',
+          code: 'ollama_unreachable'
+        }
+      }
+    });
+    (runtimeHandler as (event: Record<string, unknown>) => void)({
+      eventType: 'job_finished',
+      commandName: 'runtime.list-llm-models',
+      workerStatus: 'ready',
+      requestId: 'req-2',
+      jobId: 'job-2',
+      payload: {}
+    });
+
+    expect(get(shellState).lastRuntimeError).toBe('exam.analyze: Ollama is unreachable.');
     teardownRuntimeJobBridge();
   });
 

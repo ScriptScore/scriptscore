@@ -53,7 +53,7 @@ export function onRuntimeJobEvent(handler: RuntimeJobEventHandler): () => void {
 }
 
 export async function refreshShellState(): Promise<void> {
-  shellState.set(await getShellState());
+  shellState.set(normalizeShellState(await getShellState()));
 }
 
 export async function ensureRuntimeJobBridge(): Promise<void> {
@@ -101,6 +101,31 @@ function isBackgroundProviderProbe(commandName: string | null | undefined): bool
   return commandName === 'runtime.list-llm-models' || commandName === 'runtime.validate-llm-model';
 }
 
+function isRecoverableWorkerAvailabilityError(message: string | null): boolean {
+  if (!message) {
+    return false;
+  }
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes('cannot connect to worker') ||
+    normalized.includes('can not connect to worker') ||
+    normalized.includes('worker unavailable') ||
+    normalized.includes('desktop worker is not available') ||
+    normalized.includes('timed out waiting for the desktop worker to connect') ||
+    normalized.includes('desktop worker exited before connecting')
+  );
+}
+
+function normalizeShellState(state: ShellState): ShellState {
+  if (
+    state.workerStatus === 'ready' &&
+    isRecoverableWorkerAvailabilityError(state.lastRuntimeError)
+  ) {
+    return { ...state, lastRuntimeError: null };
+  }
+  return state;
+}
+
 function currentRuntimeError(current: ShellState, event: RuntimeJobEvent): string | null {
   if (isBackgroundProviderProbe(event.commandName)) {
     return current.lastRuntimeError;
@@ -126,12 +151,15 @@ function currentRuntimeError(current: ShellState, event: RuntimeJobEvent): strin
 
 function applyRuntimeJobEvent(event: RuntimeJobEvent): void {
   const workerActivity = workerActivityFromEvent(event);
-  shellState.update((current) => ({
-    ...current,
-    workerStatus: event.workerStatus,
-    workerActivity: workerActivity ?? current.workerActivity ?? { activeJobs: [], pendingJobCount: 0 },
-    lastRuntimeError: currentRuntimeError(current, event)
-  }));
+  shellState.update((current) =>
+    normalizeShellState({
+      ...current,
+      workerStatus: event.workerStatus,
+      workerActivity:
+        workerActivity ?? current.workerActivity ?? { activeJobs: [], pendingJobCount: 0 },
+      lastRuntimeError: currentRuntimeError(current, event)
+    })
+  );
 
   completionRegistry.emitRuntimeEvent(event);
   jobProgress.set(runtimeProgressTracker.handleEvent(event));
