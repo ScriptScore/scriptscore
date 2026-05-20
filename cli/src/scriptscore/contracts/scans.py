@@ -247,6 +247,8 @@ class ScansPdfCreateRedactedRequest(BaseModel):
     regions: list[TemplateRasterRegion] = Field(default_factory=list)
     raster_sizes_by_page: dict[int, PdfRasterSize] = Field(default_factory=dict)
     """Template preview pixel size per page number (maps template pixels to PDF points)."""
+    page_order: list[int] | None = None
+    """Optional selected source PDF pages to keep in the output PDF, in output order."""
     student_ref: str | None = None
     """Optional scope for progress events only; never echoed in success `data`."""
     output_artifacts_dir: Path | None = None
@@ -272,6 +274,11 @@ class ScansPdfCreateRedactedRequest(BaseModel):
                 raise ValueError(
                     f"raster_sizes_by_page must include page_number {page_number} for each region page."
                 )
+        if self.page_order is not None:
+            if not self.page_order:
+                self.page_order = None
+            elif len(set(self.page_order)) != len(self.page_order):
+                raise ValueError("page_order must not contain duplicate page numbers.")
         return self
 
 

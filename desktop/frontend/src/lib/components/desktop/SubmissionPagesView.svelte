@@ -6,7 +6,7 @@
   import type { StudentIntakeSummary, StudentWorkflowSubmission } from '$lib/types';
   import HorizontalProgressBar from './HorizontalProgressBar.svelte';
   import { stageLabel, stageProgressTone } from './student-workflow-helpers';
-  import { DesktopButton, IconButton, PagePreviewFrame } from './ui';
+  import { ConfirmDialog, DesktopButton, IconButton, PagePreviewFrame } from './ui';
 
   export let intakeItem: StudentIntakeSummary | null;
   export let submission: StudentWorkflowSubmission | null;
@@ -23,6 +23,7 @@
   let pageNumber = 1;
   let prevStudentKey = '';
   let pageOrderBusy = false;
+  let pendingRemovePageNumber: number | null = null;
 
   $: examPaths =
     intakeItem?.examPagePaths?.filter(
@@ -55,15 +56,24 @@
     prevStudentKey = currentKey;
   }
 
-  async function removeCurrentPage() {
+  function requestRemoveCurrentPage() {
     if (!intakeItem || !onSavePageOrder || !canRemoveCurrentPage) {
       return;
     }
-    const nextPaths = examPaths.filter((_, index) => index !== pageNumber - 1);
+    pendingRemovePageNumber = pageNumber;
+  }
+
+  async function confirmRemovePage() {
+    if (!intakeItem || !onSavePageOrder || pendingRemovePageNumber === null) {
+      return;
+    }
+    const removeIndex = pendingRemovePageNumber - 1;
+    const nextPaths = examPaths.filter((_, index) => index !== removeIndex);
     pageOrderBusy = true;
     try {
       await onSavePageOrder(intakeItem.studentRef, nextPaths);
       pageNumber = Math.min(pageNumber, Math.max(1, nextPaths.length));
+      pendingRemovePageNumber = null;
     } finally {
       pageOrderBusy = false;
     }
@@ -146,7 +156,7 @@
         <DesktopButton
           variant="destructive"
           disabled={!canRemoveCurrentPage}
-          onclick={removeCurrentPage}
+          onclick={requestRemoveCurrentPage}
         >
           Remove page
         </DesktopButton>
@@ -161,3 +171,16 @@
     </div>
   {/if}
 </div>
+
+<ConfirmDialog
+  open={pendingRemovePageNumber !== null}
+  title="Remove page?"
+  description={`Remove page ${pendingRemovePageNumber ?? pageNumber} from this prepared submission. The workflow will be reset to intake if downstream work has started.`}
+  confirmLabel="Remove page"
+  destructive
+  busy={pageOrderBusy}
+  onCancel={() => {
+    pendingRemovePageNumber = null;
+  }}
+  onConfirm={() => void confirmRemovePage()}
+/>

@@ -56,6 +56,7 @@
   export let seedPaths: string[] = [];
   export let seedVersion: number = 0;
   export let existingIntakeItems: StudentIntakeSummary[] = [];
+  export let expectedPageCount = 0;
   export let onSubmissionCompleted:
     | ((payload: SubmissionCompletedPayload) => void | Promise<void>)
     | null = null;
@@ -365,6 +366,33 @@
     previewPageNumbers,
     activeItem?.desiredPageOrder
   );
+  $: excludedPreviewPageNumbers = previewPageNumbers.filter(
+    (pageNumber) => !orderedPreviewPageNumbers.includes(pageNumber)
+  );
+  $: displayedPreviewPageNumbers = [
+    ...orderedPreviewPageNumbers,
+    ...excludedPreviewPageNumbers
+  ];
+  $: hasExtraPreviewPages =
+    expectedPageCount > 0 && previewRenderingComplete && previewPageNumbers.length > expectedPageCount;
+  $: hasMissingPreviewPages =
+    expectedPageCount > 0 &&
+    previewRenderingComplete &&
+    orderedPreviewPageNumbers.length < expectedPageCount;
+  $: hasUnresolvedPageMismatch =
+    expectedPageCount > 0 &&
+    previewRenderingComplete &&
+    orderedPreviewPageNumbers.length !== expectedPageCount;
+  $: step1PageMismatchMessage =
+    expectedPageCount <= 0 || !previewRenderingComplete
+      ? null
+      : orderedPreviewPageNumbers.length < expectedPageCount
+        ? `This submission has ${orderedPreviewPageNumbers.length} selected page${orderedPreviewPageNumbers.length === 1 ? '' : 's'}; the template has ${expectedPageCount}. Replace or rescan the PDF before finalizing intake.`
+        : previewPageNumbers.length > expectedPageCount
+          ? orderedPreviewPageNumbers.length === expectedPageCount
+            ? `This submission has ${previewPageNumbers.length} pages; the template has ${expectedPageCount}. Excluded pages will be left out of the prepared submission.`
+            : `This submission has ${previewPageNumbers.length} pages; the template has ${expectedPageCount}. Exclude extra pages before finalizing.`
+          : null;
   $: previewRenderingComplete =
     !activeItem?.previewProgress ||
     (activeItem.previewProgress.total !== null &&
@@ -456,29 +484,66 @@
     dragOverPreviewPageNumber = null;
   }
 
-  function allowPreviewPageDrop(event: DragEvent, pageNumber: number): void {
-    if (!previewPageIsRendered(pageNumber)) return;
-    event.preventDefault();
-    if (draggedPreviewPageNumber !== null && draggedPreviewPageNumber !== pageNumber) {
-      dragOverPreviewPageNumber = pageNumber;
+  function canDragPreviewPage(pageNumber: number): boolean {
+    return previewPageIsRendered(pageNumber) && !pageIsExcluded(pageNumber);
+  }
+
+  function beginPreviewPagePointerDrag(event: PointerEvent, pageNumber: number): void {
+    if (event.button !== 0 || !canDragPreviewPage(pageNumber)) return;
+    startPreviewPageDrag(pageNumber);
+  }
+
+  function previewPagePointerEnter(pageNumber: number): void {
+    if (
+      draggedPreviewPageNumber === null ||
+      draggedPreviewPageNumber === pageNumber ||
+      !canDragPreviewPage(pageNumber)
+    ) {
+      return;
+    }
+    dragOverPreviewPageNumber = pageNumber;
+  }
+
+  function previewPagePointerLeave(pageNumber: number): void {
+    if (dragOverPreviewPageNumber === pageNumber) {
+      dragOverPreviewPageNumber = null;
     }
   }
 
-  function dropPreviewPage(pageNumber: number): void {
-    if (!activeItem || draggedPreviewPageNumber === null || !previewPageIsRendered(pageNumber)) return;
+  function finishPreviewPagePointerDrag(): void {
+    if (draggedPreviewPageNumber === null) return;
+    reorderDraggedPreviewPage(dragOverPreviewPageNumber);
+    endPreviewPageDrag();
+  }
+
+  function reorderDraggedPreviewPage(targetPageNumber: number | null): boolean {
+    if (
+      !activeItem ||
+      draggedPreviewPageNumber === null ||
+      targetPageNumber === null ||
+      !previewPageIsRendered(targetPageNumber)
+    ) {
+      return false;
+    }
     const currentOrder = normalizeDesiredPageOrder(
       previewPageNumbers,
       activeItem.desiredPageOrder
     );
-    const nextOrder = reorderPageNumbers(currentOrder, draggedPreviewPageNumber, pageNumber);
+    if (
+      draggedPreviewPageNumber === targetPageNumber ||
+      !currentOrder.includes(draggedPreviewPageNumber) ||
+      !currentOrder.includes(targetPageNumber)
+    ) {
+      return false;
+    }
+    const nextOrder = reorderPageNumbers(currentOrder, draggedPreviewPageNumber, targetPageNumber);
     updateQueueItem(activeItem.id, { desiredPageOrder: nextOrder });
-    dragOverPreviewPageNumber = null;
-    draggedPreviewPageNumber = null;
+    return true;
   }
 
   function endPreviewPageDrag(): void {
-    draggedPreviewPageNumber = null;
     dragOverPreviewPageNumber = null;
+    draggedPreviewPageNumber = null;
   }
 
   async function beginItem(id: string) {
@@ -864,6 +929,53 @@
     activeRegionIndex = nextIndex >= 0 ? nextIndex : 0;
   }
 
+  function previewPageNumbersForItem(item: QueueItem): number[] {
+    const rendered = item.previewPages?.map((page) => page.pageNumber) ?? [];
+    return item.previewProgress?.total
+      ? previewPagesFromTotal(item.previewProgress.total)
+      : rendered;
+  }
+
+  function includedPageNumbersForItem(item: QueueItem): number[] {
+    return normalizeDesiredPageOrder(previewPageNumbersForItem(item), item.desiredPageOrder);
+  }
+
+  function pageIsExcluded(pageNumber: number): boolean {
+    return excludedPreviewPageNumbers.includes(pageNumber);
+  }
+
+  function canTogglePreviewPage(pageNumber: number): boolean {
+    if (!activeItem || !previewPageIsRendered(pageNumber) || !hasExtraPreviewPages) return false;
+    return pageIsExcluded(pageNumber) || orderedPreviewPageNumbers.length > expectedPageCount;
+  }
+
+  function canDeleteActivePreviewPage(): boolean {
+    if (!activePreview) return false;
+    return (
+      hasExtraPreviewPages &&
+      !pageIsExcluded(activePreview.pageNumber) &&
+      orderedPreviewPageNumbers.length > expectedPageCount &&
+      canTogglePreviewPage(activePreview.pageNumber)
+    );
+  }
+
+  function deleteActivePreviewPage(): void {
+    if (!activePreview || !canDeleteActivePreviewPage()) return;
+    togglePreviewPageIncluded(activePreview.pageNumber);
+  }
+
+  function togglePreviewPageIncluded(pageNumber: number): void {
+    if (!activeItem || !canTogglePreviewPage(pageNumber)) return;
+    const currentOrder = normalizeDesiredPageOrder(previewPageNumbers, activeItem.desiredPageOrder);
+    const nextOrder = currentOrder.includes(pageNumber)
+      ? currentOrder.filter((candidate) => candidate !== pageNumber)
+      : [...currentOrder, pageNumber];
+    updateQueueItem(activeItem.id, { desiredPageOrder: nextOrder });
+    if (!nextOrder.includes(activePreviewPageNumber)) {
+      activePreviewPageNumber = nextOrder[0] ?? pageNumber;
+    }
+  }
+
   function addRedactionRegion() {
     if (!activeItem || !activePreview) return;
     const w = activePreview.pngWidthPx;
@@ -1035,6 +1147,9 @@
       return sharedRosterMessage ??
         'The course roster is not ready yet. Wait for it to finish loading before preparing this submission.';
     }
+    if (expectedPageCount > 0 && includedPageNumbersForItem(item).length < expectedPageCount) {
+      return 'This submission has fewer selected pages than the template. Replace or rescan the PDF before finalizing intake.';
+    }
     return null;
   }
 
@@ -1044,7 +1159,7 @@
       courseId: lmsLinked ? courseIdTrimmed : null,
       canvasUserId: lmsLinked ? item.selectedUserId! : null,
       localStudentName: lmsLinked ? null : localStudentName,
-      desiredPageOrder: normalizeDesiredPageOrder(previewPageNumbers, item.desiredPageOrder),
+      desiredPageOrder: includedPageNumbersForItem(item),
       redactionRegionsPx: redactionRegionsForFinalize(item),
       rasterSizesByPage: rasterSizesForFinalize(item)
     };
@@ -1059,6 +1174,11 @@
     if (activeId) void beginItem(activeId);
   }
 </script>
+
+<svelte:window
+  onpointerup={finishPreviewPagePointerDrag}
+  onpointercancel={endPreviewPageDrag}
+/>
 
 <section
   class="bg-surface-panel px-8 py-2"
@@ -1151,49 +1271,49 @@
             <p class="mt-4 shell-body text-workspace-text-secondary">
               The first region is used to identify the student name; any additional regions are privacy masks. Use the page pills to place or adjust regions on every sheet of the scan. Drag those same page pills to set the final page order; each pill keeps its original page label so changes stay visible.
             </p>
+            {#if step1PageMismatchMessage}
+              <InlineMessage
+                tone={hasMissingPreviewPages ? 'error' : 'warning'}
+                class="mt-4 rounded-2xl px-4 py-3"
+              >
+                {step1PageMismatchMessage}
+              </InlineMessage>
+            {/if}
             <div class="mt-6 grid gap-6 lg:grid-cols-2">
               {#if activePreview}
                 <div class="min-w-0">
                   <div class="flex flex-wrap items-center justify-between gap-3">
                     <div class="flex flex-wrap items-center gap-2">
-                      {#each orderedPreviewPageNumbers as pageNumber (pageNumber)}
+                      {#each displayedPreviewPageNumbers as pageNumber (pageNumber)}
                       {@const pageRendered = renderedPreviewPageNumbers.includes(pageNumber)}
+                      {@const excluded = excludedPreviewPageNumbers.includes(pageNumber)}
                       <button
-                        class={`inline-flex h-9 items-center gap-2 rounded-xl border px-3 text-xs font-medium transition-colors ${
-                          pageNumber === activePreviewPageNumber
-                            ? 'border-workspace-border-strong bg-workspace-sidebar-active text-workspace-text-primary'
-                            : dragOverPreviewPageNumber === pageNumber
-                              ? 'border-[var(--message-info-border)] bg-[var(--message-info-bg)]/30 text-workspace-text-primary'
-                              : 'border-workspace-border bg-card/20 text-workspace-text-secondary hover:bg-muted/20'
-                        } disabled:cursor-not-allowed disabled:opacity-50`}
+                        class={`inline-flex h-9 select-none items-center gap-2 rounded-xl border px-3 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                          excluded
+                            ? 'border-workspace-border bg-card/10 text-workspace-text-muted opacity-75 line-through hover:bg-muted/20'
+                            : pageNumber === activePreviewPageNumber
+                              ? 'border-workspace-border-strong bg-workspace-sidebar-active text-workspace-text-primary'
+                              : dragOverPreviewPageNumber === pageNumber
+                                ? 'border-[var(--message-info-border)] bg-[var(--message-info-bg)]/30 text-workspace-text-primary'
+                                : 'border-workspace-border bg-card/20 text-workspace-text-secondary hover:bg-muted/20'
+                        }`}
                         type="button"
-                        draggable={pageRendered}
                         disabled={!pageRendered}
-                        aria-label={`Page ${pageNumber}`}
-                        ondragstart={(event) => {
-                          if (!pageRendered) return;
-                          startPreviewPageDrag(pageNumber);
-                          event.dataTransfer?.setData('text/plain', String(pageNumber));
-                          if (event.dataTransfer) {
-                            event.dataTransfer.effectAllowed = 'move';
-                          }
-                        }}
-                        ondragover={(event) => allowPreviewPageDrop(event, pageNumber)}
-                        ondragleave={() => {
-                          if (dragOverPreviewPageNumber === pageNumber) {
-                            dragOverPreviewPageNumber = null;
-                          }
-                        }}
-                        ondrop={(event) => {
-                          event.preventDefault();
-                          dropPreviewPage(pageNumber);
-                        }}
-                        ondragend={() => endPreviewPageDrag()}
+                        aria-label={excluded ? `Restore page ${pageNumber}` : `Page ${pageNumber}`}
+                        title={excluded ? `Click to restore page ${pageNumber}` : undefined}
+                        onpointerdown={(event) => beginPreviewPagePointerDrag(event, pageNumber)}
+                        onpointerenter={() => previewPagePointerEnter(pageNumber)}
+                        onpointerleave={() => previewPagePointerLeave(pageNumber)}
                         onclick={() => {
-                          if (pageRendered) selectPreviewPage(pageNumber);
+                          if (!pageRendered) return;
+                          if (excluded) {
+                            togglePreviewPageIncluded(pageNumber);
+                            return;
+                          }
+                          selectPreviewPage(pageNumber);
                         }}
                       >
-                        <span class="cursor-grab text-workspace-text-muted" aria-hidden="true">::</span>
+                        <span class={excluded ? 'text-workspace-text-muted' : 'cursor-grab text-workspace-text-muted'} aria-hidden="true">::</span>
                         <span>Page {pageNumber}</span>
                       </button>
                       {/each}
@@ -1226,9 +1346,21 @@
                     >
                       Add Redaction
                     </DesktopButton>
-                    <DesktopButton size="compact" type="button" onclick={() => void confirmRegions()} disabled={!activePreview || !previewRenderingComplete}>
-                      {previewRenderingComplete ? 'Confirm for All Pages' : `Wait to Confirm - ${previewRenderingPercent}%`}
-                    </DesktopButton>
+                    {#if hasUnresolvedPageMismatch}
+                      <DesktopButton
+                        size="compact"
+                        type="button"
+                        variant="destructive"
+                        onclick={deleteActivePreviewPage}
+                        disabled={!canDeleteActivePreviewPage()}
+                      >
+                        Delete Page {activePreview.pageNumber}
+                      </DesktopButton>
+                    {:else}
+                      <DesktopButton size="compact" type="button" onclick={() => void confirmRegions()} disabled={!activePreview || !previewRenderingComplete}>
+                        {previewRenderingComplete ? 'Confirm for All Pages' : `Wait to Confirm - ${previewRenderingPercent}%`}
+                      </DesktopButton>
+                    {/if}
                   </div>
                   {#if activePreview && visibleRectEntries.length > 0}
                     <div class="mt-3 space-y-3">
@@ -1473,6 +1605,7 @@
                   type="button"
                   disabled={
                     !activeItem.confirmed ||
+                    hasMissingPreviewPages ||
                     (lmsLinked
                       ? !activeItem.selectedUserId
                       : !(activeItem.localStudentName?.trim()))

@@ -36,13 +36,14 @@ def _ordered_rendered_pages(
         raise ValueError(
             "scans.ingest expected rendered PDF pages to cover a contiguous 1-based page range."
         )
-    if sorted(page_order) != expected:
-        raise ValueError("page_order must contain every source PDF page number exactly once.")
+    selected = [int(page_number) for page_number in page_order]
+    if any(page_number not in expected for page_number in selected):
+        raise ValueError("page_order must contain valid source PDF page numbers.")
 
     rendered_by_page_number = {
         int(rendered_page.page_number): rendered_page for rendered_page in rendered_pages
     }
-    return [rendered_by_page_number[page_number] for page_number in page_order]
+    return [rendered_by_page_number[page_number] for page_number in selected]
 
 
 def handle_scans_ingest(ctx: CommandContext, request: ScansIngestRequest) -> CommandOutcome:

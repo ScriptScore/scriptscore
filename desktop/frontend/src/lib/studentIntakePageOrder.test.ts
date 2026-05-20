@@ -12,8 +12,12 @@ describe('student intake page order helpers', () => {
     expect(normalizeDesiredPageOrder([1, 2, 3], [3, 1, 2])).toEqual([3, 1, 2]);
   });
 
-  it('falls back when desired order does not match the available page set', () => {
-    expect(normalizeDesiredPageOrder([1, 2, 3], [3, 1])).toEqual([1, 2, 3]);
+  it('keeps a partial selected page order', () => {
+    expect(normalizeDesiredPageOrder([1, 2, 3], [3, 1])).toEqual([3, 1]);
+  });
+
+  it('ignores invalid desired pages without restoring excluded pages', () => {
+    expect(normalizeDesiredPageOrder([1, 2, 3], [3, 99, 3, 0, 1])).toEqual([3, 1]);
   });
 
   it('reorders page numbers by drag target', () => {
