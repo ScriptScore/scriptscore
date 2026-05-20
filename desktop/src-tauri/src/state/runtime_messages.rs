@@ -303,6 +303,8 @@ mod tests {
                 last_runtime_error: None,
                 worker: None,
                 app_handle: None,
+                resource_dir_override: None,
+                worker_extra_env: Vec::new(),
                 scheduler: RuntimeScheduler::default(),
                 host_workflow_children: Default::default(),
                 intake_pipeline_active: false,

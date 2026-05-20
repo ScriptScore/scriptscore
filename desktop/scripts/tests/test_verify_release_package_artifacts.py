@@ -105,6 +105,61 @@ class VerifyReleasePackageArtifactsTests(unittest.TestCase):
                     env["LD_LIBRARY_PATH"],
                 )
             self.assertNotIn("PYTHONHOME", env)
+            self.assertNotIn("releaseSmoke", summary)
+
+    def test_release_smoke_command_targets_headless_document_mode(self) -> None:
+        command = MODULE.release_smoke_command(
+            Path("/tmp/ScriptScore"),
+            Path("/tmp/summary.json"),
+            Path("/tmp/resources"),
+        )
+
+        self.assertEqual(command[0], "/tmp/ScriptScore")
+        self.assertIn("--release-smoke", command)
+        self.assertIn("--release-smoke-output", command)
+        self.assertIn("--release-smoke-resource-dir", command)
+        self.assertIn("document", command)
+
+    def test_release_smoke_skips_when_no_packaged_executable_exists(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            payload_root = Path(tmp_dir) / "payload"
+            self._write_payload_layout(payload_root)
+
+            with mock.patch.dict(MODULE.os.environ, {"SCRIPTSCORE_RELEASE_SMOKE": "1"}):
+                summary = MODULE.run_packaged_release_smoke(
+                    payload_root,
+                    payload_root / "app" / "resources",
+                )
+
+            self.assertEqual(summary["status"], "skipped")
+
+    def test_validate_payload_root_runs_opt_in_release_smoke(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            payload_root = Path(tmp_dir) / "payload"
+            self._write_payload_layout(payload_root)
+            app_executable = payload_root / "app" / "ScriptScore"
+            app_executable.write_text("#!/bin/sh\n", encoding="utf-8")
+            app_executable.chmod(0o755)
+
+            def fake_run(*args, **kwargs):
+                command = args[0]
+                if "--release-smoke-output" not in command:
+                    return subprocess.CompletedProcess(args=command, returncode=0)
+                output_path = Path(command[command.index("--release-smoke-output") + 1])
+                output_path.write_text(
+                    json.dumps({"status": "passed", "mode": "document"}),
+                    encoding="utf-8",
+                )
+                return subprocess.CompletedProcess(args=command, returncode=0)
+
+            with (
+                mock.patch.dict(MODULE.os.environ, {"SCRIPTSCORE_RELEASE_SMOKE": "1"}),
+                mock.patch.object(MODULE.subprocess, "run", side_effect=fake_run),
+            ):
+                summary = MODULE.validate_payload_root(payload_root)
+
+            self.assertEqual(summary["releaseSmoke"]["status"], "passed")
+            self.assertEqual(summary["releaseSmoke"]["mode"], "document")
 
     def test_validate_payload_root_rejects_missing_runtime(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

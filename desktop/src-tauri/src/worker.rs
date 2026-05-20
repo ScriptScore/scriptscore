@@ -191,8 +191,20 @@ impl WorkerClient {
         bundled_resource_dir: Option<&Path>,
         runtime_source: WorkerRuntimeSource,
     ) -> HostResult<Self> {
+        Self::launch_with_extra_env(bundled_resource_dir, runtime_source, [])
+    }
+
+    pub fn launch_with_extra_env<I>(
+        bundled_resource_dir: Option<&Path>,
+        runtime_source: WorkerRuntimeSource,
+        extra_env: I,
+    ) -> HostResult<Self>
+    where
+        I: IntoIterator<Item = (std::ffi::OsString, std::ffi::OsString)>,
+    {
         cleanup_orphaned_worker_markers();
-        let launch_spec = resolve_worker_launch_spec(bundled_resource_dir, runtime_source)?;
+        let mut launch_spec = resolve_worker_launch_spec(bundled_resource_dir, runtime_source)?;
+        launch_spec.extra_env.extend(extra_env);
 
         #[cfg(windows)]
         {
