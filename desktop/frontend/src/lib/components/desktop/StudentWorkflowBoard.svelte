@@ -99,53 +99,56 @@
   }
 </script>
 
-<div class="flex items-start justify-between gap-4">
-  <div class="min-w-0">
-    <div class="text-base font-semibold text-workspace-text-primary">Exam Workflow</div>
-    <div class="text-sm text-workspace-text-muted">
-      {courseCode} · {displayName} · {canonicalReadyCount} submission{canonicalReadyCount === 1 ? '' : 's'} ready
+<div class="flex min-h-0 flex-1 flex-col" aria-label="Student workflow board">
+  <div class="flex shrink-0 items-start justify-between gap-4">
+    <div class="min-w-0">
+      <div class="text-base font-semibold text-workspace-text-primary">Exam Workflow</div>
+      <div class="text-sm text-workspace-text-muted">
+        {courseCode} · {displayName} · {canonicalReadyCount} submission{canonicalReadyCount === 1 ? '' : 's'} ready
+      </div>
+    </div>
+    <div class="flex shrink-0 items-center gap-2">
+      {#if recoveryAvailable}
+        <DesktopButton
+          variant="secondary"
+          disabled={recoveryBusy || onRecoverWorkflow === null}
+          onclick={() => void onRecoverWorkflow?.()}
+        >
+          {recoveryBusy ? 'Recovering…' : 'Recover Workflow'}
+        </DesktopButton>
+      {:else if busyActionLabel !== null}
+        <DesktopButton
+          variant="secondary"
+          disabled={stopWorkflowBusy || onStopWorkflow === null}
+          onclick={() => void onStopWorkflow?.()}
+        >
+          {stopWorkflowBusy ? 'Stopping…' : 'Stop Workflow'}
+        </DesktopButton>
+      {/if}
+      <DesktopButton
+        variant="secondary"
+        disabled={busyActionLabel !== null || canonicalReadyRows.length === 0}
+        onclick={handleBeginWorkflow}
+      >
+        {busyActionLabel ?? 'Begin Workflow'}
+      </DesktopButton>
     </div>
   </div>
-  <div class="flex shrink-0 items-center gap-2">
-    {#if recoveryAvailable}
-      <DesktopButton
-        variant="secondary"
-        disabled={recoveryBusy || onRecoverWorkflow === null}
-        onclick={() => void onRecoverWorkflow?.()}
-      >
-        {recoveryBusy ? 'Recovering…' : 'Recover Workflow'}
-      </DesktopButton>
-    {:else if busyActionLabel !== null}
-      <DesktopButton
-        variant="secondary"
-        disabled={stopWorkflowBusy || onStopWorkflow === null}
-        onclick={() => void onStopWorkflow?.()}
-      >
-        {stopWorkflowBusy ? 'Stopping…' : 'Stop Workflow'}
-      </DesktopButton>
-    {/if}
-    <DesktopButton
-      variant="secondary"
-      disabled={busyActionLabel !== null || canonicalReadyRows.length === 0}
-      onclick={handleBeginWorkflow}
+
+  {#if recoveryAvailable}
+    <div
+      class="mt-4 shrink-0 rounded-xl border border-message-warning-border bg-message-warning-bg px-4 py-3 text-sm text-message-warning-text"
+      role="status"
     >
-      {busyActionLabel ?? 'Begin Workflow'}
-    </DesktopButton>
-  </div>
-</div>
+      This workflow is marked running, but the desktop runtime has no active job. Recover it to
+      unlock review and restart controls.
+    </div>
+  {/if}
 
-{#if recoveryAvailable}
   <div
-    class="mt-4 rounded-xl border border-message-warning-border bg-message-warning-bg px-4 py-3 text-sm text-message-warning-text"
-    role="status"
+    class="mt-5 flex min-h-0 flex-1 flex-col overflow-hidden rounded-3xl border border-workspace-border bg-surface-card-subtle"
   >
-    This workflow is marked running, but the desktop runtime has no active job. Recover it to
-    unlock review and restart controls.
-  </div>
-{/if}
-
-<div class="mt-5 overflow-hidden rounded-3xl border border-workspace-border bg-surface-card-subtle">
-  <div class="flex items-stretch">
+  <div class="flex shrink-0 items-stretch">
     <div class="flex min-w-0 flex-1 items-center justify-center gap-3 bg-surface-card-control px-6 py-5">
       <div class="text-xs font-semibold uppercase tracking-wide text-workspace-text-muted">Prepared</div>
       <div class="text-2xl font-semibold text-workspace-text-primary">{intakeComplete}</div>
@@ -167,8 +170,8 @@
     </div>
   </div>
 
-  <div class="border-t border-workspace-border px-6 py-5">
-    <div class="flex flex-col items-center justify-center pb-4 text-center">
+  <div class="flex min-h-0 flex-1 flex-col border-t border-workspace-border px-6 py-5">
+    <div class="flex shrink-0 flex-col items-center justify-center pb-4 text-center">
       <IconButton
         variant="ghost"
         size="default"
@@ -188,7 +191,7 @@
       </div>
     </div>
 
-    <div class="mt-5 flex items-center justify-end gap-4">
+    <div class="mt-5 flex shrink-0 items-center justify-end gap-4">
       {#if attentionItems.length > 0}
         <StatusBadge tone="warning" class="gap-2">
           <HugeiconsIcon icon={AlertCircleIcon} size={14} strokeWidth={1.8} aria-hidden="true" />
@@ -197,13 +200,16 @@
       {/if}
     </div>
 
-    <div class="mt-3">
+    <div class="mt-3 flex min-h-0 flex-1 flex-col">
       {#if canonicalReadyRows.length === 0}
         <div class="py-2 text-sm text-workspace-text-secondary">
           No submissions are ready yet. Upload a student PDF to prepare it for grading.
         </div>
       {:else}
-        <div class="max-h-[30rem] overflow-y-auto">
+        <div
+          class="min-h-0 flex-1 overflow-y-auto pb-1 pr-1"
+          aria-label="Student workflow submissions"
+        >
           <div class="grid grid-cols-[repeat(auto-fill,minmax(13rem,1fr))] gap-3">
             {#each workflowRows as row (row.studentRef)}
               <button
@@ -246,5 +252,6 @@
         </div>
       {/if}
     </div>
+  </div>
   </div>
 </div>

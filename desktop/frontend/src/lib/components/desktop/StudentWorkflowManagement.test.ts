@@ -305,6 +305,23 @@ describe('StudentWorkflowBoard workflow trigger', () => {
     expect(screen.queryByText('draft grading ready')).toBeNull();
   });
 
+  it('uses the available pane height as the student card scroll container', () => {
+    renderBoard({
+      canonicalReadyRows: Array.from({ length: 18 }, (_, index) =>
+        workflowRow(`student_${index + 1}`, `Student ${index + 1}`, 'waiting')
+      ),
+      canonicalReadyCount: 18
+    });
+
+    expect(screen.getByLabelText('Student workflow board').className).toContain('min-h-0');
+
+    const submissionsRegion = screen.getByLabelText('Student workflow submissions');
+    expect(submissionsRegion.className).toContain('min-h-0');
+    expect(submissionsRegion.className).toContain('flex-1');
+    expect(submissionsRegion.className).toContain('overflow-y-auto');
+    expect(screen.getByRole('button', { name: 'Open Student 18 workflow' })).toBeTruthy();
+  });
+
   it('keeps compact labels when scoped progress details are available', () => {
     renderBoard({
       canonicalReadyRows: [

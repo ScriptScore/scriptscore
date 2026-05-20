@@ -1140,7 +1140,7 @@
   />
 
   <section
-    class={`flex min-h-0 min-w-0 flex-1 flex-col bg-surface-panel px-6 pb-6 ${compactReviewHeader ? 'pt-2' : 'pt-6'} ${currentView === 'intake' ? 'overflow-y-auto' : ''}`}
+    class={`flex min-h-0 min-w-0 flex-1 flex-col bg-surface-panel px-6 pb-6 ${compactReviewHeader ? 'pt-2' : 'pt-6'} ${currentView === 'intake' ? 'overflow-y-auto' : 'overflow-hidden'}`}
   >
     {#if currentView === 'intake'}
       <div class="mb-4 flex items-center gap-4">
