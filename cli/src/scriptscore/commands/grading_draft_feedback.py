@@ -25,6 +25,10 @@ _BLANK_LOCAL_FEEDBACK = "No relevant answer provided."
 _DEFAULT_FALLBACK_FEEDBACK = "Needs instructor review."
 
 
+def _row_count_label(count: int) -> str:
+    return f"{count} row{'s' if count != 1 else ''}"
+
+
 def _prompt_variables(request_row: FeedbackRequest) -> dict[str, str]:
     return {
         "subject": request_row.subject,
@@ -208,7 +212,7 @@ def handle_grading_draft_feedback(
                     code="feedback_default_fallback",
                     message=(
                         "Feedback drafting used the default fallback for "
-                        f"{fallback_count} row{'s' if fallback_count != 1 else ''}."
+                        f"{_row_count_label(fallback_count)}."
                     ),
                     scope={"row_count": fallback_count},
                 )

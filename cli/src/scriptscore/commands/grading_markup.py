@@ -33,6 +33,10 @@ from scriptscore.prompts import PromptResponseError
 from scriptscore.runtime import CommandContext, CommandOutcome, CommandSpec
 
 
+def _row_count_label(count: int) -> str:
+    return f"{count} row{'s' if count != 1 else ''}"
+
+
 @dataclass(frozen=True)
 class MarkupPromptRun:
     """One non-retrying markup prompt execution."""
@@ -365,7 +369,7 @@ def handle_grading_markup(ctx: CommandContext, request: GradingMarkupRequest) ->
                     code="markup_fallback",
                     message=(
                         "Markup returned no instructor highlights for "
-                        f"{fallback_count} row{'s' if fallback_count != 1 else ''}."
+                        f"{_row_count_label(fallback_count)}."
                     ),
                     scope={"row_count": fallback_count},
                 )

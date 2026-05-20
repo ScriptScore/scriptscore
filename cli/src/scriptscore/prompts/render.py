@@ -13,7 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from scriptscore.contracts import ErrorCategory, ScriptscoreError
 from scriptscore.prompts.loader import PromptDefinition
 
-TOKEN_PATTERN = re.compile(r"\{\{([a-zA-Z0-9_]+)\}\}")
+TOKEN_PATTERN = re.compile(r"\{\{([A-Za-z0-9_]+)\}\}")
 
 
 class PromptRenderError(ScriptscoreError):

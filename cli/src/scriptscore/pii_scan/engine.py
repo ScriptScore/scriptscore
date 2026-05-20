@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import math
 import statistics
+from dataclasses import dataclass
 from pathlib import Path
 from time import perf_counter
 from typing import Protocol, cast
@@ -33,6 +34,50 @@ class TokenReader(Protocol):
     def read(self, image: object) -> ReadResult: ...
 
 
+@dataclass(frozen=True)
+class _HandwritingMetrics:
+    backend_name: str
+    presence: float
+    alpha_word_count: int
+    mean_confidence: float
+    low_confidence_share: float
+    height_variation: float
+    average_slope: float
+    overall_fragment_density: float
+    lower_dark_share: float
+    lower_fragment_density: float
+    max_y_share: float
+    answer_band_dark_share: float
+    answer_band_fragment_density: float
+    answer_band_word_count: int
+    answer_band_alpha_chars: int
+    widest_answer_band_share: float
+    footer_token_count: int
+    prompt_token_count: int
+
+    def as_dict(self) -> dict[str, float | int | str]:
+        return {
+            "backend_name": self.backend_name,
+            "presence": round(self.presence, 4),
+            "alpha_word_count": self.alpha_word_count,
+            "mean_confidence": round(self.mean_confidence, 4),
+            "low_conf_ratio": round(self.low_confidence_share, 4),
+            "height_cv": round(self.height_variation, 4),
+            "angle_mean": round(self.average_slope, 4),
+            "component_density": round(self.overall_fragment_density, 4),
+            "lower_dark_ratio": round(self.lower_dark_share, 4),
+            "lower_component_density": round(self.lower_fragment_density, 4),
+            "max_y_ratio": round(self.max_y_share, 4),
+            "answer_band_dark_ratio": round(self.answer_band_dark_share, 4),
+            "answer_band_component_density": round(self.answer_band_fragment_density, 4),
+            "answer_band_word_count": self.answer_band_word_count,
+            "answer_band_alpha_chars": self.answer_band_alpha_chars,
+            "max_answer_band_width_ratio": round(self.widest_answer_band_share, 4),
+            "footer_word_count": self.footer_token_count,
+            "top_prompt_word_count": self.prompt_token_count,
+        }
+
+
 def _fragment_density(binary_mask: object) -> float:
     mask = cast(np.ndarray, binary_mask)
     component_total, _labels, stats, _centroids = cv2.connectedComponentsWithStats(
@@ -47,19 +92,16 @@ def _fragment_density(binary_mask: object) -> float:
     return float(fragment_count / max(1.0, (mask.shape[0] * mask.shape[1]) / 10000.0))
 
 
-def _infer_handwriting(
-    raster: RasterBundle,
-    tokens: list[VisionToken],
+def _alpha_tokens(tokens: list[VisionToken]) -> list[VisionToken]:
+    return [token for token in tokens if any(character.isalpha() for character in token.text)]
+
+
+def _no_alpha_signal(
     *,
+    structure_score: float,
     backend_name: str,
 ) -> WritingSignal:
-    reasons: list[str] = []
-    alpha_tokens = [
-        token for token in tokens if any(character.isalpha() for character in token.text)
-    ]
-    structure_score = text_structure_score(raster)
-
-    if not alpha_tokens and structure_score < 0.08:
+    if structure_score < 0.08:
         return WritingSignal(
             state="false",
             score=0.0,
@@ -70,255 +112,343 @@ def _infer_handwriting(
                 "backend_name": backend_name,
             },
         )
-
-    if not alpha_tokens:
-        return WritingSignal(
-            state="unknown",
-            score=round(structure_score, 3),
-            reasons=["text-like structure exists but OCR did not recover readable words"],
-            metrics={
-                "presence": round(structure_score, 4),
-                "alpha_word_count": 0,
-                "backend_name": backend_name,
-            },
-        )
-
-    confidences = [token.confidence for token in alpha_tokens]
-    heights = [token.height for token in alpha_tokens]
-    mean_confidence = statistics.fmean(confidences)
-    low_confidence_share = sum(1 for confidence in confidences if confidence < 0.55) / len(
-        confidences
+    return WritingSignal(
+        state="unknown",
+        score=round(structure_score, 3),
+        reasons=["text-like structure exists but OCR did not recover readable words"],
+        metrics={
+            "presence": round(structure_score, 4),
+            "alpha_word_count": 0,
+            "backend_name": backend_name,
+        },
     )
-    height_variation = statistics.pstdev(heights) / max(1.0, statistics.fmean(heights))
 
+
+def _average_token_slope(tokens: list[VisionToken]) -> float:
     slopes: list[float] = []
-    for token in alpha_tokens:
+    for token in tokens:
         delta_x = max(1, token.corners[1][0] - token.corners[0][0])
         delta_y = token.corners[1][1] - token.corners[0][1]
         slopes.append(abs(math.degrees(math.atan2(delta_y, delta_x))))
-    average_slope = statistics.fmean(slopes)
+    return statistics.fmean(slopes)
 
+
+def _dark_share(mask: object) -> float:
+    array = cast(np.ndarray, mask)
+    return float((array < 160).sum()) / float(array.size) if array.size else 0.0
+
+
+def _handwriting_metrics(
+    raster: RasterBundle,
+    alpha_tokens: list[VisionToken],
+    *,
+    backend_name: str,
+    structure_score: float,
+) -> _HandwritingMetrics:
+    confidences = [token.confidence for token in alpha_tokens]
+    heights = [token.height for token in alpha_tokens]
     grayscale = cast(np.ndarray, raster.grayscale)
     binary_mask = cast(np.ndarray, raster.binary_mask)
-    overall_fragment_density = _fragment_density(binary_mask)
-
     lower_start = int(grayscale.shape[0] * 0.45)
     lower_mask = binary_mask[lower_start:, :]
-    lower_dark_share = (
-        float((lower_mask < 160).sum()) / float(lower_mask.size) if lower_mask.size else 0.0
-    )
-    lower_fragment_density = _fragment_density(lower_mask)
-    max_y_share = max((token.bottom for token in alpha_tokens), default=0) / max(
-        1.0,
-        grayscale.shape[0],
-    )
-
     answer_band_start = int(grayscale.shape[0] * 0.19)
     answer_band_end = int(grayscale.shape[0] * 0.82)
     answer_band_mask = binary_mask[answer_band_start:answer_band_end, :]
-    answer_band_dark_share = (
-        float((answer_band_mask < 160).sum()) / float(answer_band_mask.size)
-        if answer_band_mask.size
-        else 0.0
-    )
-    answer_band_fragment_density = (
-        _fragment_density(answer_band_mask) if answer_band_mask.size else 0.0
-    )
     answer_band_tokens = [
         token
         for token in alpha_tokens
         if 0.19 <= (token.center_y / max(1.0, grayscale.shape[0])) <= 0.82
     ]
-    answer_band_alpha_chars = sum(
-        sum(1 for character in token.text if character.isalpha()) for token in answer_band_tokens
-    )
-    widest_answer_band_share = max(
-        (token.width / max(1.0, grayscale.shape[1]) for token in answer_band_tokens),
-        default=0.0,
-    )
-    footer_token_count = sum(
-        1 for token in alpha_tokens if (token.center_y / max(1.0, grayscale.shape[0])) > 0.82
-    )
-    prompt_token_count = sum(
-        1 for token in alpha_tokens if (token.center_y / max(1.0, grayscale.shape[0])) < 0.19
+    return _HandwritingMetrics(
+        backend_name=backend_name,
+        presence=structure_score,
+        alpha_word_count=len(alpha_tokens),
+        mean_confidence=statistics.fmean(confidences),
+        low_confidence_share=sum(1 for confidence in confidences if confidence < 0.55)
+        / len(confidences),
+        height_variation=statistics.pstdev(heights) / max(1.0, statistics.fmean(heights)),
+        average_slope=_average_token_slope(alpha_tokens),
+        overall_fragment_density=_fragment_density(binary_mask),
+        lower_dark_share=_dark_share(lower_mask),
+        lower_fragment_density=_fragment_density(lower_mask),
+        max_y_share=max((token.bottom for token in alpha_tokens), default=0)
+        / max(1.0, grayscale.shape[0]),
+        answer_band_dark_share=_dark_share(answer_band_mask),
+        answer_band_fragment_density=_fragment_density(answer_band_mask)
+        if answer_band_mask.size
+        else 0.0,
+        answer_band_word_count=len(answer_band_tokens),
+        answer_band_alpha_chars=sum(
+            sum(1 for character in token.text if character.isalpha())
+            for token in answer_band_tokens
+        ),
+        widest_answer_band_share=max(
+            (token.width / max(1.0, grayscale.shape[1]) for token in answer_band_tokens),
+            default=0.0,
+        ),
+        footer_token_count=sum(
+            1 for token in alpha_tokens if (token.center_y / max(1.0, grayscale.shape[0])) > 0.82
+        ),
+        prompt_token_count=sum(
+            1 for token in alpha_tokens if (token.center_y / max(1.0, grayscale.shape[0])) < 0.19
+        ),
     )
 
-    metrics = {
-        "backend_name": backend_name,
-        "presence": round(structure_score, 4),
-        "alpha_word_count": len(alpha_tokens),
-        "mean_confidence": round(mean_confidence, 4),
-        "low_conf_ratio": round(low_confidence_share, 4),
-        "height_cv": round(height_variation, 4),
-        "angle_mean": round(average_slope, 4),
-        "component_density": round(overall_fragment_density, 4),
-        "lower_dark_ratio": round(lower_dark_share, 4),
-        "lower_component_density": round(lower_fragment_density, 4),
-        "max_y_ratio": round(max_y_share, 4),
-        "answer_band_dark_ratio": round(answer_band_dark_share, 4),
-        "answer_band_component_density": round(answer_band_fragment_density, 4),
-        "answer_band_word_count": len(answer_band_tokens),
-        "answer_band_alpha_chars": answer_band_alpha_chars,
-        "max_answer_band_width_ratio": round(widest_answer_band_share, 4),
-        "footer_word_count": footer_token_count,
-        "top_prompt_word_count": prompt_token_count,
-    }
 
-    if (
-        mean_confidence >= 0.76
-        and low_confidence_share <= 0.3
-        and lower_dark_share <= 0.02
-        and lower_fragment_density <= 0.35
-        and len(alpha_tokens) >= 6
-        and height_variation <= 0.25
-        and average_slope <= 1.2
+def _false_writing_signal(metrics: _HandwritingMetrics, reasons: list[str]) -> WritingSignal:
+    return WritingSignal(
+        state="false",
+        score=0.0,
+        reasons=reasons,
+        metrics={**metrics.as_dict(), "score": 0.0, "status": "false"},
+    )
+
+
+def _mostly_printed_with_empty_answer_region(metrics: _HandwritingMetrics) -> bool:
+    return (
+        metrics.mean_confidence >= 0.76
+        and metrics.low_confidence_share <= 0.3
+        and metrics.lower_dark_share <= 0.02
+        and metrics.lower_fragment_density <= 0.35
+        and metrics.alpha_word_count >= 6
+        and metrics.height_variation <= 0.25
+        and metrics.average_slope <= 1.2
         and (
-            not answer_band_tokens
+            metrics.answer_band_word_count == 0
             or (
-                len(answer_band_tokens) == 1
+                metrics.answer_band_word_count == 1
                 and (
-                    widest_answer_band_share >= 0.55
-                    or prompt_token_count >= (len(alpha_tokens) - footer_token_count - 1)
+                    metrics.widest_answer_band_share >= 0.55
+                    or metrics.prompt_token_count
+                    >= (metrics.alpha_word_count - metrics.footer_token_count - 1)
                 )
             )
         )
-    ):
-        return WritingSignal(
-            state="false",
-            score=0.0,
-            reasons=[
+    )
+
+
+def _short_top_prompt_only(metrics: _HandwritingMetrics) -> bool:
+    return (
+        metrics.mean_confidence >= 0.72
+        and metrics.low_confidence_share <= 0.15
+        and metrics.lower_dark_share <= 0.01
+        and metrics.lower_fragment_density <= 0.2
+        and metrics.answer_band_word_count == 0
+        and metrics.prompt_token_count <= 2
+        and metrics.alpha_word_count
+        <= (metrics.prompt_token_count + metrics.footer_token_count + 1)
+    )
+
+
+def _printed_prompt_outweighs_answer(metrics: _HandwritingMetrics) -> bool:
+    return (
+        metrics.mean_confidence >= 0.85
+        and metrics.low_confidence_share <= 0.1
+        and metrics.height_variation <= 0.2
+        and metrics.average_slope <= 0.6
+        and metrics.prompt_token_count >= 4
+        and metrics.answer_band_alpha_chars >= 30
+        and metrics.answer_band_word_count <= metrics.prompt_token_count
+        and metrics.lower_dark_share <= 0.015
+        and metrics.lower_fragment_density <= 0.25
+    )
+
+
+def _prompt_footer_without_answer(metrics: _HandwritingMetrics) -> bool:
+    return (
+        metrics.answer_band_alpha_chars < 8
+        and metrics.footer_token_count >= 2
+        and metrics.prompt_token_count >= 3
+        and metrics.lower_dark_share <= 0.01
+        and metrics.lower_fragment_density <= 0.25
+    )
+
+
+def _printed_text_signal(metrics: _HandwritingMetrics) -> WritingSignal | None:
+    if _mostly_printed_with_empty_answer_region(metrics):
+        return _false_writing_signal(
+            metrics,
+            [
                 "OCR is mostly high-confidence printed text",
                 "lower answer region has minimal ink",
             ],
-            metrics={**metrics, "score": 0.0, "status": "false"},
         )
 
-    if (
-        mean_confidence >= 0.72
-        and low_confidence_share <= 0.15
-        and lower_dark_share <= 0.01
-        and lower_fragment_density <= 0.2
-        and not answer_band_tokens
-        and prompt_token_count <= 2
-        and len(alpha_tokens) <= (prompt_token_count + footer_token_count + 1)
-    ):
-        return WritingSignal(
-            state="false",
-            score=0.0,
-            reasons=[
+    if _short_top_prompt_only(metrics):
+        return _false_writing_signal(
+            metrics,
+            [
                 "OCR is mostly high-confidence printed text",
                 "only a short top-of-page prompt is present",
             ],
-            metrics={**metrics, "score": 0.0, "status": "false"},
         )
 
-    if (
-        mean_confidence >= 0.85
-        and low_confidence_share <= 0.1
-        and height_variation <= 0.2
-        and average_slope <= 0.6
-        and prompt_token_count >= 4
-        and answer_band_alpha_chars >= 30
-        and len(answer_band_tokens) <= prompt_token_count
-        and lower_dark_share <= 0.015
-        and lower_fragment_density <= 0.25
-    ):
-        return WritingSignal(
-            state="false",
-            score=0.0,
-            reasons=[
+    if _printed_prompt_outweighs_answer(metrics):
+        return _false_writing_signal(
+            metrics,
+            [
                 "OCR is highly printed-looking across the prompt and answer band",
                 "answer-band text does not outweigh the printed prompt",
             ],
-            metrics={**metrics, "score": 0.0, "status": "false"},
         )
 
-    if (
-        answer_band_alpha_chars < 8
-        and footer_token_count >= 2
-        and prompt_token_count >= 3
-        and lower_dark_share <= 0.01
-        and lower_fragment_density <= 0.25
-    ):
-        return WritingSignal(
-            state="false",
-            score=0.0,
-            reasons=[
+    if _prompt_footer_without_answer(metrics):
+        return _false_writing_signal(
+            metrics,
+            [
                 "OCR is concentrated in the printed prompt and footer",
                 "no answer-band handwriting evidence was recovered",
             ],
-            metrics={**metrics, "score": 0.0, "status": "false"},
         )
+    return None
 
+
+def _add_handwriting_score(
+    reasons: list[str],
+    score: float,
+    condition: bool,
+    increment: float,
+    reason: str,
+) -> float:
+    if condition:
+        reasons.append(reason)
+        return score + increment
+    return score
+
+
+def _score_handwriting(metrics: _HandwritingMetrics) -> tuple[float, list[str]]:
+    reasons: list[str] = []
     score = 0.0
-    if structure_score > 0.12:
-        score += 0.15
-        reasons.append("image contains clear text-like structure")
-    if lower_dark_share > 0.02:
-        score += 0.25
-        reasons.append("lower answer region contains ink")
-    if lower_fragment_density > 0.6:
-        score += 0.25
-        reasons.append("lower answer region contains fragmented components")
-    if answer_band_alpha_chars >= 8:
-        score += 0.1
-        reasons.append("OCR recovered text in the answer band")
-    if len(answer_band_tokens) >= 2:
-        score += 0.05
-        reasons.append("multiple OCR segments appear in the answer band")
-    elif (
-        len(answer_band_tokens) == 1
-        and answer_band_alpha_chars >= 24
-        and widest_answer_band_share <= 0.55
-    ):
-        score += 0.05
-        reasons.append("a compact OCR segment appears in the answer band")
-    if answer_band_dark_share > 0.01:
-        score += 0.1
-        reasons.append("answer band contains ink")
-    if answer_band_fragment_density > 0.6:
-        score += 0.1
-        reasons.append("answer band contains fragmented components")
-    if height_variation > 0.22:
-        score += 0.15
-        reasons.append("token heights vary more than typical printed text")
-    if average_slope > 1.0:
-        score += 0.1
-        reasons.append("text baseline is irregular")
-    if overall_fragment_density > 2.5:
-        score += 0.1
-        reasons.append("stroke fragmentation suggests freehand writing")
-    if mean_confidence < 0.75:
-        score += 0.1
-        reasons.append("OCR confidence is lower than clean printed text")
-    if low_confidence_share > 0.2:
-        score += 0.1
-        reasons.append("many OCR tokens have low confidence")
-    if (
-        len(alpha_tokens) <= 4
-        and structure_score > 0.1
-        and len(answer_band_tokens) >= 1
-        and answer_band_alpha_chars >= 12
-        and height_variation > 0.15
-    ):
-        score += 0.15
-        reasons.append("few OCR segments in the answer band suggest a short handwritten answer")
+    score = _add_handwriting_score(
+        reasons, score, metrics.presence > 0.12, 0.15, "image contains clear text-like structure"
+    )
+    score = _add_handwriting_score(
+        reasons, score, metrics.lower_dark_share > 0.02, 0.25, "lower answer region contains ink"
+    )
+    score = _add_handwriting_score(
+        reasons,
+        score,
+        metrics.lower_fragment_density > 0.6,
+        0.25,
+        "lower answer region contains fragmented components",
+    )
+    score = _add_handwriting_score(
+        reasons,
+        score,
+        metrics.answer_band_alpha_chars >= 8,
+        0.1,
+        "OCR recovered text in the answer band",
+    )
+    score = _add_handwriting_score(
+        reasons,
+        score,
+        metrics.answer_band_word_count >= 2,
+        0.05,
+        "multiple OCR segments appear in the answer band",
+    )
+    score = _add_handwriting_score(
+        reasons,
+        score,
+        metrics.answer_band_word_count == 1
+        and metrics.answer_band_alpha_chars >= 24
+        and metrics.widest_answer_band_share <= 0.55,
+        0.05,
+        "a compact OCR segment appears in the answer band",
+    )
+    score = _add_handwriting_score(
+        reasons, score, metrics.answer_band_dark_share > 0.01, 0.1, "answer band contains ink"
+    )
+    score = _add_handwriting_score(
+        reasons,
+        score,
+        metrics.answer_band_fragment_density > 0.6,
+        0.1,
+        "answer band contains fragmented components",
+    )
+    score = _add_handwriting_score(
+        reasons,
+        score,
+        metrics.height_variation > 0.22,
+        0.15,
+        "token heights vary more than typical printed text",
+    )
+    score = _add_handwriting_score(
+        reasons, score, metrics.average_slope > 1.0, 0.1, "text baseline is irregular"
+    )
+    score = _add_handwriting_score(
+        reasons,
+        score,
+        metrics.overall_fragment_density > 2.5,
+        0.1,
+        "stroke fragmentation suggests freehand writing",
+    )
+    score = _add_handwriting_score(
+        reasons,
+        score,
+        metrics.mean_confidence < 0.75,
+        0.1,
+        "OCR confidence is lower than clean printed text",
+    )
+    score = _add_handwriting_score(
+        reasons,
+        score,
+        metrics.low_confidence_share > 0.2,
+        0.1,
+        "many OCR tokens have low confidence",
+    )
+    score = _add_handwriting_score(
+        reasons,
+        score,
+        metrics.alpha_word_count <= 4
+        and metrics.presence > 0.1
+        and metrics.answer_band_word_count >= 1
+        and metrics.answer_band_alpha_chars >= 12
+        and metrics.height_variation > 0.15,
+        0.15,
+        "few OCR segments in the answer band suggest a short handwritten answer",
+    )
+    return min(1.0, score), reasons
 
-    score = min(1.0, score)
+
+def _handwriting_state(score: float) -> ScanHandwritingState:
     if score >= 0.45:
-        state: ScanHandwritingState = "true"
-    elif score <= 0.15:
-        state = "false"
-    else:
-        state = "unknown"
+        return "true"
+    if score <= 0.15:
+        return "false"
+    return "unknown"
+
+
+def _infer_handwriting(
+    raster: RasterBundle,
+    tokens: list[VisionToken],
+    *,
+    backend_name: str,
+) -> WritingSignal:
+    alpha_tokens = _alpha_tokens(tokens)
+    structure_score = text_structure_score(raster)
+    if not alpha_tokens:
+        return _no_alpha_signal(structure_score=structure_score, backend_name=backend_name)
+
+    metrics = _handwriting_metrics(
+        raster,
+        alpha_tokens,
+        backend_name=backend_name,
+        structure_score=structure_score,
+    )
+    printed_signal = _printed_text_signal(metrics)
+    if printed_signal is not None:
+        return printed_signal
+
+    score, reasons = _score_handwriting(metrics)
     if not reasons:
         reasons.append("handwriting heuristics were inconclusive")
     rounded = round(score, 3)
+    state = _handwriting_state(score)
     return WritingSignal(
         state=state,
         score=rounded,
         reasons=reasons,
-        metrics={**metrics, "score": rounded, "status": state},
+        metrics={**metrics.as_dict(), "score": rounded, "status": state},
     )
 
 

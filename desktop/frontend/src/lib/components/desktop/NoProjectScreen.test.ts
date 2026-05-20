@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { tick } from 'svelte';
 import { get } from 'svelte/store';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { appSettings, defaultAppSettings } from '$lib/stores/appSettings';
 import { notifications } from '$lib/stores/notifications';
@@ -15,6 +16,8 @@ const desktopMocks = vi.hoisted(() => ({
 vi.mock('$lib/desktop', () => desktopMocks);
 
 const scrollIntoView = vi.fn();
+const ONBOARDING_VALIDATION_DEBOUNCE_MS = 300;
+const CONNECTION_MESSAGE_VISIBLE_MS = 1500;
 
 function completeOnboarding() {
   appSettings.save({
@@ -48,8 +51,25 @@ function baseProps() {
   };
 }
 
+async function flushOnboardingValidationDebounce() {
+  await tick();
+  await Promise.resolve();
+  await tick();
+  await vi.advanceTimersByTimeAsync(ONBOARDING_VALIDATION_DEBOUNCE_MS);
+  for (let i = 0; i < 3; i += 1) {
+    await Promise.resolve();
+    await tick();
+  }
+}
+
+async function flushConnectionTicker() {
+  await vi.advanceTimersByTimeAsync(CONNECTION_MESSAGE_VISIBLE_MS);
+  await tick();
+}
+
 describe('NoProjectScreen', () => {
   beforeEach(() => {
+    vi.useRealTimers();
     localStorage.clear();
     appSettings.save(defaultAppSettings);
     notifications.clear();
@@ -69,6 +89,11 @@ describe('NoProjectScreen', () => {
       configurable: true,
       value: scrollIntoView
     });
+  });
+
+  afterEach(() => {
+    vi.clearAllTimers();
+    vi.useRealTimers();
   });
 
   it('shows the browser preview notice and disables backend actions outside the desktop host', () => {
@@ -161,6 +186,7 @@ describe('NoProjectScreen', () => {
   });
 
   it('captures LMS-linked Canvas setup details during onboarding', async () => {
+    vi.useFakeTimers();
     render(NoProjectScreen, baseProps());
 
     await fireEvent.click(screen.getByRole('radio', { name: /LMS-linked/ }));
@@ -190,6 +216,8 @@ describe('NoProjectScreen', () => {
       name: 'How to get your Canvas API token'
     }) as HTMLImageElement;
     expect(guideImage.getAttribute('src')).toBe('/canvas-api-token-guide.png');
+    await flushOnboardingValidationDebounce();
+    vi.useRealTimers();
     await waitFor(() => {
       expect(desktopMocks.listCanvasCourses).toHaveBeenCalledWith(
         'https://canvas.example.test',
@@ -207,6 +235,7 @@ describe('NoProjectScreen', () => {
   });
 
   it('keeps project setup blocked when the Canvas connectivity check fails', async () => {
+    vi.useFakeTimers();
     desktopMocks.listCanvasCourses.mockRejectedValueOnce(new Error('401 unauthorized'));
     render(NoProjectScreen, baseProps());
 
@@ -218,18 +247,19 @@ describe('NoProjectScreen', () => {
       target: { value: 'bad-token' }
     });
 
-    await waitFor(
-      () => {
-        expect(screen.getByText('Error: 401 unauthorized')).toBeTruthy();
-      },
-      { timeout: 2000 }
-    );
+    await flushOnboardingValidationDebounce();
+    await flushConnectionTicker();
+    vi.useRealTimers();
+    await waitFor(() => {
+      expect(screen.getByText('Error: 401 unauthorized')).toBeTruthy();
+    });
     expect((screen.getByRole('button', { name: 'Continue' }) as HTMLButtonElement).disabled).toBe(
       true
     );
   });
 
   it('captures manual and cloud AI setup choices during onboarding', async () => {
+    vi.useFakeTimers();
     render(NoProjectScreen, baseProps());
 
     await fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
@@ -262,6 +292,9 @@ describe('NoProjectScreen', () => {
     expect((screen.getByLabelText('Vision model') as HTMLInputElement).value).toBe(
       'qwen3.5:cloud'
     );
+    await flushOnboardingValidationDebounce();
+    await flushConnectionTicker();
+    vi.useRealTimers();
     await waitFor(() => {
       expect(desktopMocks.validateVisionModel).toHaveBeenCalledWith(
         'ollama_cloud',
@@ -278,6 +311,7 @@ describe('NoProjectScreen', () => {
   });
 
   it('checks Local Ollama connectivity without an API key before continuing AI setup', async () => {
+    vi.useFakeTimers();
     render(NoProjectScreen, {
       ...baseProps(),
       visionModels: [
@@ -294,6 +328,8 @@ describe('NoProjectScreen', () => {
     });
     await fireEvent.click(screen.getByRole('option', { name: 'llava:7b' }));
 
+    await flushOnboardingValidationDebounce();
+    vi.useRealTimers();
     await waitFor(() => {
       expect(desktopMocks.validateVisionModel).toHaveBeenCalledWith(
         'ollama_native',
@@ -310,6 +346,7 @@ describe('NoProjectScreen', () => {
   });
 
   it('shows grading profile setup after AI assistance is enabled', async () => {
+    vi.useFakeTimers();
     render(NoProjectScreen, {
       ...baseProps(),
       visionModels: [{ name: 'qwen3.5:9b', displayName: 'qwen3.5:9b' }]
@@ -317,6 +354,8 @@ describe('NoProjectScreen', () => {
 
     await fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
     await fireEvent.click(screen.getByRole('radio', { name: /Local Ollama/ }));
+    await flushOnboardingValidationDebounce();
+    vi.useRealTimers();
     await waitFor(() => {
       expect((screen.getByRole('button', { name: 'Continue' }) as HTMLButtonElement).disabled).toBe(
         false
@@ -336,6 +375,7 @@ describe('NoProjectScreen', () => {
   });
 
   it('keeps AI setup blocked when the Cloud Ollama connectivity check fails', async () => {
+    vi.useFakeTimers();
     desktopMocks.validateVisionModel.mockRejectedValueOnce(new Error('Ollama rejected the API key'));
     render(NoProjectScreen, baseProps());
 
@@ -345,18 +385,19 @@ describe('NoProjectScreen', () => {
       target: { value: 'bad-key' }
     });
 
-    await waitFor(
-      () => {
-        expect(screen.getByText('Error: Ollama rejected the API key')).toBeTruthy();
-      },
-      { timeout: 2000 }
-    );
+    await flushOnboardingValidationDebounce();
+    await flushConnectionTicker();
+    vi.useRealTimers();
+    await waitFor(() => {
+      expect(screen.getByText('Error: Ollama rejected the API key')).toBeTruthy();
+    });
     expect((screen.getByRole('button', { name: 'Continue' }) as HTMLButtonElement).disabled).toBe(
       true
     );
   });
 
   it('validates a typed Ollama vision model instead of requiring a discovered list option', async () => {
+    vi.useFakeTimers();
     render(NoProjectScreen, baseProps());
 
     await fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
@@ -368,6 +409,8 @@ describe('NoProjectScreen', () => {
       target: { value: 'ollama-key' }
     });
 
+    await flushOnboardingValidationDebounce();
+    vi.useRealTimers();
     await waitFor(() => {
       expect(desktopMocks.validateVisionModel).toHaveBeenCalledWith(
         'ollama_cloud',

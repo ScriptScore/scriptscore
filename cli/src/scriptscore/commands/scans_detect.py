@@ -66,6 +66,24 @@ class _HeaderTextMatch:
     ordered_similarity: float
 
 
+@dataclass(frozen=True)
+class _TargetOcrData:
+    metadata: PageOcrMetadata
+    boxes: list[OcrTextBox]
+    source: Literal["generated", "artifact", "inline_boxes"]
+    timing_ms: int | None
+
+
+@dataclass(frozen=True)
+class _TargetDetectBatch:
+    results: list[DetectResult]
+    page_ocr_result: PageOcrResult | None
+    artifacts: list[ArtifactReference]
+    failed_count: int
+    fallback_count: int
+    completed: int
+
+
 def _normalize_text(value: str) -> str:
     return " ".join(_NON_ALNUM_RE.sub(" ", value.lower()).split())
 
@@ -738,6 +756,255 @@ def _write_trace(
     )
 
 
+def _page_scope(target: DetectTarget) -> dict[str, object]:
+    assert target.page.student_ref is not None
+    return {"student_ref": target.page.student_ref, "page_number": target.page.page_number}
+
+
+def _ordered_hints(target: DetectTarget) -> list[QuestionDetectHint]:
+    return sorted(
+        target.question_hints, key=lambda hint: (hint.template_region.y, hint.question_number)
+    )
+
+
+def _read_target_ocr(
+    ctx: CommandContext,
+    target: DetectTarget,
+    *,
+    image_width: int,
+    image_height: int,
+    page_scope: dict[str, object],
+) -> _TargetOcrData:
+    if target.ocr_metadata_path is not None:
+        metadata = _load_ocr_metadata(
+            path=target.ocr_metadata_path,
+            target=target,
+            image_width=image_width,
+            image_height=image_height,
+        )
+        boxes = _sanitize_ocr_boxes(
+            [_ocr_box(box) for box in metadata.boxes],
+            image_width=image_width,
+            image_height=image_height,
+        )
+        return _TargetOcrData(metadata=metadata, boxes=boxes, source="artifact", timing_ms=None)
+
+    if target.ocr_boxes is not None:
+        boxes = _sanitize_ocr_boxes(
+            [_ocr_box(box) for box in target.ocr_boxes],
+            image_width=image_width,
+            image_height=image_height,
+        )
+        metadata = _ocr_metadata_from_boxes(
+            page_number=target.page.page_number,
+            image_path=target.page.image_path,
+            image_width=image_width,
+            image_height=image_height,
+            boxes=boxes,
+        )
+        return _TargetOcrData(metadata=metadata, boxes=boxes, source="inline_boxes", timing_ms=None)
+
+    ctx.emit(
+        event="page_ocr_started",
+        scope=page_scope,
+        data={"image_width": image_width, "image_height": image_height},
+    )
+    ocr_started = perf_counter()
+    boxes = _sanitize_ocr_boxes(
+        read_page_ocr(target.page.image_path),
+        image_width=image_width,
+        image_height=image_height,
+    )
+    timing_ms = round((perf_counter() - ocr_started) * 1000)
+    metadata = _ocr_metadata_from_boxes(
+        page_number=target.page.page_number,
+        image_path=target.page.image_path,
+        image_width=image_width,
+        image_height=image_height,
+        boxes=boxes,
+    )
+    ctx.emit(
+        event="page_ocr_completed",
+        scope=page_scope,
+        data={
+            "image_width": image_width,
+            "image_height": image_height,
+            "ocr_box_count": len(boxes),
+            "ocr_timing_ms": timing_ms,
+        },
+    )
+    return _TargetOcrData(metadata=metadata, boxes=boxes, source="generated", timing_ms=timing_ms)
+
+
+def _fallback_target_batch(
+    ctx: CommandContext,
+    target: DetectTarget,
+    request: ScansDetectRequest,
+    *,
+    message: str,
+    image_width: int,
+    image_height: int,
+    page_scope: dict[str, object],
+    completed: int,
+    total: int,
+) -> _TargetDetectBatch:
+    assert target.ocr_metadata_path is not None
+    page_results: list[DetectResult] = []
+    for hint in _ordered_hints(target):
+        scope = {**page_scope, "question_id": hint.question_id}
+        ctx.emit(
+            event="item_started", progress=progress(completed=completed, total=total), scope=scope
+        )
+        result = _template_region_result(target=target, hint=hint, message=message, scope=scope)
+        page_results.append(result)
+        completed += 1
+        ctx.emit(
+            event="item_completed",
+            progress=progress(completed=completed, total=total),
+            scope=scope,
+            data={"status": result.status, "region_source": result.region_source},
+        )
+    artifact = _write_trace(
+        output_dir=request.output_artifacts_dir,
+        target=target,
+        boxes=[],
+        results=page_results,
+        ocr_metadata_path=target.ocr_metadata_path,
+        ocr_source="artifact",
+        image_width=image_width,
+        image_height=image_height,
+        ocr_timing_ms=None,
+    )
+    return _TargetDetectBatch(
+        results=page_results,
+        page_ocr_result=None,
+        artifacts=[artifact],
+        failed_count=0,
+        fallback_count=len(page_results),
+        completed=completed,
+    )
+
+
+def _detect_target_regions(
+    ctx: CommandContext,
+    target: DetectTarget,
+    *,
+    boxes: list[OcrTextBox],
+    image_width: int,
+    image_height: int,
+    page_scope: dict[str, object],
+    completed: int,
+    total: int,
+) -> tuple[list[DetectResult], int, int, int]:
+    page_results: list[DetectResult] = []
+    failed_count = 0
+    fallback_count = 0
+    ordered_hints = _ordered_hints(target)
+    for index, hint in enumerate(ordered_hints):
+        scope = {**page_scope, "question_id": hint.question_id}
+        ctx.emit(
+            event="item_started", progress=progress(completed=completed, total=total), scope=scope
+        )
+        next_hint = ordered_hints[index + 1] if index + 1 < len(ordered_hints) else None
+        result = _detect_region(
+            target=target,
+            hint=hint,
+            next_hint=next_hint,
+            boxes=boxes,
+            page_width=image_width,
+            page_height=image_height,
+        )
+        if result.status == "warning":
+            fallback_count += 1
+        if result.status == "error":
+            failed_count += 1
+        page_results.append(result)
+        completed += 1
+        ctx.emit(
+            event="item_completed",
+            progress=progress(completed=completed, total=total),
+            scope=scope,
+            data={"status": result.status, "region_source": result.region_source},
+        )
+    return page_results, failed_count, fallback_count, completed
+
+
+def _process_detect_target(
+    ctx: CommandContext,
+    request: ScansDetectRequest,
+    target: DetectTarget,
+    *,
+    completed: int,
+    total: int,
+) -> _TargetDetectBatch:
+    assert target.page.student_ref is not None
+    page_scope = _page_scope(target)
+    image = load_page_image(target.page.image_path)
+    try:
+        ocr = _read_target_ocr(
+            ctx,
+            target,
+            image_width=image.width,
+            image_height=image.height,
+            page_scope=page_scope,
+        )
+    except ScriptscoreError as exc:
+        fallback_message = (
+            f"Supplied OCR metadata could not be reused; template region was used. {exc.message}"
+        )
+        return _fallback_target_batch(
+            ctx,
+            target,
+            request,
+            message=fallback_message,
+            image_width=image.width,
+            image_height=image.height,
+            page_scope=page_scope,
+            completed=completed,
+            total=total,
+        )
+
+    ocr_metadata_path, ocr_artifact = _write_ocr_metadata(
+        output_dir=request.output_artifacts_dir,
+        student_ref=target.page.student_ref,
+        metadata=ocr.metadata,
+    )
+    page_results, failed_count, fallback_count, completed = _detect_target_regions(
+        ctx,
+        target,
+        boxes=ocr.boxes,
+        image_width=image.width,
+        image_height=image.height,
+        page_scope=page_scope,
+        completed=completed,
+        total=total,
+    )
+    trace_artifact = _write_trace(
+        output_dir=request.output_artifacts_dir,
+        target=target,
+        boxes=ocr.boxes,
+        results=page_results,
+        ocr_metadata_path=ocr_metadata_path,
+        ocr_source=ocr.source,
+        image_width=image.width,
+        image_height=image.height,
+        ocr_timing_ms=ocr.timing_ms,
+    )
+    return _TargetDetectBatch(
+        results=page_results,
+        page_ocr_result=PageOcrResult(
+            student_ref=target.page.student_ref,
+            page_number=target.page.page_number,
+            ocr_metadata_path=ocr_metadata_path,
+            ocr_source=ocr.source,
+        ),
+        artifacts=[ocr_artifact, trace_artifact],
+        failed_count=failed_count,
+        fallback_count=fallback_count,
+        completed=completed,
+    )
+
+
 def handle_scans_detect(ctx: CommandContext, request: ScansDetectRequest) -> CommandOutcome:
     """Refine per-student question regions using OCR."""
 
@@ -771,175 +1038,14 @@ def handle_scans_detect(ctx: CommandContext, request: ScansDetectRequest) -> Com
 
     for target in request.detect_targets:
         ctx.check_cancelled()
-        assert target.page.student_ref is not None
-        page_scope = {
-            "student_ref": target.page.student_ref,
-            "page_number": target.page.page_number,
-        }
-        image = load_page_image(target.page.image_path)
-        ocr_timing_ms: int | None = None
-        ordered_hints = sorted(
-            target.question_hints, key=lambda hint: (hint.template_region.y, hint.question_number)
-        )
-        if target.ocr_metadata_path is not None:
-            try:
-                metadata = _load_ocr_metadata(
-                    path=target.ocr_metadata_path,
-                    target=target,
-                    image_width=image.width,
-                    image_height=image.height,
-                )
-                boxes = _sanitize_ocr_boxes(
-                    [_ocr_box(box) for box in metadata.boxes],
-                    image_width=image.width,
-                    image_height=image.height,
-                )
-                ocr_source: Literal["generated", "artifact", "inline_boxes"] = "artifact"
-            except ScriptscoreError as exc:
-                fallback_message = (
-                    "Supplied OCR metadata could not be reused; template region was used. "
-                    f"{exc.message}"
-                )
-                page_results = []
-                for hint in ordered_hints:
-                    scope = {**page_scope, "question_id": hint.question_id}
-                    ctx.emit(
-                        event="item_started",
-                        progress=progress(completed=completed, total=total),
-                        scope=scope,
-                    )
-                    result = _template_region_result(
-                        target=target,
-                        hint=hint,
-                        message=fallback_message,
-                        scope=scope,
-                    )
-                    page_results.append(result)
-                    results.append(result)
-                    fallback_count += 1
-                    completed += 1
-                    ctx.emit(
-                        event="item_completed",
-                        progress=progress(completed=completed, total=total),
-                        scope=scope,
-                        data={"status": result.status, "region_source": result.region_source},
-                    )
-                artifacts.append(
-                    _write_trace(
-                        output_dir=request.output_artifacts_dir,
-                        target=target,
-                        boxes=[],
-                        results=page_results,
-                        ocr_metadata_path=target.ocr_metadata_path,
-                        ocr_source="artifact",
-                        image_width=image.width,
-                        image_height=image.height,
-                        ocr_timing_ms=None,
-                    )
-                )
-                continue
-        elif target.ocr_boxes is not None:
-            boxes = _sanitize_ocr_boxes(
-                [_ocr_box(box) for box in target.ocr_boxes],
-                image_width=image.width,
-                image_height=image.height,
-            )
-            metadata = _ocr_metadata_from_boxes(
-                page_number=target.page.page_number,
-                image_path=target.page.image_path,
-                image_width=image.width,
-                image_height=image.height,
-                boxes=boxes,
-            )
-            ocr_source = "inline_boxes"
-        else:
-            ctx.emit(
-                event="page_ocr_started",
-                scope=page_scope,
-                data={"image_width": image.width, "image_height": image.height},
-            )
-            ocr_started = perf_counter()
-            boxes = _sanitize_ocr_boxes(
-                read_page_ocr(target.page.image_path),
-                image_width=image.width,
-                image_height=image.height,
-            )
-            ocr_timing_ms = round((perf_counter() - ocr_started) * 1000)
-            metadata = _ocr_metadata_from_boxes(
-                page_number=target.page.page_number,
-                image_path=target.page.image_path,
-                image_width=image.width,
-                image_height=image.height,
-                boxes=boxes,
-            )
-            ocr_source = "generated"
-            ctx.emit(
-                event="page_ocr_completed",
-                scope=page_scope,
-                data={
-                    "image_width": image.width,
-                    "image_height": image.height,
-                    "ocr_box_count": len(boxes),
-                    "ocr_timing_ms": ocr_timing_ms,
-                },
-            )
-        ocr_metadata_path, ocr_artifact = _write_ocr_metadata(
-            output_dir=request.output_artifacts_dir,
-            student_ref=target.page.student_ref,
-            metadata=metadata,
-        )
-        artifacts.append(ocr_artifact)
-        page_ocr_results.append(
-            PageOcrResult(
-                student_ref=target.page.student_ref,
-                page_number=target.page.page_number,
-                ocr_metadata_path=ocr_metadata_path,
-                ocr_source=ocr_source,
-            )
-        )
-        page_results = []
-        for index, hint in enumerate(ordered_hints):
-            scope = {**page_scope, "question_id": hint.question_id}
-            ctx.emit(
-                event="item_started",
-                progress=progress(completed=completed, total=total),
-                scope=scope,
-            )
-            next_hint = ordered_hints[index + 1] if index + 1 < len(ordered_hints) else None
-            result = _detect_region(
-                target=target,
-                hint=hint,
-                next_hint=next_hint,
-                boxes=boxes,
-                page_width=image.width,
-                page_height=image.height,
-            )
-            if result.status == "warning":
-                fallback_count += 1
-            if result.status == "error":
-                failed_count += 1
-            page_results.append(result)
-            results.append(result)
-            completed += 1
-            ctx.emit(
-                event="item_completed",
-                progress=progress(completed=completed, total=total),
-                scope=scope,
-                data={"status": result.status, "region_source": result.region_source},
-            )
-        artifacts.append(
-            _write_trace(
-                output_dir=request.output_artifacts_dir,
-                target=target,
-                boxes=boxes,
-                results=page_results,
-                ocr_metadata_path=ocr_metadata_path,
-                ocr_source=ocr_source,
-                image_width=image.width,
-                image_height=image.height,
-                ocr_timing_ms=ocr_timing_ms,
-            )
-        )
+        batch = _process_detect_target(ctx, request, target, completed=completed, total=total)
+        results.extend(batch.results)
+        artifacts.extend(batch.artifacts)
+        failed_count += batch.failed_count
+        fallback_count += batch.fallback_count
+        completed = batch.completed
+        if batch.page_ocr_result is not None:
+            page_ocr_results.append(batch.page_ocr_result)
 
     if total > 0:
         ctx.emit(

@@ -38,6 +38,8 @@ from scriptscore.contracts import (
 from scriptscore.prompts import PromptResponseError, parse_json_model
 from scriptscore.runtime import CommandContext, CommandOutcome, CommandSpec
 
+BLANK_LOCAL_SCORING_REASON = "Blank local scoring required no model judgment."
+
 
 class PreliminaryScorePayload(BaseModel):
     """Strict provider response payload for criterion scoring."""
@@ -121,7 +123,7 @@ def _preliminary_confidence(
     """Derive explicit preliminary-scoring confidence metadata."""
 
     if blank_local:
-        return "high", "Blank local scoring required no model judgment."
+        return "high", BLANK_LOCAL_SCORING_REASON
     if degraded_parse_error:
         return "low", "Criterion response parsing failed after retries and fell back to zero."
     if successful_retry:
@@ -169,7 +171,7 @@ def _blank_local_row(
         rationale="Blank answer scored zero.",
         status="ok",
         confidence="high",
-        confidence_reason="Blank local scoring required no model judgment.",
+        confidence_reason=BLANK_LOCAL_SCORING_REASON,
         warnings=[],
     )
     return PreliminaryRowRun(
@@ -209,7 +211,7 @@ def _blank_local_answer_rows(
             rationale="Blank answer scored zero.",
             status="ok",
             confidence="high",
-            confidence_reason="Blank local scoring required no model judgment.",
+            confidence_reason=BLANK_LOCAL_SCORING_REASON,
             warnings=[],
         )
         for criterion in request_row.rubric_criteria

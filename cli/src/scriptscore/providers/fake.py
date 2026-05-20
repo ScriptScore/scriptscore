@@ -26,7 +26,7 @@ from scriptscore.providers.interfaces import (
     ProviderCapability,
 )
 
-_TAG_RE = re.compile(r"<(?P<tag>[a-zA-Z0-9_]+)>(?P<value>.*?)</(?P=tag)>", re.DOTALL)
+_TAG_RE = re.compile(r"<(?P<tag>[A-Za-z0-9_]+)>(?P<value>.*?)</(?P=tag)>", re.DOTALL)
 _QUESTION_PREFIX_RE = re.compile(r"^\s*(?:question\s*)?\d+\s*[\].:)-]*\s*", re.IGNORECASE)
 
 
@@ -82,107 +82,127 @@ def _image_has_nonwhite_pixels(path: str) -> bool:
         return inverted.getbbox() is not None
 
 
-def _default_llm_response(request: LlmRequest) -> LlmResponse:
-    if request.prompt_id == "question_text":
-        baseline = _extract_tag(request.rendered_text, "baseline_pdf_text")
-        if baseline:
-            return LlmResponse(
-                raw_text=_QUESTION_PREFIX_RE.sub("", baseline).strip() or baseline.strip()
-            )
-        return LlmResponse(raw_text="Derived question text")
+def _question_text_response(request: LlmRequest) -> LlmResponse:
+    baseline = _extract_tag(request.rendered_text, "baseline_pdf_text")
+    if baseline:
+        return LlmResponse(
+            raw_text=_QUESTION_PREFIX_RE.sub("", baseline).strip() or baseline.strip()
+        )
+    return LlmResponse(raw_text="Derived question text")
 
-    if request.prompt_id == "question_context":
-        return LlmResponse(raw_text="")
 
-    if request.prompt_id == "rubric_generate":
-        max_points_raw = _extract_tag(request.rendered_text, "max_points")
-        max_points = max(1, int(max_points_raw or "1"))
-        criteria: list[dict[str, Any]] = [
+def _rubric_generate_response(request: LlmRequest) -> LlmResponse:
+    max_points_raw = _extract_tag(request.rendered_text, "max_points")
+    max_points = max(1, int(max_points_raw or "1"))
+    criteria: list[dict[str, Any]] = [
+        {
+            "label": "Overall response quality",
+            "points": max_points,
+            "partial_credit_guidance": (
+                f"Award between 0 and {max_points} points based on correctness and completeness."
+            ),
+        }
+    ]
+    return LlmResponse(raw_text=json.dumps({"criteria": criteria}))
+
+
+def _rubric_semantic_review_response(request: LlmRequest) -> LlmResponse:
+    candidate_pairs = _extract_candidate_pairs(request.rendered_text)
+    return LlmResponse(
+        raw_text=json.dumps(
             {
-                "label": "Overall response quality",
-                "points": max_points,
-                "partial_credit_guidance": (
-                    f"Award between 0 and {max_points} points based on correctness and completeness."
-                ),
-            }
-        ]
-        return LlmResponse(raw_text=json.dumps({"criteria": criteria}))
-
-    if request.prompt_id == "rubric_semantic_review":
-        candidate_pairs = _extract_candidate_pairs(request.rendered_text)
-        return LlmResponse(
-            raw_text=json.dumps(
-                {
-                    "pair_reviews": [
-                        {
-                            "left_index": pair["left_index"],
-                            "right_index": pair["right_index"],
-                            "classification": "duplicate"
+                "pair_reviews": [
+                    {
+                        "left_index": pair["left_index"],
+                        "right_index": pair["right_index"],
+                        "classification": (
+                            "duplicate"
                             if pair.get("code") == "rubric_duplicate_criterion"
-                            else "overlap",
-                            "reason": "The candidate pair appears to target materially similar evidence.",
-                        }
-                        for pair in candidate_pairs
-                    ]
-                }
-            )
+                            else "overlap"
+                        ),
+                        "reason": "The candidate pair appears to target materially similar evidence.",
+                    }
+                    for pair in candidate_pairs
+                ]
+            }
         )
+    )
 
-    if request.prompt_id == "handwriting_verify":
-        has_handwriting = _image_has_nonwhite_pixels(request.file_inputs["question_crop_png"])
-        return LlmResponse(
-            raw_text=json.dumps(
-                {
-                    "has_handwriting": has_handwriting,
-                    "confidence": "high",
-                    "status": "complete",
-                }
-            )
+
+def _handwriting_verify_response(request: LlmRequest) -> LlmResponse:
+    has_handwriting = _image_has_nonwhite_pixels(request.file_inputs["question_crop_png"])
+    return LlmResponse(
+        raw_text=json.dumps(
+            {
+                "has_handwriting": has_handwriting,
+                "confidence": "high",
+                "status": "complete",
+            }
         )
+    )
 
-    if request.prompt_id == "parse_ocr":
-        if not _image_has_nonwhite_pixels(request.file_inputs["question_crop_png"]):
-            return LlmResponse(raw_text="[blank]")
-        return LlmResponse(raw_text="parsed answer")
 
-    if request.prompt_id == "preliminary_score":
-        student_answer = _extract_tag(request.rendered_text, "student_answer")
-        max_points = max(0, int(_extract_tag(request.rendered_text, "points") or "0"))
-        visible_answer = bool(student_answer.strip())
-        minimum_positive_award = 1 if max_points > 0 else 0
-        points_awarded = min(max_points, minimum_positive_award) if visible_answer else 0
-        return LlmResponse(
-            raw_text=json.dumps(
-                {
-                    "points_awarded": points_awarded,
-                    "rationale": "Awarded based on the visible evidence for this criterion."
-                    if points_awarded
-                    else "No criterion evidence was visible in the answer.",
-                }
-            )
-        )
+def _parse_ocr_response(request: LlmRequest) -> LlmResponse:
+    if not _image_has_nonwhite_pixels(request.file_inputs["question_crop_png"]):
+        return LlmResponse(raw_text="[blank]")
+    return LlmResponse(raw_text="parsed answer")
 
-    if request.prompt_id == "consistency_review":
-        return LlmResponse(raw_text=json.dumps({"adjustments": []}))
 
-    if request.prompt_id == "feedback_draft":
-        attrs = _extract_assessment_attrs(request.rendered_text)
-        points_awarded_attr = attrs.get("total_points_awarded")
-        max_points_attr = attrs.get("question_max_points")
-        if (
-            points_awarded_attr is not None
-            and max_points_attr is not None
-            and points_awarded_attr.isdigit()
-            and points_awarded_attr == max_points_attr
-        ):
-            return LlmResponse(raw_text="Strong work overall.")
-        return LlmResponse(raw_text="You showed some understanding but missed a key detail.")
+def _preliminary_score_response(request: LlmRequest) -> LlmResponse:
+    student_answer = _extract_tag(request.rendered_text, "student_answer")
+    max_points = max(0, int(_extract_tag(request.rendered_text, "points") or "0"))
+    visible_answer = bool(student_answer.strip())
+    minimum_positive_award = 1 if max_points > 0 else 0
+    points_awarded = min(max_points, minimum_positive_award) if visible_answer else 0
+    rationale = (
+        "Awarded based on the visible evidence for this criterion."
+        if points_awarded
+        else "No criterion evidence was visible in the answer."
+    )
+    return LlmResponse(
+        raw_text=json.dumps({"points_awarded": points_awarded, "rationale": rationale})
+    )
 
-    if request.prompt_id == "markup":
-        student_answer = _extract_tag(request.rendered_text, "student_answer")
-        if not student_answer:
-            return LlmResponse(raw_text="")
-        return LlmResponse(raw_text=f'<span data-kind="correct">{student_answer}</span>')
+
+def _feedback_draft_response(request: LlmRequest) -> LlmResponse:
+    attrs = _extract_assessment_attrs(request.rendered_text)
+    points_awarded_attr = attrs.get("total_points_awarded")
+    max_points_attr = attrs.get("question_max_points")
+    if (
+        points_awarded_attr is not None
+        and max_points_attr is not None
+        and points_awarded_attr.isdigit()
+        and points_awarded_attr == max_points_attr
+    ):
+        return LlmResponse(raw_text="Strong work overall.")
+    return LlmResponse(raw_text="You showed some understanding but missed a key detail.")
+
+
+def _markup_response(request: LlmRequest) -> LlmResponse:
+    student_answer = _extract_tag(request.rendered_text, "student_answer")
+    if not student_answer:
+        return LlmResponse(raw_text="")
+    return LlmResponse(raw_text=f'<span data-kind="correct">{student_answer}</span>')
+
+
+_DEFAULT_LLM_RESPONDERS: dict[str, Callable[[LlmRequest], LlmResponse]] = {
+    "question_text": _question_text_response,
+    "question_context": lambda _request: LlmResponse(raw_text=""),
+    "rubric_generate": _rubric_generate_response,
+    "rubric_semantic_review": _rubric_semantic_review_response,
+    "handwriting_verify": _handwriting_verify_response,
+    "parse_ocr": _parse_ocr_response,
+    "preliminary_score": _preliminary_score_response,
+    "consistency_review": lambda _request: LlmResponse(raw_text=json.dumps({"adjustments": []})),
+    "feedback_draft": _feedback_draft_response,
+    "markup": _markup_response,
+}
+
+
+def _default_llm_response(request: LlmRequest) -> LlmResponse:
+    responder = _DEFAULT_LLM_RESPONDERS.get(request.prompt_id)
+    if responder is not None:
+        return responder(request)
 
     raise ValueError(f"Unsupported fake prompt id: {request.prompt_id}")
 
