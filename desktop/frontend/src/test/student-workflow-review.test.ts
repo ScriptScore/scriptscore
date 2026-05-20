@@ -673,6 +673,49 @@ describe('StudentWorkflowWorkspace review and detail panes', () => {
     expect(screen.queryByRole('button', { name: 'Accept' })).toBeNull();
   });
 
+  it('keeps alignment controls reachable in the responsive review layout', async () => {
+    render(AlignmentReviewView, {
+      intakeItem: {
+        studentRef: 'student_1',
+        canonicalPdfPath: '/tmp/student_1.pdf',
+        ingestStatus: 'ok',
+        pageCount: 9,
+        examPagePaths: Array.from({ length: 9 }, (_, index) => `/tmp/student_1_p${index + 1}.png`),
+        warnings: []
+      },
+      submission: {
+        studentRef: 'student_1',
+        canonicalPdfPath: '/tmp/student_1.pdf',
+        pageCount: 9,
+        stage: 'alignment_review',
+        latestJobId: 'job_align_1',
+        failureMessage: null,
+        warnings: [],
+        pageArtifacts: [],
+        alignmentPages: Array.from({ length: 9 }, (_, index) =>
+          alignmentPage(index + 1, 0.93, false, { questionCount: 1 })
+        ),
+        answers: []
+      },
+      templatePreviewArtifacts: templateArtifacts(9),
+      displayName: 'Student One',
+      onconfirm: vi.fn(),
+      onback: vi.fn()
+    });
+
+    const confirmButton = await screen.findByRole('button', {
+      name: 'Confirm alignment → continue'
+    });
+    const controlsRail = confirmButton.closest('aside');
+    const reviewBody = controlsRail?.parentElement;
+
+    expect(reviewBody?.className).toContain('flex-col');
+    expect(reviewBody?.className).toContain('overflow-y-auto');
+    expect(reviewBody?.className).toContain('xl:flex-row');
+    expect(controlsRail?.className).toContain('w-full');
+    expect(controlsRail?.className).toContain('xl:w-[15rem]');
+  });
+
   it('can reuse an accepted alignment transform for remaining actionable pages', async () => {
     const onConfirm = vi.fn().mockResolvedValue(undefined);
     renderAlignmentReuseFixture(onConfirm);
