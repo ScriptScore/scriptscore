@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { tick } from 'svelte';
-import { fireEvent, render, screen } from '@testing-library/svelte';
+import { fireEvent, render, screen, within } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 
 import ModerationWorkspace from './ModerationWorkspace.svelte';
@@ -376,6 +376,61 @@ describe('ModerationWorkspace', () => {
     });
   });
 
+  it('opens an answer crop preview when the crop is clicked', async () => {
+    render(ModerationWorkspace, {
+      workspaceState: moderationWorkspaceState(),
+      busy: false,
+      onSaveModeratedScore: vi.fn(),
+      onSaveModeratedFeedback: vi.fn(),
+      onSetQuestionReviewed: vi.fn()
+    });
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Preview answer crop for student_1' }));
+
+    expect(await screen.findByRole('dialog', { name: 'student_1 answer crop' })).toBeTruthy();
+    const previewImage = await screen.findByAltText('student_1 answer crop preview');
+    expect((previewImage as HTMLImageElement).src).toContain('/tmp/crop-1.png');
+  });
+
+  it('moves a card from the answer crop without opening the crop preview', async () => {
+    const onSaveModeratedScore = vi.fn().mockResolvedValue(undefined);
+    render(ModerationWorkspace, {
+      workspaceState: moderationWorkspaceState(),
+      busy: false,
+      onSaveModeratedScore,
+      onSaveModeratedFeedback: vi.fn(),
+      onSetQuestionReviewed: vi.fn()
+    });
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Add lane' }));
+    await fireEvent.click(screen.getByRole('button', { name: '5 pt' }));
+    await tick();
+
+    const card = await screen.findByTestId('moderation-card-student_1-question_1');
+    const cropTrigger = screen.getByRole('button', { name: 'Preview answer crop for student_1' });
+    const lane = screen.getByTestId('score-lane-5');
+    Object.defineProperty(card, 'setPointerCapture', { value: vi.fn(), configurable: true });
+    Object.defineProperty(card, 'releasePointerCapture', { value: vi.fn(), configurable: true });
+    const originalElementFromPoint = document.elementFromPoint;
+    Object.defineProperty(document, 'elementFromPoint', {
+      value: vi.fn().mockReturnValue(lane),
+      configurable: true
+    });
+
+    await fireEvent.pointerDown(cropTrigger, { button: 0, pointerId: 9, clientX: 10, clientY: 10 });
+    await fireEvent.pointerMove(card, { pointerId: 9, clientX: 30, clientY: 10 });
+    await fireEvent.pointerUp(cropTrigger, { pointerId: 9, clientX: 30, clientY: 10 });
+    await fireEvent.click(cropTrigger);
+    await tick();
+
+    expect(onSaveModeratedScore).toHaveBeenCalledWith('student_1', 'question_1', 5);
+    expect(screen.queryByRole('dialog', { name: 'student_1 answer crop' })).toBeNull();
+    Object.defineProperty(document, 'elementFromPoint', {
+      value: originalElementFromPoint,
+      configurable: true
+    });
+  });
+
   it('renders a global size slider and size-driven card sizing', async () => {
     render(ModerationWorkspace, {
       workspaceState: moderationWorkspaceState(),
@@ -394,36 +449,38 @@ describe('ModerationWorkspace', () => {
     const imageEvidence = screen.getByAltText('student_1 answer crop');
 
     expect(slider).toBeTruthy();
-    expect(slider.getAttribute('max')).toBe('192');
+    expect(slider.getAttribute('max')).toBe('240');
     expect(cardGrid?.className).toContain('justify-start');
     expect(cardGrid?.getAttribute('style')).toContain(
-      'grid-template-columns: repeat(auto-fill, minmax(min(100%, 15.2rem), 15.2rem));'
+      'grid-template-columns: repeat(auto-fill, minmax(min(100%, 15rem), 15rem));'
     );
     expect(cardGrid?.getAttribute('style')).not.toContain('1fr');
     expect(card.className).toContain('select-none');
     expect(textEvidence?.className).toContain('select-none');
     expect(feedback.className).toContain('select-text');
-    expect(card.getAttribute('style')).toContain('min-height: 11rem;');
+    expect(card.getAttribute('style')).toContain('min-height: 11.666666666666666rem;');
     expect(card.getAttribute('style')).not.toMatch(/(^|;)\s*height:/);
-    expect(textEvidence?.getAttribute('style')).toContain('max-height: 5.777777777777778rem;');
+    expect(textEvidence?.getAttribute('style')).toContain('max-height: 6.277777777777778rem;');
     expect(textEvidence?.getAttribute('style')).not.toMatch(/(^|;)\s*height:/);
-    expect(imageEvidence.getAttribute('style')).toContain('max-height: 6.5rem;');
+    expect(imageEvidence.getAttribute('style')).toContain('max-height: 7.285714285714286rem;');
     expect(imageEvidence.getAttribute('style')).not.toMatch(/(^|;)\s*height:/);
-    expect(feedback.getAttribute('style')).toContain('max-height: 4.75rem;');
+    expect(feedback.getAttribute('style')).toContain('min-height: 5.277777777777778rem;');
+    expect(feedback.getAttribute('style')).toContain('max-height: 7.285714285714286rem;');
     expect(feedback.getAttribute('style')).not.toMatch(/(^|;)\s*height:/);
 
-    await fireEvent.input(slider, { currentTarget: { value: '192' }, target: { value: '192' } });
+    await fireEvent.input(slider, { currentTarget: { value: '240' }, target: { value: '240' } });
 
     expect(cardGrid?.getAttribute('style')).toContain(
-      'grid-template-columns: repeat(auto-fill, minmax(min(100%, 31.2rem), 31.2rem));'
+      'grid-template-columns: repeat(auto-fill, minmax(min(100%, 24rem), 24rem));'
     );
     expect(cardGrid?.getAttribute('style')).not.toContain('1fr');
-    expect(card.getAttribute('style')).toContain('min-height: 21rem;');
+    expect(card.getAttribute('style')).toContain('min-height: 29rem;');
     expect(card.getAttribute('style')).not.toMatch(/(^|;)\s*height:/);
-    expect(textEvidence?.getAttribute('style')).toContain('max-height: 7.5rem;');
-    expect(imageEvidence.getAttribute('style')).toContain('max-height: 8rem;');
-    expect(feedback.getAttribute('style')).toContain('max-height: 4.75rem;');
-    expect(feedback.getAttribute('style')).toContain('font-size: 1.13rem;');
+    expect(textEvidence?.getAttribute('style')).toContain('max-height: 16rem;');
+    expect(imageEvidence.getAttribute('style')).toContain('max-height: 22.142857142857142rem;');
+    expect(feedback.getAttribute('style')).toContain('min-height: 16rem;');
+    expect(feedback.getAttribute('style')).toContain('max-height: 18rem;');
+    expect(feedback.getAttribute('style')).toContain('font-size: 1.25rem;');
   });
 
   it('shows evidence controls inside the settings popover', async () => {
@@ -786,6 +843,79 @@ describe('ModerationWorkspace', () => {
     expect(card.getAttribute('draggable')).toBe('false');
   });
 
+  it('places the mini-card toggle beside the student name and the move action in the card controls', async () => {
+    render(ModerationWorkspace, {
+      workspaceState: moderationWorkspaceState(),
+      busy: false,
+      onSaveModeratedScore: vi.fn(),
+      onSaveModeratedFeedback: vi.fn(),
+      onSetQuestionReviewed: vi.fn()
+    });
+
+    const card = await screen.findByTestId('moderation-card-student_1-question_1');
+    const cardButtons = within(card).getAllByRole('button');
+
+    expect(cardButtons[0]?.getAttribute('aria-label')).toBe('Use mini card for student_1');
+    expect(cardButtons[3]?.getAttribute('aria-label')).toBe('Move student_1 to score lane');
+  });
+
+  it('moves a card directly to any valid hidden score lane', async () => {
+    const onSaveModeratedScore = vi.fn().mockResolvedValue(undefined);
+    render(ModerationWorkspace, {
+      workspaceState: moderationWorkspaceState(),
+      busy: false,
+      onSaveModeratedScore,
+      onSaveModeratedFeedback: vi.fn(),
+      onSetQuestionReviewed: vi.fn()
+    });
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Move student_1 to score lane' }));
+
+    expect(screen.getByRole('dialog', { name: 'Move student_1 to score lane' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '4 points' })).toBeNull();
+    expect(screen.getByRole('button', { name: '3 points' })).toBeTruthy();
+
+    await fireEvent.click(screen.getByRole('button', { name: '3 points' }));
+    await tick();
+
+    expect(onSaveModeratedScore).toHaveBeenCalledWith('student_1', 'question_1', 3);
+    expect(screen.getByTestId('score-lane-3')).toBeTruthy();
+  });
+
+  it('disables the direct move action when moderation is busy or the card is pending', async () => {
+    const pendingSave = vi.fn(() => new Promise<void>(() => {}));
+    const view = render(ModerationWorkspace, {
+      workspaceState: moderationWorkspaceState(),
+      busy: true,
+      onSaveModeratedScore: pendingSave,
+      onSaveModeratedFeedback: vi.fn(),
+      onSetQuestionReviewed: vi.fn()
+    });
+
+    expect(
+      (screen.getByRole('button', { name: /Move student_1\*? to score lane/ }) as HTMLButtonElement)
+        .disabled
+    ).toBe(true);
+
+    await view.rerender({
+      workspaceState: moderationWorkspaceState(),
+      busy: false,
+      onSaveModeratedScore: pendingSave,
+      onSaveModeratedFeedback: vi.fn(),
+      onSetQuestionReviewed: vi.fn()
+    });
+
+    await fireEvent.click(screen.getByRole('button', { name: /Move student_1\*? to score lane/ }));
+    await fireEvent.click(screen.getByRole('button', { name: '3 points' }));
+    await tick();
+
+    expect(pendingSave).toHaveBeenCalledTimes(1);
+    expect(
+      (screen.getByRole('button', { name: /Move student_1\*? to score lane/ }) as HTMLButtonElement)
+        .disabled
+    ).toBe(true);
+  });
+
   it('moves mini cards to the end of their score lane', async () => {
     const state = moderationWorkspaceState();
     const secondSubmission = structuredClone(state.studentWorkflow!.submissions[0]!);
@@ -934,14 +1064,18 @@ describe('ModerationWorkspace', () => {
     });
 
     expect(screen.getByRole('button', { name: 'Preview full page for student_1' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Preview answer crop for student_1' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Preview full page for Ada Lovelace' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Preview answer crop for Ada Lovelace' })).toBeNull();
 
     await fireEvent.click(screen.getByRole('button', { name: 'Moderation view settings' }));
     await fireEvent.click(screen.getByRole('button', { name: /Actual student names/i }));
     await tick();
 
     expect(screen.getByRole('button', { name: 'Preview full page for Ada Lovelace' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Preview answer crop for Ada Lovelace' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Preview full page for student_1' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Preview answer crop for student_1' })).toBeNull();
   });
 
   it('refreshes live names when the roster cache becomes ready after names are enabled', async () => {
