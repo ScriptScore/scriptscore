@@ -15,6 +15,7 @@ use scriptscore_desktop_host::models::{
     RubricCriterion, RubricUpdateInput, RuntimeJobEvent, TemplateRedactionRegionInput,
     WorkerStatus,
 };
+use scriptscore_desktop_host::release_smoke::{run_document_smoke, ReleaseSmokeConfig};
 use scriptscore_desktop_host::state::AppState;
 use scriptscore_desktop_host::test_support::{lock_env_vars, EnvVarGuard};
 
@@ -790,6 +791,38 @@ fn create_project_runs_exam_setup_and_supports_open_close_lifecycle() {
             .display_name,
         "Midterm 1"
     );
+}
+
+#[test]
+fn release_smoke_document_mode_uses_synthetic_project_without_path_evidence() {
+    let _guard = lock_env_vars();
+    let test_root = temp_root("scriptscore-release-smoke-state");
+    std::fs::create_dir_all(&test_root).expect("test root should exist");
+    let _projects_root = EnvVarGuard::set("SCRIPTSCORE_PROJECTS_ROOT", &test_root);
+    let _python = EnvVarGuard::set("SCRIPTSCORE_PYTHON", test_python());
+
+    let summary = run_document_smoke(&ReleaseSmokeConfig {
+        output_path: test_root.join("summary.json"),
+        mode: "document".into(),
+        resource_dir: None,
+    })
+    .expect("release smoke should pass");
+    let summary_json = serde_json::to_value(summary).expect("summary should serialize");
+
+    assert_eq!(summary_json["status"], "passed");
+    assert_eq!(summary_json["mode"], "document");
+    assert_eq!(summary_json["synthetic"]["studentSubmissions"], 2);
+    assert!(
+        summary_json["template"]["questionCount"]
+            .as_i64()
+            .expect("question count")
+            >= 1
+    );
+    assert_eq!(summary_json["intake"]["rowCount"], 2);
+    assert_eq!(summary_json["workflow"]["submissionCount"], 2);
+    assert!(!summary_json
+        .to_string()
+        .contains(&test_root.to_string_lossy().to_string()));
 }
 
 #[test]

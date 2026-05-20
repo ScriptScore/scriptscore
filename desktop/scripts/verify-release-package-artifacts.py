@@ -8,6 +8,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 BUNDLE_EXTENSIONS = {
@@ -378,6 +379,100 @@ def windows_app_executable_candidates(payload_root: Path) -> list[Path]:
     return candidates
 
 
+def executable_mode(path: Path) -> bool:
+    return path.is_file() and os.access(path, os.X_OK)
+
+
+def packaged_app_executable_candidates(payload_root: Path) -> list[Path]:
+    if sys.platform.startswith("win"):
+        return windows_app_executable_candidates(payload_root)
+
+    mac_candidates = sorted(
+        path
+        for path in payload_root.rglob("*.app/Contents/MacOS/*")
+        if executable_mode(path) and "scriptscore" in path.name.lower()
+    )
+    if mac_candidates:
+        return mac_candidates
+
+    return sorted(
+        path
+        for path in payload_root.rglob("*")
+        if executable_mode(path)
+        and "scriptscore" in path.name.lower()
+        and "runtime" not in {part.lower() for part in path.parts}
+    )
+
+
+def release_smoke_requested() -> bool:
+    return os.environ.get("SCRIPTSCORE_RELEASE_SMOKE", "").lower() in {"1", "true", "yes"}
+
+
+def release_smoke_command(
+    app_executable: Path,
+    output_path: Path,
+    resource_dir: Path,
+) -> list[str]:
+    return [
+        str(app_executable),
+        "--release-smoke",
+        "--release-smoke-output",
+        str(output_path),
+        "--release-smoke-mode",
+        "document",
+        "--release-smoke-resource-dir",
+        str(resource_dir),
+    ]
+
+
+def load_release_smoke_summary(path: Path) -> dict[str, object] | None:
+    if not path.is_file():
+        return None
+    value = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(value, dict):
+        raise VerificationError(f"Release smoke summary was not a JSON object: {path}")
+    return value
+
+
+def run_packaged_release_smoke(payload_root: Path, resource_dir: Path) -> dict[str, object]:
+    if not release_smoke_requested():
+        return {"status": "disabled"}
+
+    candidates = packaged_app_executable_candidates(payload_root)
+    if not candidates:
+        return {
+            "status": "skipped",
+            "reason": "No runnable packaged ScriptScore app executable was found in this payload.",
+        }
+
+    app_executable = candidates[0]
+    with tempfile.TemporaryDirectory(prefix="scriptscore-release-smoke-") as tmp_dir:
+        output_path = Path(tmp_dir) / "summary.json"
+        env = os.environ.copy()
+        env["SCRIPTSCORE_RELEASE_SMOKE"] = "1"
+        result = subprocess.run(
+            release_smoke_command(app_executable, output_path, resource_dir),
+            check=False,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=600,
+        )
+        summary = load_release_smoke_summary(output_path)
+        if result.returncode != 0:
+            details = (result.stderr or result.stdout or "").strip()
+            raise VerificationError(
+                "Packaged release smoke failed"
+                + (f": {details[-1000:]}" if details else ".")
+            )
+        if summary is None:
+            raise VerificationError(
+                f"Packaged release smoke did not write a summary: {output_path}"
+            )
+        summary["appExecutable"] = str(app_executable)
+        return summary
+
+
 def validate_windows_payload_icon(
     payload_root: Path,
     reference_icon: Path | None = None,
@@ -460,7 +555,7 @@ def validate_payload_root(payload_root: Path) -> dict[str, object]:
     runtime_root = find_payload_runtime_root(payload_root)
     model_root = find_payload_model_root(payload_root)
     legal_root = find_payload_legal_root(payload_root)
-    return {
+    summary = {
         "payloadRoot": str(payload_root),
         "runtime": validate_runtime(runtime_root),
         "models": validate_models(model_root),
@@ -468,6 +563,9 @@ def validate_payload_root(payload_root: Path) -> dict[str, object]:
         "legal": validate_legal(legal_root),
         "windowsIcon": validate_windows_payload_icon(payload_root),
     }
+    if release_smoke_requested():
+        summary["releaseSmoke"] = run_packaged_release_smoke(payload_root, runtime_root.parent)
+    return summary
 
 
 def should_scan_text(path: Path) -> bool:
@@ -606,6 +704,11 @@ def main() -> int:
                 "legal": legal_summary,
             }
         )
+        if release_smoke_requested():
+            payload_summaries[0]["releaseSmoke"] = {
+                "status": "skipped",
+                "reason": "No packaged app executable is available for staging-directory validation.",
+            }
 
     summary = {
         "label": args.label,

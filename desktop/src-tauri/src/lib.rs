@@ -7,6 +7,8 @@ pub mod models;
 mod path_utils;
 mod project_store;
 mod protocol;
+#[doc(hidden)]
+pub mod release_smoke;
 mod secrets;
 pub mod state;
 pub mod test_support;
@@ -22,6 +24,10 @@ use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    if let Some(exit_code) = release_smoke::run_from_env_args(std::env::args_os()) {
+        std::process::exit(exit_code);
+    }
+
     configure_linux_webkit_environment();
 
     tauri::Builder::default()

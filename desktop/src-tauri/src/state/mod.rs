@@ -341,6 +341,8 @@ pub(crate) struct DesktopApp {
     last_runtime_error: Option<String>,
     worker: Option<crate::worker::WorkerClient>,
     app_handle: Option<AppHandle>,
+    resource_dir_override: Option<PathBuf>,
+    worker_extra_env: Vec<(OsString, OsString)>,
     scheduler: RuntimeScheduler,
     host_workflow_children: HashMap<String, Vec<String>>,
     /// Unified intake progress (frontend): first half redact, second half ingest.
@@ -381,6 +383,8 @@ impl AppState {
                     last_runtime_error,
                     worker,
                     app_handle: None,
+                    resource_dir_override: None,
+                    worker_extra_env: Vec::new(),
                     scheduler: RuntimeScheduler::default(),
                     host_workflow_children: HashMap::new(),
                     intake_pipeline_active: false,
@@ -389,6 +393,21 @@ impl AppState {
                 }),
             }),
         }
+    }
+
+    #[doc(hidden)]
+    pub fn bootstrap_for_release_smoke(resource_dir: Option<PathBuf>) -> Self {
+        let state = Self::bootstrap_with_args(std::iter::empty::<OsString>());
+        {
+            let mut app = state.inner.lock();
+            app.resource_dir_override = resource_dir;
+            app.worker_extra_env = vec![(
+                OsString::from("SCRIPTSCORE_INCLUDE_BUILTIN_FAKES"),
+                OsString::from("1"),
+            )];
+            app.reload_worker_for_current_runtime();
+        }
+        state
     }
 
     pub fn create_project(
@@ -1225,6 +1244,9 @@ impl AppState {
 
 impl DesktopApp {
     fn bundled_resource_dir(&self) -> Option<PathBuf> {
+        if let Some(resource_dir) = self.resource_dir_override.as_ref() {
+            return Some(resource_dir.clone());
+        }
         self.app_handle
             .as_ref()
             .and_then(|app_handle| app_handle.path().resource_dir().ok())
@@ -1235,9 +1257,10 @@ impl DesktopApp {
             return Ok(());
         }
         self.worker_status = WorkerStatus::Starting;
-        match crate::worker::WorkerClient::launch(
+        match crate::worker::WorkerClient::launch_with_extra_env(
             self.bundled_resource_dir().as_deref(),
             self.worker_runtime_source(),
+            self.worker_extra_env.clone(),
         ) {
             Ok(worker) => {
                 self.worker = Some(worker);
@@ -1273,9 +1296,10 @@ impl DesktopApp {
 
     fn reload_worker_for_current_runtime(&mut self) {
         self.worker_status = WorkerStatus::Starting;
-        match crate::worker::WorkerClient::launch(
+        match crate::worker::WorkerClient::launch_with_extra_env(
             self.bundled_resource_dir().as_deref(),
             self.worker_runtime_source(),
+            self.worker_extra_env.clone(),
         ) {
             Ok(worker) => {
                 self.worker = Some(worker);

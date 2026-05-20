@@ -177,6 +177,19 @@ there because the locked PyTorch stack does not publish macOS Intel CPython
 signing, and Linux repository signing are deliberately outside this first RC
 package workflow.
 
+### Opt-In Release Smoke
+
+Package validation can run an additional headless release smoke when
+`SCRIPTSCORE_RELEASE_SMOKE=1` is set. The smoke launches the packaged desktop
+host with `--release-smoke`, generates synthetic PDFs in a temporary directory,
+creates a local no-LMS project, and writes a JSON summary with durable counts
+instead of screenshots or generated project files.
+
+The default smoke mode is `document`. It is deterministic and avoids hosted or
+local AI services. `local-ai` is reserved for future full local AI validation
+and should skip unless `SCRIPTSCORE_SMOKE_OLLAMA_URL` and
+`SCRIPTSCORE_SMOKE_OLLAMA_MODEL` are configured by the operator.
+
 ## Optional Quality Reports
 
 The scripts under `desktop/scripts/` include optional local quality-report helpers, including
