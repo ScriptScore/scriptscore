@@ -1167,6 +1167,7 @@
         sharedRosterMessage={rosterCacheState.lastError ?? rosterCacheState.idleReason ?? null}
         onEnsureRosterCache={ensureSharedRosterCache}
         existingIntakeItems={intakeItems}
+        expectedPageCount={expectedTemplatePageCount}
         {onFinalizeSubmission}
         onActiveFileChange={(filename) => {
           activeIntakeFilename = filename;

@@ -400,6 +400,9 @@ describe('StudentWorkflowWorkspace roster and stage state', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Next →' }));
     await fireEvent.click(screen.getByRole('button', { name: 'Next →' }));
     await fireEvent.click(screen.getByRole('button', { name: 'Remove page' }));
+    await fireEvent.click(
+      within(screen.getByRole('dialog')).getByRole('button', { name: 'Remove page' })
+    );
 
     expect(onSaveStudentIntakePageOrder).toHaveBeenCalledWith('student_1', [
       '/tmp/student_1_p1.png',

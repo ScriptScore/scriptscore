@@ -7,18 +7,20 @@ export function normalizeDesiredPageOrder(
     return [...availablePageNumbers];
   }
 
-  const available = [...availablePageNumbers].sort((left, right) => left - right);
-  const desired = desiredPageOrder.filter((pageNumber) => Number.isInteger(pageNumber) && pageNumber > 0);
-  const sortedDesired = [...desired].sort((left, right) => left - right);
-  if (available.length !== desired.length) {
-    return [...availablePageNumbers];
-  }
-  for (let index = 0; index < available.length; index += 1) {
-    if (available[index] !== sortedDesired[index]) {
-      return [...availablePageNumbers];
+  const available = new Set(availablePageNumbers);
+  const seen = new Set<number>();
+  const desired: number[] = [];
+  for (const pageNumber of desiredPageOrder) {
+    if (!Number.isInteger(pageNumber) || pageNumber <= 0 || !available.has(pageNumber)) {
+      continue;
     }
+    if (seen.has(pageNumber)) {
+      continue;
+    }
+    seen.add(pageNumber);
+    desired.push(pageNumber);
   }
-  return [...desired];
+  return desired.length > 0 ? desired : [...availablePageNumbers];
 }
 
 export function reorderPageNumbers(

@@ -1120,7 +1120,7 @@ def test_scans_ingest_honors_explicit_page_order(tmp_path: Path) -> None:
     ]
 
 
-def test_scans_ingest_rejects_partial_page_order_after_render(tmp_path: Path) -> None:
+def test_scans_ingest_accepts_partial_page_order_after_render(tmp_path: Path) -> None:
     pdf = make_student_pdf(tmp_path / "scan_001.pdf", page_texts=["page 1", "page 2"])
     output_dir = (tmp_path / "ingest_out").resolve()
 
@@ -1140,14 +1140,65 @@ def test_scans_ingest_rejects_partial_page_order_after_render(tmp_path: Path) ->
 
     assert result.exit_code == 0
     assert isinstance(result.envelope, CommandSuccessEnvelope)
+    row = result.envelope.data["pdf_results"][0]
+    assert row["status"] == "ok"
+    assert [page["page_number"] for page in row["pages"]] == [2]
+    assert [Path(page["image_path"]).name for page in row["pages"]] == ["page_001.png"]
+
+
+def test_scans_ingest_rejects_out_of_range_page_order_after_render(tmp_path: Path) -> None:
+    pdf = make_student_pdf(tmp_path / "scan_001.pdf", page_texts=["page 1", "page 2"])
+    output_dir = (tmp_path / "ingest_out").resolve()
+
+    result = _runner().run(
+        "scans.ingest",
+        {
+            "pdf_targets": [
+                {
+                    "student_ref": "scan_001",
+                    "pdf_path": str(pdf),
+                    "page_order": [3],
+                }
+            ],
+            "output_artifacts_dir": str(output_dir),
+        },
+    )
+
+    assert result.exit_code == 0
+    assert isinstance(result.envelope, CommandSuccessEnvelope)
     assert result.envelope.degraded is True
     row = result.envelope.data["pdf_results"][0]
     assert row["status"] == "error"
     assert row["warnings"][0]["code"] == "pdf_render_failed"
-    assert (
-        "page_order must contain every source PDF page number exactly once."
-        in row["warnings"][0]["message"]
+    assert "page_order must contain valid source PDF page numbers." in row["warnings"][0]["message"]
+
+
+def test_scans_pdf_create_redacted_keeps_selected_pages_in_order(tmp_path: Path) -> None:
+    fitz = pytest.importorskip("fitz")
+    pdf = make_student_pdf(tmp_path / "scan_001.pdf", page_texts=["page 1", "page 2", "page 3"])
+    output_pdf = (tmp_path / "redacted_selected.pdf").resolve()
+
+    result = _runner().run(
+        "scans.pdf-create-redacted",
+        {
+            "input_pdf_path": str(pdf.resolve()),
+            "output_pdf_path": str(output_pdf),
+            "regions": [],
+            "raster_sizes_by_page": {},
+            "page_order": [3, 1],
+        },
     )
+
+    assert result.exit_code == 0
+    assert isinstance(result.envelope, CommandSuccessEnvelope)
+    assert result.envelope.data["page_count"] == 2
+    document = fitz.open(output_pdf)
+    try:
+        assert document.page_count == 2
+        assert "page 3" in document.load_page(0).get_text()
+        assert "page 1" in document.load_page(1).get_text()
+    finally:
+        document.close()
 
 
 def test_scans_ingest_runtime_failure_is_row_local_degraded(

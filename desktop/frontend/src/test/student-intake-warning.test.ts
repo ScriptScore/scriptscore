@@ -858,10 +858,9 @@ describe('student intake overwrite warning', () => {
     await waitFor(() => {
       expect((pageTwoButton as HTMLButtonElement).disabled).toBe(false);
     });
-    await fireEvent.dragStart(pageTwoButton);
-    await fireEvent.dragOver(screen.getByRole('button', { name: 'Page 1' }));
-    await fireEvent.drop(screen.getByRole('button', { name: 'Page 1' }));
-    await fireEvent.dragEnd(pageTwoButton);
+    await fireEvent.pointerDown(pageTwoButton, { button: 0 });
+    await fireEvent.pointerEnter(screen.getByRole('button', { name: 'Page 1' }));
+    await fireEvent.pointerUp(window);
 
     const pagePills = screen.getAllByRole('button', { name: /Page [12]/ });
     expect(pagePills[0]?.textContent).toContain('Page 2');
@@ -901,6 +900,99 @@ describe('student intake overwrite warning', () => {
     expect(await screen.findByText('Submission ready')).toBeTruthy();
     expect(screen.queryByText('Applied page order')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Up' })).toBeNull();
+  });
+
+  it('allows extra source pages to be excluded before finalization', async () => {
+    desktopMocks.transientRenderPdfPagePng.mockImplementation(async (_pdfPath: string, pageNumber: number) =>
+      previewPage(pageNumber, 3)
+    );
+    const finalizedWorkspace = baseWorkspaceState({
+      studentIntake: {
+        status: 'ok',
+        latestJobId: 'job_intake_1',
+        unresolvedCount: 0,
+        items: [
+          {
+            studentRef: 'student_1',
+            canonicalPdfPath: '/tmp/student_1.pdf',
+            ingestStatus: 'ok',
+            pageCount: 2,
+            examPagePaths: ['/tmp/page_001.png', '/tmp/page_002.png'],
+            warnings: [],
+            bindingTokenHex: 'token_42'
+          }
+        ]
+      }
+    });
+    const onFinalizeSubmission = vi.fn().mockResolvedValue(finalizeResult(finalizedWorkspace));
+
+    const view = render(StudentIntakeWorkspace, {
+      ...readySharedRosterProps,
+      prerequisitesMet: true,
+      lmsCourseId: 'persisted-course-id',
+      existingIntakeItems: [],
+      seedPaths: ['/tmp/exam.pdf'],
+      seedVersion: 1,
+      busyAction: null,
+      expectedPageCount: 2,
+      onFinalizeSubmission
+    });
+
+    expect(
+      await screen.findByText('This submission has 3 pages; the template has 2. Exclude extra pages before finalizing.')
+    ).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Confirm for All Pages' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Exclude page 3' })).toBeNull();
+    await fireEvent.click(screen.getByRole('button', { name: 'Page 3' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Delete Page 3' }));
+    await waitFor(() => {
+      const restoredPill = screen.getByRole('button', { name: 'Restore page 3' });
+      expect(restoredPill).toBeTruthy();
+      expect(restoredPill.getAttribute('title')).toBe('Click to restore page 3');
+    });
+    expect(screen.queryByText('Restore')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Confirm for All Pages' })).toBeTruthy();
+
+    await advanceToAssociationStep(view.component as { __testConfirmRegions: () => Promise<void> });
+    await fireEvent.click(screen.getByRole('checkbox'));
+    await fireEvent.click(screen.getByRole('button', { name: 'Confirm student →' }));
+
+    await waitFor(() => {
+      expect(onFinalizeSubmission).toHaveBeenCalledWith(
+        expect.objectContaining({
+          desiredPageOrder: [1, 2]
+        })
+      );
+    });
+  });
+
+  it('blocks finalization when selected pages are fewer than the template', async () => {
+    desktopMocks.transientRenderPdfPagePng.mockImplementation(async (_pdfPath: string, pageNumber: number) =>
+      previewPage(pageNumber, 2)
+    );
+
+    const view = render(StudentIntakeWorkspace, {
+      ...readySharedRosterProps,
+      prerequisitesMet: true,
+      lmsCourseId: 'persisted-course-id',
+      existingIntakeItems: [],
+      seedPaths: ['/tmp/exam.pdf'],
+      seedVersion: 1,
+      busyAction: null,
+      expectedPageCount: 3,
+      onFinalizeSubmission: vi.fn()
+    });
+
+    expect(
+      await screen.findByText(
+        'This submission has 2 selected pages; the template has 3. Replace or rescan the PDF before finalizing intake.'
+      )
+    ).toBeTruthy();
+    await advanceToAssociationStep(view.component as { __testConfirmRegions: () => Promise<void> });
+    await fireEvent.click(screen.getByRole('checkbox'));
+    expect(
+      (screen.getByRole('button', { name: 'Confirm student →' }) as HTMLButtonElement).disabled
+    ).toBe(true);
   });
 
   it('preserves ordered pages, default redactions, ad-hoc redactions, and raster sizes in finalization', async () => {
@@ -959,10 +1051,9 @@ describe('student intake overwrite warning', () => {
     await waitFor(() => {
       expect((pageTwoButton as HTMLButtonElement).disabled).toBe(false);
     });
-    await fireEvent.dragStart(pageTwoButton);
-    await fireEvent.dragOver(screen.getByRole('button', { name: 'Page 1' }));
-    await fireEvent.drop(screen.getByRole('button', { name: 'Page 1' }));
-    await fireEvent.dragEnd(pageTwoButton);
+    await fireEvent.pointerDown(pageTwoButton, { button: 0 });
+    await fireEvent.pointerEnter(screen.getByRole('button', { name: 'Page 1' }));
+    await fireEvent.pointerUp(window);
     await fireEvent.click(pageTwoButton);
     await fireEvent.click(screen.getByRole('button', { name: 'Add Redaction' }));
 

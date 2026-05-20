@@ -90,6 +90,7 @@ struct StudentIntakePreparedInputs {
     input_refs: HashSet<String>,
     default_regions_json: Vec<Value>,
     default_raster_json: Value,
+    template_page_count: usize,
     persist_local_display_names: bool,
 }
 
@@ -109,6 +110,7 @@ pub(crate) fn run_student_intake(
     }
 
     let prepared = prepare_student_intake_inputs(project_path, &inputs)?;
+    validate_selected_page_counts(&inputs, prepared.template_page_count)?;
     let _intake_progress = start_intake_pipeline_progress(state, inputs.len());
 
     let mut canonical_targets = Vec::new();
@@ -424,6 +426,12 @@ fn prepare_student_intake_inputs(
         input_refs,
         default_regions_json: template_redaction_regions_json(&redactions),
         default_raster_json: raster_sizes_by_page_json(&raster_sizes),
+        template_page_count: workspace
+            .template_preview_artifacts
+            .iter()
+            .filter_map(|artifact| usize::try_from(artifact.page_number).ok())
+            .max()
+            .unwrap_or(0),
         persist_local_display_names: workspace
             .project_config
             .lms_course_id
@@ -455,6 +463,25 @@ fn canonical_targets_job_payload(canonical_targets: &[Value]) -> Value {
     json!({
         "pdf_targets": canonical_targets,
     })
+}
+
+fn validate_selected_page_counts(
+    inputs: &[StudentIntakeInput],
+    template_page_count: usize,
+) -> HostResult<()> {
+    if template_page_count == 0 {
+        return Ok(());
+    }
+    for input in inputs {
+        let page_order = normalized_desired_page_order(input);
+        if !page_order.is_empty() && page_order.len() < template_page_count {
+            return Err(HostError::Validation(format!(
+                "Submission '{}' has fewer selected pages than the template. Replace or rescan the PDF before finalizing intake.",
+                input.student_ref
+            )));
+        }
+    }
+    Ok(())
 }
 
 fn sanitized_ingest_request_payload(inputs: &[StudentIntakeInput]) -> Value {
@@ -549,6 +576,7 @@ fn redact_and_promote_submission(
                 "output_pdf_path": temp_redacted.to_string_lossy(),
                 "regions": regions_json,
                 "raster_sizes_by_page": raster_json,
+                "page_order": normalized_desired_page_order(input),
                 "student_ref": input.student_ref.trim(),
             }),
             persisted_request_payload: json!({
@@ -567,19 +595,10 @@ fn redact_and_promote_submission(
         ))
     })?;
 
-    let page_order = normalized_desired_page_order(input);
-    let canonical_target = if page_order.is_empty() {
-        json!({
-            "student_ref": input.student_ref,
-            "pdf_path": canonical_pdf_path.to_string_lossy().into_owned(),
-        })
-    } else {
-        json!({
-            "student_ref": input.student_ref,
-            "pdf_path": canonical_pdf_path.to_string_lossy().into_owned(),
-            "page_order": page_order,
-        })
-    };
+    let canonical_target = json!({
+        "student_ref": input.student_ref,
+        "pdf_path": canonical_pdf_path.to_string_lossy().into_owned(),
+    });
     let summary = StudentIntakeSummary {
         student_ref: input.student_ref.clone(),
         local_display_name: persisted_local_display_name(input, persist_local_display_name),
@@ -779,7 +798,7 @@ mod tests {
         read_png_raster_dimensions, resolved_redaction_payloads, sanitized_ingest_request_payload,
         submission_has_downstream_progress, template_redaction_regions_json,
         validate_page_order_update_input, validate_reordered_paths_match_existing,
-        workflow_status_for_submissions,
+        validate_selected_page_counts, workflow_status_for_submissions,
     };
     use crate::models::{
         InstructorProfile, StudentIntakeInput, StudentIntakePageOrderUpdateInput,
@@ -1097,6 +1116,24 @@ mod tests {
         };
 
         assert_eq!(normalized_desired_page_order(&input), vec![3, 2]);
+    }
+
+    #[test]
+    fn selected_page_count_validation_blocks_missing_pages() {
+        let input = StudentIntakeInput {
+            student_ref: "student_1".into(),
+            local_student_name: None,
+            raw_pdf_path: "/tmp/student_1.pdf".into(),
+            desired_page_order: vec![1, 2],
+            redaction_regions_px: Vec::new(),
+            raster_sizes_by_page: HashMap::new(),
+        };
+
+        assert!(validate_selected_page_counts(std::slice::from_ref(&input), 2).is_ok());
+        assert!(validate_selected_page_counts(&[input], 3)
+            .expect_err("fewer selected pages than template should fail")
+            .to_string()
+            .contains("Replace or rescan"));
     }
 
     #[test]

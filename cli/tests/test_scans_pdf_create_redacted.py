@@ -171,6 +171,32 @@ def test_scans_pdf_create_redacted_accepts_worker_injected_output_artifacts_dir(
     assert result.exit_code == 0
 
 
+def test_scans_pdf_create_redacted_can_select_pages_in_place(tmp_path: Path) -> None:
+    pdf = make_student_pdf(tmp_path / "student.pdf", page_texts=["page 1", "page 2", "page 3"])
+
+    result = _runner().run(
+        "scans.pdf-create-redacted",
+        {
+            "input_pdf_path": str(pdf.resolve()),
+            "output_pdf_path": str(pdf.resolve()),
+            "regions": [],
+            "raster_sizes_by_page": {},
+            "page_order": [3, 1],
+        },
+    )
+
+    assert result.exit_code == 0
+    assert isinstance(result.envelope, CommandSuccessEnvelope)
+    assert result.envelope.data["page_count"] == 2
+    document = fitz.open(pdf)
+    try:
+        assert document.page_count == 2
+        assert "page 3" in document.load_page(0).get_text()
+        assert "page 1" in document.load_page(1).get_text()
+    finally:
+        document.close()
+
+
 def test_scans_pdf_create_redacted_rejects_missing_raster_for_region_page(tmp_path: Path) -> None:
     pdf = make_student_pdf(tmp_path / "x.pdf", page_texts=["a"])
     out = tmp_path / "o.pdf"

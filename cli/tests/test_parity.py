@@ -485,7 +485,7 @@ def test_scans_ingest_with_page_order_matches_between_direct_cli_and_sidecar(
             {
                 "student_ref": "scan_001",
                 "pdf_path": str(pdf),
-                "page_order": [3, 1, 2],
+                "page_order": [3, 1],
             }
         ],
         "output_artifacts_dir": str(output_dir),
