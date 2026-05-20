@@ -9,6 +9,7 @@
     EyeIcon,
     File02Icon,
     FileQuestionMarkIcon,
+    Move02Icon,
     SquareArrowShrink02Icon
   } from '@hugeicons/core-free-icons';
   import {
@@ -54,6 +55,7 @@
 
   type CardPreview =
     | { kind: 'page'; cardKey: string; card: ModerationCard }
+    | { kind: 'crop'; cardKey: string; card: ModerationCard }
     | { kind: 'rubric'; cardKey: string; card: ModerationCard };
 
   type CardPointerDragState = {
@@ -108,10 +110,11 @@
   let scoreLanes: number[] = [];
   let pointerDragState: CardPointerDragState | null = null;
   let lanesRenderKey = 0;
-  let cardColumnWidthStyle = '15.2rem';
+  let cardColumnWidthStyle = '15rem';
   let cardMinHeightStyle = '11rem';
   let textBlockMaxHeightStyle = '5.777777777777778rem';
   let imageBlockMaxHeightStyle = '6.5rem';
+  let feedbackBlockMinHeightStyle = '3.5rem';
   let feedbackBlockMaxHeightStyle = '3.5rem';
   let evidenceFontSizeStyle = '0.6875rem';
   let evidenceLineHeightStyle = '1rem';
@@ -356,11 +359,34 @@
     }));
   }
 
-  $: cardColumnWidthStyle = `${12 + cardSize / 10}rem`;
-  $: cardMinHeightStyle = `${9 + cardSize / 16}rem`;
-  $: textBlockMaxHeightStyle = `${Math.min(7.5, 4 + cardSize / 18)}rem`;
-  $: imageBlockMaxHeightStyle = `${Math.min(8, 4.5 + cardSize / 16)}rem`;
-  $: feedbackBlockMaxHeightStyle = `${Math.min(4.75, 3 + cardSize / 18)}rem`;
+  function scoreMoveOptions(
+    question: ModerationQuestionGroup,
+    card: ModerationCard
+  ): Array<{ value: string; label: string }> {
+    return Array.from({ length: question.maxPoints + 1 }, (_, index) => question.maxPoints - index)
+      .filter((score) => score !== card.effectiveTotalPoints)
+      .map((score) => ({
+        value: String(score),
+        label: `${score} ${score === 1 ? 'point' : 'points'}`
+      }));
+  }
+
+  function canMoveCard(card: ModerationCard): boolean {
+    return (
+      !busy &&
+      pendingCardKey !== cardKey(card.studentRef, card.answer.questionId) &&
+      onSaveModeratedScore !== null
+    );
+  }
+
+  $: cardColumnWidthStyle = `${
+    cardSize <= 192 ? 14 + cardSize / 32 : Math.min(24, 20 + (cardSize - 192) / 12)
+  }rem`;
+  $: cardMinHeightStyle = `${9 + cardSize / 12}rem`;
+  $: textBlockMaxHeightStyle = `${Math.min(16, 4.5 + cardSize / 18)}rem`;
+  $: imageBlockMaxHeightStyle = `${Math.min(24, 5 + cardSize / 14)}rem`;
+  $: feedbackBlockMinHeightStyle = `${Math.min(16, 3.5 + cardSize / 18)}rem`;
+  $: feedbackBlockMaxHeightStyle = `${Math.min(18, 5 + cardSize / 14)}rem`;
   $: evidenceFontSizeStyle = `${0.65 + cardSize / 420}rem`;
   $: evidenceLineHeightStyle = `${0.95 + cardSize / 320}rem`;
   $: feedbackFontSizeStyle = `${0.65 + cardSize / 400}rem`;
@@ -435,18 +461,21 @@
     if (preview.kind === 'page') {
       return `${label} page ${preview.card.pageNumber ?? ''}`.trim();
     }
+    if (preview.kind === 'crop') {
+      return `${label} answer crop`;
+    }
     return `${label} graded rubric`;
   }
 
-  function previewAnchorStyle(kind: CardPreview['kind'], event: MouseEvent): string {
+  function previewAnchorStyle(kind: CardPreview['kind'], event: Event): string {
     const target = event.currentTarget;
     const article =
       target instanceof HTMLElement ? target.closest('article') ?? target : null;
     const rect = article?.getBoundingClientRect() ?? new DOMRect(16, 16, 0, 0);
     const margin = 12;
     const gap = 10;
-    const popoverWidth = kind === 'page' ? 560 : 430;
-    const popoverHeight = kind === 'page' ? 720 : 460;
+    const popoverWidth = kind === 'rubric' ? 430 : 560;
+    const popoverHeight = kind === 'page' ? 720 : kind === 'crop' ? 560 : 460;
     const viewportWidth = window.innerWidth;
     const viewportHeight = window.innerHeight;
     const width = Math.min(popoverWidth, Math.max(280, viewportWidth - margin * 2));
@@ -479,7 +508,7 @@
     previewOpenSuppressionTimer = window.setTimeout(clearPreviewOpenSuppression, 500);
   }
 
-  function openPreview(kind: CardPreview['kind'], card: ModerationCard, event: MouseEvent): void {
+  function openPreview(kind: CardPreview['kind'], card: ModerationCard, event: Event): void {
     const trigger = event.currentTarget instanceof HTMLElement ? event.currentTarget : null;
     if (
       trigger &&
@@ -496,6 +525,14 @@
       cardKey: cardKey(card.studentRef, card.answer.questionId),
       card
     };
+  }
+
+  function handleCropPreviewKeyDown(event: KeyboardEvent, card: ModerationCard): void {
+    if (event.key !== 'Enter' && event.key !== ' ') {
+      return;
+    }
+    event.preventDefault();
+    openPreview('crop', card, event);
   }
 
   function closePreview(): void {
@@ -584,6 +621,17 @@
     }
   }
 
+  async function handleMoveCardSelection(card: ModerationCard, value: string) {
+    if (!canMoveCard(card)) {
+      return;
+    }
+    const targetScore = Number(value);
+    if (!Number.isFinite(targetScore)) {
+      return;
+    }
+    await handleSaveScore(card, targetScore);
+  }
+
   async function handleSaveFeedback(card: ModerationCard) {
     const key = cardKey(card.studentRef, card.answer.questionId);
     const hasDraft = Object.hasOwn(feedbackDrafts, key);
@@ -632,6 +680,12 @@
   }
 
   function isInteractiveCardTarget(target: EventTarget | null): boolean {
+    if (
+      target instanceof Element &&
+      target.closest('[data-card-drag-compatible="true"]') !== null
+    ) {
+      return false;
+    }
     return (
       target instanceof Element &&
       target.closest(
@@ -724,6 +778,9 @@
     const draggedKey = pointerDragState.cardKey;
     const lane = scoreLaneAtPoint(event.clientX, event.clientY);
     releaseCardPointerCapture(event.currentTarget as HTMLElement, event.pointerId);
+    if (completedDrag && event.target instanceof Node) {
+      suppressNextPreviewOpenFrom(event.target);
+    }
     pointerDragState = null;
     hoverLaneKey = null;
     draggingCardKey = null;
@@ -968,7 +1025,7 @@
                     class="mt-2 w-full accent-interaction-selected"
                     type="range"
                     min="0"
-                    max="192"
+                    max="240"
                     step="1"
                     bind:value={cardSize}
                     aria-label="Answer card size"
@@ -1063,7 +1120,23 @@
                       ondragend={handleDragEnd}
                     >
                       <div class="flex items-center justify-between gap-2">
-                        <div class="flex min-h-6 min-w-0 flex-1 items-center">
+                        <div class="flex min-h-6 min-w-0 flex-1 items-center gap-1">
+                          <IconButton
+                            size="compact"
+                            variant="ghost"
+                            class="h-6 w-6 shrink-0 rounded-full"
+                            ariaLabel={`${compactCard ? 'Use full card for' : 'Use mini card for'} ${displayLabel}`}
+                            title={`${compactCard ? 'Use full card for' : 'Use mini card for'} ${displayLabel}`}
+                            aria-pressed={compactCard}
+                            onclick={() => toggleCompactCard(card)}
+                          >
+                            <HugeiconsIcon
+                              icon={compactCard ? EyeIcon : SquareArrowShrink02Icon}
+                              size={14}
+                              strokeWidth={1.8}
+                              aria-hidden="true"
+                            />
+                          </IconButton>
                           <div
                             class="truncate font-semibold text-text-primary"
                             title={scoreEditTitle(card)}
@@ -1111,22 +1184,22 @@
                           >
                             <HugeiconsIcon icon={CheckListIcon} size={14} strokeWidth={1.8} aria-hidden="true" />
                           </IconButton>
-                          <IconButton
-                            size="compact"
-                            variant="ghost"
-                            class="h-6 w-6 rounded-full"
-                            ariaLabel={`${compactCard ? 'Use full card for' : 'Use mini card for'} ${displayLabel}`}
-                            title={`${compactCard ? 'Use full card for' : 'Use mini card for'} ${displayLabel}`}
-                            aria-pressed={compactCard}
-                            onclick={() => toggleCompactCard(card)}
-                          >
-                            <HugeiconsIcon
-                              icon={compactCard ? EyeIcon : SquareArrowShrink02Icon}
-                              size={14}
-                              strokeWidth={1.8}
-                              aria-hidden="true"
-                            />
-                          </IconButton>
+                          <IconSelectField
+                            ariaLabel={`Move ${displayLabel} to score lane`}
+                            dialogLabel={`Move ${displayLabel} to score lane`}
+                            menuLabel="Move to score"
+                            title={`Move ${displayLabel} to score lane`}
+                            value=""
+                            options={scoreMoveOptions(selectedQuestion, card)}
+                            icon={Move02Icon}
+                            iconSize={14}
+                            iconStrokeWidth={1.8}
+                            disabled={!canMoveCard(card)}
+                            align="right"
+                            menuClass="min-w-32"
+                            triggerClass="inline-flex h-6 w-6 items-center justify-center rounded-full text-text-secondary transition-colors hover:bg-interaction-hover hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring disabled:cursor-not-allowed disabled:opacity-50"
+                            onChange={(value) => handleMoveCardSelection(card, value)}
+                          />
                         </div>
                       </div>
 
@@ -1149,7 +1222,16 @@
                         {/if}
 
                         {#if (evidenceView === 'png' || evidenceView === 'both') && card.answer.cropImagePath}
-                          <div class="overflow-hidden rounded-md bg-surface-canvas">
+                          <div
+                            class="overflow-hidden rounded-md bg-surface-canvas focus-within:ring-2 focus-within:ring-focus-ring"
+                            data-card-drag-compatible="true"
+                            role="button"
+                            tabindex="0"
+                            aria-label={`Preview answer crop for ${displayLabel}`}
+                            title={`Preview answer crop for ${displayLabel}`}
+                            onclick={(event: MouseEvent) => openPreview('crop', card, event)}
+                            onkeydown={(event) => handleCropPreviewKeyDown(event, card)}
+                          >
                             <img
                               src={toDesktopAssetUrl(card.answer.cropImagePath)}
                               alt={`${label} answer crop`}
@@ -1165,6 +1247,7 @@
                           class="min-h-14 w-full select-text resize-none overflow-auto rounded-md border border-border-default bg-surface-canvas px-2 py-1.5 text-[11px] leading-4 text-text-primary outline-none transition-colors focus:border-border-strong focus:ring-2 focus:ring-focus-ring"
                           placeholder="Feedback"
                           rows="3"
+                          style:min-height={feedbackBlockMinHeightStyle}
                           style:max-height={feedbackBlockMaxHeightStyle}
                           style:font-size={feedbackFontSizeStyle}
                           style:line-height={feedbackLineHeightStyle}
@@ -1227,6 +1310,15 @@
               <PagePreviewFrame
                 src={toDesktopAssetUrl(activePreview.card.pageImagePath)}
                 alt={`${studentLabel(activePreview.card.studentRef, showStudentNames, studentDisplayNamesByRef)} full page ${activePreview.card.pageNumber ?? ''}`.trim()}
+                class="mx-auto w-fit max-h-[62vh] max-w-full rounded-md"
+                imageClass="block max-h-[62vh] max-w-full object-contain"
+              />
+            {/if}
+          {:else if activePreview.kind === 'crop'}
+            {#if activePreview.card.answer.cropImagePath}
+              <PagePreviewFrame
+                src={toDesktopAssetUrl(activePreview.card.answer.cropImagePath)}
+                alt={`${studentLabel(activePreview.card.studentRef, showStudentNames, studentDisplayNamesByRef)} answer crop preview`}
                 class="mx-auto w-fit max-h-[62vh] max-w-full rounded-md"
                 imageClass="block max-h-[62vh] max-w-full object-contain"
               />
