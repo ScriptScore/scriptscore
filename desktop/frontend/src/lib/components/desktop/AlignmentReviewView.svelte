@@ -496,8 +496,10 @@
   {/if}
 
   {#if intakeItem && selectedAlignmentPage}
-    <div class="flex min-h-0 min-w-0 flex-1 gap-6 px-6 py-4">
-      <div class="min-h-0 min-w-0 flex-1 overflow-hidden">
+    <div
+      class="flex min-h-0 min-w-0 flex-1 flex-col gap-4 overflow-y-auto px-4 py-4 xl:flex-row xl:gap-6 xl:overflow-hidden xl:px-6"
+    >
+      <div class="min-h-[24rem] min-w-0 flex-1 overflow-hidden xl:min-h-0">
         <AlignmentOverlayCanvas
           templateImageUrl={selectedTemplateUrl}
           submissionImageUrl={selectedSubmissionUrl}
@@ -511,7 +513,7 @@
         />
       </div>
 
-      <aside class="flex w-[15rem] shrink-0 min-h-0 flex-col gap-6 overflow-auto">
+      <aside class="flex min-h-0 w-full shrink-0 flex-col gap-6 overflow-visible xl:w-[15rem] xl:overflow-auto">
         <section>
           <div class="rounded-lg border border-workspace-border bg-card/20 px-3 py-3">
             <div class="text-xs font-semibold uppercase tracking-wide text-workspace-text-muted">
