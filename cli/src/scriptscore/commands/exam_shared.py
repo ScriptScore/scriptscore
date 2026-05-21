@@ -25,7 +25,11 @@ _QUESTION_MARKER_RE = re.compile(
     r"^\s*(?:Question\s+)?(?P<number>\d+)(?:\s*\(\d+\s*(?:pts?|points?)\)|\s*[\].:)])",
     re.IGNORECASE,
 )
-_QUESTION_PREFIX_RE = re.compile(r"^\s*(?:question\s*)?\d+\s*[\].:)-]*\s*", re.IGNORECASE)
+_NUMBERED_SUBPART_MARKER_RE = re.compile(
+    r"^\s*(?P<number>\d+)(?P<subpart>[a-z])\s*[\].:)]",
+    re.IGNORECASE,
+)
+_QUESTION_PREFIX_RE = re.compile(r"^\s*(?:question\s*)?\d+[a-z]?\s*[\].:)-]*\s*", re.IGNORECASE)
 _POINTS_RE = re.compile(r"(?<!\d)(?P<points>\d+)\s*(?:pts?|points?)\b", re.IGNORECASE)
 _PAREN_POINTS_RE = re.compile(r"\((?P<points>\d+)\)")
 _POINT_DISTRIBUTION_HEADER_RE = re.compile(r"^Point Distribution\b", re.IGNORECASE)
@@ -81,6 +85,15 @@ class QuestionMarker:
     question_number: int
     page_number: int
     rect: fitz.Rect
+    subpart: str | None = None
+
+    @property
+    def question_label(self) -> str:
+        """Return the user-visible label component for this marker."""
+
+        return (
+            f"{self.question_number}{self.subpart}" if self.subpart else str(self.question_number)
+        )
 
 
 @dataclass(frozen=True)
@@ -178,30 +191,75 @@ def detect_question_markers(page: fitz.Page) -> list[QuestionMarker]:
                 and _match_point_summary_line(stripped_line) is not None
             ):
                 continue
+            subpart_match = _NUMBERED_SUBPART_MARKER_RE.match(stripped_line)
             match = _QUESTION_MARKER_RE.match(stripped_line)
-            if not match:
+            if subpart_match is None and match is None:
                 continue
+            if subpart_match is not None:
+                question_number = int(subpart_match.group("number"))
+            else:
+                assert match is not None
+                question_number = int(match.group("number"))
             candidates.append(
                 QuestionMarker(
-                    question_number=int(match.group("number")),
+                    question_number=question_number,
                     page_number=page.number + 1,
                     rect=rect,
+                    subpart=(
+                        subpart_match.group("subpart").lower()
+                        if subpart_match is not None
+                        else None
+                    ),
                 )
             )
     return candidates
 
 
 def collapse_markers(markers: list[QuestionMarker]) -> list[QuestionMarker]:
-    """Collapse duplicate detected question numbers to first occurrence."""
+    """Collapse duplicate detected question labels to first occurrence."""
 
-    seen: set[int] = set()
+    ordered = sorted(markers, key=lambda item: (item.page_number, item.rect.y0))
+    valid_subparts = _valid_numbered_subpart_keys(ordered)
+    subpart_numbers = {number for number, _subpart in valid_subparts}
+    seen: set[tuple[int, str | None]] = set()
     collapsed: list[QuestionMarker] = []
-    for marker in sorted(markers, key=lambda item: (item.page_number, item.rect.y0)):
-        if marker.question_number in seen:
+    for marker in ordered:
+        key = (marker.question_number, marker.subpart)
+        if key in seen:
             continue
-        seen.add(marker.question_number)
+        if marker.subpart is None and marker.question_number in subpart_numbers:
+            continue
+        if marker.subpart is not None and key not in valid_subparts:
+            continue
+        seen.add(key)
         collapsed.append(marker)
     return collapsed
+
+
+def _valid_numbered_subpart_keys(markers: list[QuestionMarker]) -> set[tuple[int, str]]:
+    """Return subpart marker keys that form conservative `4a.`/`4b.` sequences."""
+
+    by_number: dict[int, list[str]] = {}
+    for marker in markers:
+        if marker.subpart is None:
+            continue
+        by_number.setdefault(marker.question_number, [])
+        if marker.subpart not in by_number[marker.question_number]:
+            by_number[marker.question_number].append(marker.subpart)
+
+    valid: set[tuple[int, str]] = set()
+    for number, subparts in by_number.items():
+        expected = ord("a")
+        contiguous: list[str] = []
+        for subpart in subparts:
+            if ord(subpart) != expected:
+                contiguous = []
+                break
+            contiguous.append(subpart)
+            expected += 1
+        if len(contiguous) >= 2:
+            valid.update((number, subpart) for subpart in contiguous)
+    return valid
 
 
 def extract_cover_page_max_points(page: fitz.Page) -> dict[int, int]:

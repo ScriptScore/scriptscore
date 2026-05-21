@@ -591,12 +591,15 @@ class QuestionDetectHint(BaseModel):
 
     question_id: str = Field(min_length=1)
     question_number: int = Field(ge=1)
+    question_label: str | None = Field(default=None, min_length=1)
     template_region: Region
     question_text_hint: str = Field(min_length=1)
 
     @model_validator(mode="after")
     def validate_fields(self) -> QuestionDetectHint:
         require_safe_path_component(self.question_id, field_name="question_id")
+        if self.question_label is not None:
+            require_safe_path_component(self.question_label, field_name="question_label")
         return self
 
 
@@ -625,17 +628,24 @@ class DetectTarget(BaseModel):
             raise ValueError("detect targets must not supply both ocr_boxes and ocr_metadata_path.")
         seen_question_ids: set[str] = set()
         seen_question_numbers: set[int] = set()
+        seen_question_labels: set[str] = set()
         for hint in self.question_hints:
             if hint.question_id in seen_question_ids:
                 raise ValueError(
                     f"duplicate detect hint supplied for question_id={hint.question_id!r}."
                 )
-            if hint.question_number in seen_question_numbers:
+            question_label = hint.question_label or str(hint.question_number)
+            if question_label in seen_question_labels:
+                raise ValueError(
+                    f"duplicate detect hint supplied for question_label={question_label!r}."
+                )
+            if hint.question_label is None and hint.question_number in seen_question_numbers:
                 raise ValueError(
                     f"duplicate detect hint supplied for question_number={hint.question_number}."
                 )
             seen_question_ids.add(hint.question_id)
             seen_question_numbers.add(hint.question_number)
+            seen_question_labels.add(question_label)
         return self
 
 

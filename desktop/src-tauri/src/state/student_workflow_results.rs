@@ -5,7 +5,7 @@ use serde_json::{json, Map, Value};
 
 use crate::errors::{HostError, HostResult};
 use crate::models::{
-    ExamWorkspaceState, StudentWorkflowAlignmentPage, StudentWorkflowAnswer,
+    ExamWorkspaceState, QuestionRecord, StudentWorkflowAlignmentPage, StudentWorkflowAnswer,
     StudentWorkflowCriterionResult, StudentWorkflowDetectRegion, StudentWorkflowDetectReview,
     StudentWorkflowDetectReviewRow, StudentWorkflowHighlightSpan, StudentWorkflowPage,
     StudentWorkflowPiiPrescreen, StudentWorkflowSubmission, WorkspaceWarning,
@@ -249,6 +249,7 @@ pub(super) fn build_detect_targets(
             .push(json!({
                 "question_id": question.question_id,
                 "question_number": question.question_number,
+                "question_label": question_label(question),
                 "template_region": {
                     "x": region.x,
                     "y": region.y,
@@ -383,6 +384,15 @@ fn detect_review_row(
         warnings: parse_warnings(row.get("warnings"))?,
         resolved_region: None,
     })
+}
+
+fn question_label(question: &QuestionRecord) -> String {
+    question
+        .question_id
+        .strip_prefix('q')
+        .filter(|label| !label.is_empty() && label.chars().all(|ch| ch.is_ascii_alphanumeric()))
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| question.question_number.to_string())
 }
 
 fn template_region_for_question(
@@ -1618,6 +1628,10 @@ mod tests {
             build_detect_targets(&workspace, &submission).expect("detect targets should build");
         assert_eq!(detect_targets.len(), 2);
         assert_eq!(detect_targets[0]["question_hints"][0]["question_id"], "q1");
+        assert_eq!(
+            detect_targets[0]["question_hints"][0]["question_label"],
+            "1"
+        );
         assert_eq!(
             detect_targets[0]["page"]["source_pdf_path"],
             "/tmp/student-1.pdf"

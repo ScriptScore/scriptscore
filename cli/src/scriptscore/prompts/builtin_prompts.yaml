@@ -371,6 +371,10 @@ preliminary_score:
     Rules:
     - Award integer points only, from 0 to the current criterion max.
     - Use visible evidence in the student answer.
+    - If the question appears to include printed multiple-choice options, identify those printed options from the question text or template context, but do not treat the printed option text itself as the student's answer.
+    - Treat circles, checks, underlines, highlights, or nearby handwritten option letters as possible selection evidence only when they are clearly tied to a printed option.
+    - Do not treat a lone O, 0, or noisy OCR artifact as a selected option unless it is clearly connected to an answer choice.
+    - If the selected option is ambiguous or the student response signal is insufficient, say so in the rationale and do not invent a selected option.
     - Apply OCR and syntax leniency per instructor profile.
     - Do not compute or mention total score.
     - Do not provide final student-facing feedback.
@@ -458,6 +462,10 @@ preliminary_score_multi_criterion:
     - Return exactly one score object for every criterion_index in the rubric.
     - Award integer points only, from 0 to that criterion max.
     - Use visible evidence in the student answer.
+    - If the question appears to include printed multiple-choice options, identify those printed options from the question text or template context, but do not treat the printed option text itself as the student's answer.
+    - Treat circles, checks, underlines, highlights, or nearby handwritten option letters as possible selection evidence only when they are clearly tied to a printed option.
+    - Do not treat a lone O, 0, or noisy OCR artifact as a selected option unless it is clearly connected to an answer choice.
+    - If the selected option is ambiguous or the student response signal is insufficient, say so in the rationale and do not invent a selected option.
     - Apply OCR and syntax leniency per instructor profile.
     - Do not compute or mention total score.
     - Do not provide final student-facing feedback.

@@ -125,8 +125,11 @@ def handle_exam_setup(ctx: CommandContext, request: ExamSetupRequest) -> Command
             raise unsupported_layout(
                 message="No supported line-leading question labels were detected in the template PDF."
             )
-        expected_numbers = list(range(1, len(collapsed) + 1))
-        actual_numbers = [marker.question_number for marker in collapsed]
+        actual_numbers: list[int] = []
+        for marker in collapsed:
+            if not actual_numbers or actual_numbers[-1] != marker.question_number:
+                actual_numbers.append(marker.question_number)
+        expected_numbers = list(range(1, len(actual_numbers) + 1))
         if actual_numbers != expected_numbers:
             raise unsupported_layout(
                 message="Template question labels must form a contiguous sequence starting at 1.",
@@ -143,7 +146,7 @@ def handle_exam_setup(ctx: CommandContext, request: ExamSetupRequest) -> Command
         question_crops: list[tuple[Path, Image.Image]] = []
         for index, marker in enumerate(collapsed, start=1):
             ctx.check_cancelled()
-            question_id = f"q{marker.question_number}"
+            question_id = f"q{marker.question_label}"
             question_scope: dict[str, object] = {"question_id": question_id}
             ctx.emit(
                 event="item_started",
@@ -191,6 +194,7 @@ def handle_exam_setup(ctx: CommandContext, request: ExamSetupRequest) -> Command
             question = SetupQuestion(
                 question_id=question_id,
                 question_number=marker.question_number,
+                question_label=marker.question_label,
                 page_number=marker.page_number,
                 baseline_pdf_text=baseline_pdf_text,
                 max_points=max_points,

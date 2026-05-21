@@ -35,7 +35,11 @@ pub(crate) fn parse_exam_setup_success(
     artifact_records.extend(question_artifacts);
 
     page_artifacts.sort_by_key(|artifact| artifact.page_number);
-    questions.sort_by_key(|question| question.question_number);
+    questions.sort_by(|left, right| {
+        left.question_number
+            .cmp(&right.question_number)
+            .then_with(|| left.question_id.cmp(&right.question_id))
+    });
     Ok((page_artifacts, artifact_records, questions, warnings))
 }
 
