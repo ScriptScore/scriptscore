@@ -167,18 +167,22 @@ def _is_header_fragment_match(match: _HeaderTextMatch, hint: QuestionDetectHint)
     )
 
 
-def _matches_question_number(box_text: str, question_number: int) -> bool:
+def _question_label(hint: QuestionDetectHint) -> str:
+    return hint.question_label or str(hint.question_number)
+
+
+def _matches_question_label(box_text: str, question_label: str) -> bool:
     normalized = _normalize_text(box_text)
-    number = str(question_number)
+    label = _normalize_text(question_label)
     return (
-        normalized == number
-        or normalized.startswith(f"{number} ")
-        or normalized.startswith(f"question {number}")
+        normalized == label
+        or normalized.startswith(f"{label} ")
+        or normalized.startswith(f"question {label}")
     )
 
 
 def _header_match_score(box: OcrTextBox, hint: QuestionDetectHint) -> tuple[int, int, float] | None:
-    number_match = _matches_question_number(box.text, hint.question_number)
+    number_match = _matches_question_label(box.text, _question_label(hint))
     term_overlap = _hint_term_overlap_count(box.text, hint)
     text_match = _header_text_match(box.text, hint)
     if not number_match and term_overlap == 0:
@@ -205,9 +209,9 @@ def _header_match_score(box: OcrTextBox, hint: QuestionDetectHint) -> tuple[int,
 
 
 def _number_without_strong_text_match(box: OcrTextBox, hint: QuestionDetectHint) -> bool:
-    return _matches_question_number(
-        box.text, hint.question_number
-    ) and not _is_strong_header_text_match(_header_text_match(box.text, hint), hint)
+    return _matches_question_label(box.text, _question_label(hint)) and not (
+        _is_strong_header_text_match(_header_text_match(box.text, hint), hint)
+    )
 
 
 def _has_nearby_header_text_support(
@@ -217,9 +221,9 @@ def _has_nearby_header_text_support(
         if box is seed:
             continue
         text_match = _header_text_match(box.text, hint)
-        if not _matches_question_number(
-            box.text, hint.question_number
-        ) and not _is_strong_header_text_match(text_match, hint):
+        if not _matches_question_label(box.text, _question_label(hint)) and not (
+            _is_strong_header_text_match(text_match, hint)
+        ):
             continue
         if box.top <= seed.bottom + 40 and box.bottom >= seed.top - 40:
             return True
@@ -229,7 +233,7 @@ def _has_nearby_header_text_support(
 def _supports_split_header_band(
     box: OcrTextBox, hint: QuestionDetectHint, seed: OcrTextBox
 ) -> bool:
-    if _matches_question_number(box.text, hint.question_number):
+    if _matches_question_label(box.text, _question_label(hint)):
         return False
     if not _is_header_fragment_match(_header_text_match(box.text, hint), hint):
         return False
@@ -337,7 +341,7 @@ def _resolve_content_boundary(
     for seed in sorted(boxes, key=lambda box: (box.top, box.left)):
         if seed.top < hint.template_region.y or seed.top > search_bottom:
             continue
-        if _matches_question_number(seed.text, hint.question_number):
+        if _matches_question_label(seed.text, _question_label(hint)):
             continue
         candidate_boxes = tuple(_nearby_content_boxes(boxes, hint, seed))
         if not candidate_boxes:

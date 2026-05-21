@@ -12,7 +12,11 @@ from PIL import Image
 
 from scriptscore.artifacts.pdfs import PDF_RENDER_SCALE, open_pdf_document
 from scriptscore.commands import build_command_registry
-from scriptscore.commands.exam_shared import collapse_markers, detect_question_markers
+from scriptscore.commands.exam_shared import (
+    collapse_markers,
+    detect_question_markers,
+    normalize_question_text,
+)
 from scriptscore.contracts import (
     CommandErrorEnvelope,
     CommandSuccessEnvelope,
@@ -117,6 +121,11 @@ def test_exam_setup_unsupported_layout_hard_fails_without_writes(tmp_path: Path)
     assert isinstance(result.envelope, CommandErrorEnvelope)
     assert result.envelope.error.code == "unsupported_layout"
     assert not (output_dir / "output_metadata.json").exists()
+
+
+def test_normalize_question_text_strips_numbered_subpart_prefix() -> None:
+    assert normalize_question_text("1a. Define assets.") == "Define assets."
+    assert normalize_question_text("Question 12b) Explain depreciation.") == "Explain depreciation."
 
 
 def test_exam_setup_extracts_max_points_from_cover_page_score_table(tmp_path: Path) -> None:
@@ -331,6 +340,89 @@ def test_exam_setup_regions_pad_above_current_prompt_and_stop_before_next_prompt
         next_marker_top = round(next_marker.rect.y0 * PDF_RENDER_SCALE)
         assert region_top < current_marker_top
         assert region_bottom < next_marker_top
+
+
+def test_exam_setup_detects_numbered_subparts_as_independent_targets(tmp_path: Path) -> None:
+    template_pdf = (tmp_path / "subparts_template.pdf").resolve()
+    document = fitz.open()
+    try:
+        page = document.new_page()
+        page.insert_text((72, 120), "1a. Define assets. (2 points)", fontsize=12)
+        page.insert_text((72, 145), "Use one accounting sentence.", fontsize=12)
+        page.insert_text((72, 220), "1b. Define liabilities. (3 points)", fontsize=12)
+        page.insert_text((72, 245), "Use one accounting sentence.", fontsize=12)
+        page.insert_text((72, 340), "2. Explain equity. (4 points)", fontsize=12)
+        document.save(template_pdf)
+    finally:
+        document.close()
+
+    output_dir = (tmp_path / "setup_out").resolve()
+    result = _runner().run(
+        "exam.setup",
+        {
+            "template_pdf_path": str(template_pdf),
+            "output_artifacts_dir": str(output_dir),
+        },
+    )
+
+    assert result.exit_code == 0
+    assert isinstance(result.envelope, CommandSuccessEnvelope)
+    questions = result.envelope.data["questions"]
+    assert [question["question_id"] for question in questions] == ["q1a", "q1b", "q2"]
+    assert [question["question_number"] for question in questions] == [1, 1, 2]
+    assert [question["question_label"] for question in questions] == ["1a", "1b", "2"]
+    assert [question["max_points"] for question in questions] == [2, 3, 4]
+    assert "Define assets" in questions[0]["baseline_pdf_text"]
+    assert "Define liabilities" not in questions[0]["baseline_pdf_text"]
+
+
+def test_exam_setup_does_not_split_bare_or_noncontiguous_subpart_markers(
+    tmp_path: Path,
+) -> None:
+    template_pdf = (tmp_path / "invalid_subparts_template.pdf").resolve()
+    document = fitz.open()
+    try:
+        page = document.new_page()
+        page.insert_text((72, 120), "1. Combined prompt. (5 points)", fontsize=12)
+        page.insert_text(
+            (72, 145),
+            "a. Bare alphabetic marker should stay inside question 1.",
+            fontsize=12,
+        )
+        page.insert_text(
+            (72, 170),
+            "b. Another bare marker should stay inside question 1.",
+            fontsize=12,
+        )
+        page.insert_text(
+            (72, 195),
+            "1a. Noncontiguous numbered marker should stay inside question 1.",
+            fontsize=12,
+        )
+        page.insert_text(
+            (72, 220), "1c. Missing 1b means do not split numbered subparts.", fontsize=12
+        )
+        page.insert_text((72, 340), "2. Next prompt. (4 points)", fontsize=12)
+        document.save(template_pdf)
+    finally:
+        document.close()
+
+    output_dir = (tmp_path / "setup_out").resolve()
+    result = _runner().run(
+        "exam.setup",
+        {
+            "template_pdf_path": str(template_pdf),
+            "output_artifacts_dir": str(output_dir),
+        },
+    )
+
+    assert result.exit_code == 0
+    assert isinstance(result.envelope, CommandSuccessEnvelope)
+    questions = result.envelope.data["questions"]
+    assert [question["question_id"] for question in questions] == ["q1", "q2"]
+    assert "Bare alphabetic marker" in questions[0]["baseline_pdf_text"]
+    assert "Noncontiguous numbered marker" in questions[0]["baseline_pdf_text"]
+    assert "Next prompt" not in questions[0]["baseline_pdf_text"]
 
 
 def test_exam_setup_baseline_pdf_text_ignores_lines_above_padded_crop(tmp_path: Path) -> None:

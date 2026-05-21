@@ -47,6 +47,20 @@ def test_builtin_prompt_loader_reads_yaml_backed_definitions() -> None:
     assert prompt.command_scoped_inputs[0].name == "template_question_png"
 
 
+def test_grading_prompts_include_incidental_multiple_choice_guardrails() -> None:
+    for prompt_id in ("preliminary_score", "preliminary_score_multi_criterion"):
+        prompt = get_builtin_prompt(prompt_id)
+
+        assert "printed multiple-choice options" in prompt.template_text
+        assert "do not treat the printed option text itself as the student's answer" in (
+            prompt.template_text
+        )
+        assert "Do not treat a lone O, 0, or noisy OCR artifact as a selected option" in (
+            prompt.template_text
+        )
+        assert "do not invent a selected option" in prompt.template_text
+
+
 def test_builtin_prompt_loader_rejects_invalid_yaml(monkeypatch: pytest.MonkeyPatch) -> None:
     builtin_module.builtin_prompt_loader.cache_clear()
     monkeypatch.setattr(

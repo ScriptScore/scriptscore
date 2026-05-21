@@ -52,6 +52,7 @@ class SetupQuestion(BaseModel):
 
     question_id: str
     question_number: int = Field(ge=1)
+    question_label: str | None = Field(default=None, min_length=1)
     page_number: int = Field(ge=1)
     baseline_pdf_text: str
     max_points: int = Field(gt=0)
@@ -61,6 +62,8 @@ class SetupQuestion(BaseModel):
     @model_validator(mode="after")
     def validate_fields(self) -> SetupQuestion:
         require_safe_path_component(self.question_id, field_name="question_id")
+        if self.question_label is not None:
+            require_safe_path_component(self.question_label, field_name="question_label")
         self.template_question_png_path = require_absolute_path(
             self.template_question_png_path,
             field_name="template_question_png_path",

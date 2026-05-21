@@ -146,6 +146,59 @@ def test_scans_detect_request_rejects_duplicate_question_numbers(tmp_path: Path)
         )
 
 
+def test_scans_detect_request_allows_subpart_labels_with_shared_number(tmp_path: Path) -> None:
+    page = make_rgb_page(tmp_path / "scan_001" / "page_001.png")
+
+    request = ScansDetectRequest.model_validate(
+        {
+            "detect_targets": [
+                {
+                    "page": {
+                        "page_type": "student_scan",
+                        "page_number": 1,
+                        "image_path": str(page),
+                        "student_ref": "scan_001",
+                    },
+                    "question_hints": [
+                        {
+                            "question_id": "q1a",
+                            "question_number": 1,
+                            "question_label": "1a",
+                            "template_region": {
+                                "x": 10,
+                                "y": 12,
+                                "width": 60,
+                                "height": 20,
+                                "units": "rendered_page_pixels",
+                            },
+                            "question_text_hint": "First subpart",
+                        },
+                        {
+                            "question_id": "q1b",
+                            "question_number": 1,
+                            "question_label": "1b",
+                            "template_region": {
+                                "x": 10,
+                                "y": 60,
+                                "width": 60,
+                                "height": 20,
+                                "units": "rendered_page_pixels",
+                            },
+                            "question_text_hint": "Second subpart",
+                        },
+                    ],
+                }
+            ],
+            "output_artifacts_dir": str((tmp_path / "detect_out").resolve()),
+        }
+    )
+
+    assert [hint.question_label for hint in request.detect_targets[0].question_hints] == [
+        "1a",
+        "1b",
+    ]
+
+
 def test_scans_detect_refines_vertical_bounds_and_extends_horizontal_overflow(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -188,6 +241,47 @@ def test_scans_detect_refines_vertical_bounds_and_extends_horizontal_overflow(
     assert q2["region"]["y"] == 60
     assert q2["region"]["height"] == 20
     assert (output_dir / "traces" / "detect__page_number-001__student_ref-scan_001.json").exists()
+
+
+def test_scans_detect_matches_numbered_subpart_labels(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    page = make_rgb_page(tmp_path / "scan_001" / "page_001.png", size=(100, 120))
+    output_dir = (tmp_path / "detect_out").resolve()
+    payload = _detect_request(page=page, output_dir=output_dir)
+    hints = payload["detect_targets"][0]["question_hints"]
+    hints[0]["question_id"] = "q1a"
+    hints[0]["question_label"] = "1a"
+    hints[0]["question_text_hint"] = "First subpart"
+    hints[1]["question_id"] = "q1b"
+    hints[1]["question_number"] = 1
+    hints[1]["question_label"] = "1b"
+    hints[1]["question_text_hint"] = "Second subpart"
+
+    monkeypatch.setattr(
+        "scriptscore.commands.scans_detect.read_page_ocr",
+        lambda _path: [
+            OcrTextBox(
+                text="1a. First subpart", left=12, top=8, right=58, bottom=16, confidence=0.99
+            ),
+            OcrTextBox(
+                text="student writing", left=5, top=24, right=92, bottom=44, confidence=0.75
+            ),
+            OcrTextBox(
+                text="1b. Second subpart", left=12, top=60, right=62, bottom=68, confidence=0.99
+            ),
+        ],
+    )
+
+    result = _runner().run("scans.detect", payload)
+
+    assert result.exit_code == 0
+    assert isinstance(result.envelope, CommandSuccessEnvelope)
+    rows = result.envelope.data["detect_results"]
+    assert [(row["question_id"], row["region_source"]) for row in rows] == [
+        ("q1a", "ocr_refined"),
+        ("q1b", "ocr_refined"),
+    ]
 
 
 def test_scans_detect_falls_back_to_template_region_when_question_boundary_missing(
