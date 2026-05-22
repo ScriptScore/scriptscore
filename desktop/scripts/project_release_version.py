@@ -6,6 +6,7 @@ import argparse
 import json
 import re
 import shutil
+import tomllib
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -25,10 +26,25 @@ CHANNEL_OFFSETS = {
 MAX_MSI_PRERELEASE = 65535
 RELEASE_CHANNELS = {"latest", "rc"}
 PACKAGE_SUFFIXES = {".AppImage", ".deb", ".dmg", ".exe", ".msi", ".rpm"}
+RELEASE_BRANCH_RE = re.compile(r"^release/(?P<version>\d+\.\d+\.\d+)$")
+CARGO_VERSION_RE = re.compile(r'^version\s*=\s*"(?P<version>[^"]+)"\s*$', re.MULTILINE)
+INIT_VERSION_RE = re.compile(r'^__version__\s*=\s*"(?P<version>[^"]+)"\s*$', re.MULTILINE)
+UV_LOCK_PACKAGE_RE = re.compile(
+    r'^\[\[package\]\]\s*\nname = "scriptscore"\s*\nversion = "(?P<version>[^"]+)"',
+    re.MULTILINE,
+)
 
 
 class VersionProjectionError(ValueError):
     pass
+
+
+@dataclass(frozen=True)
+class ReleaseBranchVersionMismatch:
+    path: str
+    field: str
+    expected: str
+    actual: str
 
 
 @dataclass(frozen=True)
@@ -188,6 +204,159 @@ def stage_desktop_assets(
     return sorted(staged)
 
 
+def parse_release_branch(source_ref: str) -> str | None:
+    match = RELEASE_BRANCH_RE.fullmatch(source_ref.strip())
+    if match is None:
+        return None
+    return match.group("version")
+
+
+def _read_cargo_package_version(path: Path, package_name: str) -> str:
+    if path.name == "Cargo.toml":
+        text = path.read_text(encoding="utf-8")
+        match = CARGO_VERSION_RE.search(text)
+        if match is None:
+            raise VersionProjectionError(f"{path} does not contain a string version")
+        return match.group("version")
+
+    text = path.read_text(encoding="utf-8")
+    pattern = re.compile(
+        rf'^\[\[package\]\]\s*\nname = "{re.escape(package_name)}"\s*\nversion = "(?P<version>[^"]+)"',
+        re.MULTILINE,
+    )
+    match = pattern.search(text)
+    if match is None:
+        raise VersionProjectionError(f"{path} does not contain package {package_name}")
+    return match.group("version")
+
+
+def _read_uv_lock_scriptscore_version(path: Path) -> str:
+    text = path.read_text(encoding="utf-8")
+    match = UV_LOCK_PACKAGE_RE.search(text)
+    if match is None:
+        raise VersionProjectionError(f"{path} does not contain scriptscore package version")
+    return match.group("version")
+
+
+def _read_init_version(path: Path) -> str:
+    text = path.read_text(encoding="utf-8")
+    match = INIT_VERSION_RE.search(text)
+    if match is None:
+        raise VersionProjectionError(f"{path} does not contain __version__")
+    return match.group("version")
+
+
+def _read_pyproject_version(path: Path) -> str:
+    data = tomllib.loads(path.read_text(encoding="utf-8"))
+    version = data.get("project", {}).get("version")
+    if not isinstance(version, str):
+        raise VersionProjectionError(f"{path} does not contain [project].version")
+    return version
+
+
+def _read_package_lock_root_version(path: Path) -> tuple[str, str]:
+    data = json.loads(path.read_text(encoding="utf-8"))
+    root_version = data.get("version")
+    packages = data.get("packages", {})
+    workspace_version = packages.get("", {}).get("version") if isinstance(packages, dict) else None
+    if not isinstance(root_version, str):
+        raise VersionProjectionError(f"{path} does not contain root version")
+    if not isinstance(workspace_version, str):
+        raise VersionProjectionError(f'{path} does not contain packages[""].version')
+    return root_version, workspace_version
+
+
+def collect_release_branch_version_mismatches(
+    repo_root: Path, branch_version: str
+) -> list[ReleaseBranchVersionMismatch]:
+    python_dev_version = f"{branch_version}.dev0"
+    semver_dev_version = f"{branch_version}-dev.0"
+    checks: list[tuple[str, str, str, str]] = []
+
+    tauri_path = repo_root / "desktop/src-tauri/tauri.conf.json"
+    actual = tauri_config_version(tauri_path)
+    checks.append((str(tauri_path.relative_to(repo_root)), "version", branch_version, actual))
+
+    pyproject_path = repo_root / "cli/pyproject.toml"
+    actual = _read_pyproject_version(pyproject_path)
+    checks.append((str(pyproject_path.relative_to(repo_root)), "[project].version", python_dev_version, actual))
+
+    init_path = repo_root / "cli/src/scriptscore/__init__.py"
+    actual = _read_init_version(init_path)
+    checks.append((str(init_path.relative_to(repo_root)), "__version__", python_dev_version, actual))
+
+    uv_lock_path = repo_root / "cli/uv.lock"
+    actual = _read_uv_lock_scriptscore_version(uv_lock_path)
+    checks.append(
+        (str(uv_lock_path.relative_to(repo_root)), '[[package]] name = "scriptscore"', python_dev_version, actual)
+    )
+
+    cargo_toml_path = repo_root / "desktop/src-tauri/Cargo.toml"
+    actual = _read_cargo_package_version(cargo_toml_path, "scriptscore-desktop-host")
+    checks.append((str(cargo_toml_path.relative_to(repo_root)), "version", semver_dev_version, actual))
+
+    cargo_lock_path = repo_root / "desktop/src-tauri/Cargo.lock"
+    actual = _read_cargo_package_version(cargo_lock_path, "scriptscore-desktop-host")
+    checks.append(
+        (
+            str(cargo_lock_path.relative_to(repo_root)),
+            '[[package]] name = "scriptscore-desktop-host"',
+            semver_dev_version,
+            actual,
+        )
+    )
+
+    package_json_path = repo_root / "desktop/frontend/package.json"
+    package_json = json.loads(package_json_path.read_text(encoding="utf-8"))
+    actual = package_json.get("version")
+    if not isinstance(actual, str):
+        raise VersionProjectionError(f"{package_json_path} does not contain a string version")
+    checks.append((str(package_json_path.relative_to(repo_root)), "version", semver_dev_version, actual))
+
+    package_lock_path = repo_root / "desktop/frontend/package-lock.json"
+    root_version, workspace_version = _read_package_lock_root_version(package_lock_path)
+    rel = str(package_lock_path.relative_to(repo_root))
+    checks.append((rel, "version", semver_dev_version, root_version))
+    checks.append((rel, 'packages[""].version', semver_dev_version, workspace_version))
+
+    mismatches: list[ReleaseBranchVersionMismatch] = []
+    for path, field, expected, actual_value in checks:
+        if actual_value != expected:
+            mismatches.append(
+                ReleaseBranchVersionMismatch(
+                    path=path,
+                    field=field,
+                    expected=expected,
+                    actual=actual_value,
+                )
+            )
+    return mismatches
+
+
+def validate_release_branch_versions(repo_root: Path, source_ref: str) -> None:
+    branch_version = parse_release_branch(source_ref)
+    if branch_version is None:
+        raise VersionProjectionError(
+            f"source ref {source_ref!r} is not a release branch like release/0.1.0"
+        )
+
+    mismatches = collect_release_branch_version_mismatches(repo_root, branch_version)
+    if not mismatches:
+        return
+
+    lines = [
+        (
+            f"- {item.path} ({item.field}): expected {item.expected!r}, "
+            f"found {item.actual!r}"
+        )
+        for item in mismatches
+    ]
+    raise VersionProjectionError(
+        "release branch version metadata does not match "
+        f"release/{branch_version}:\n" + "\n".join(lines)
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -216,6 +385,10 @@ def build_parser() -> argparse.ArgumentParser:
     stage_assets.add_argument("--bundles", required=True)
     stage_assets.add_argument("--bundle-root", type=Path, required=True)
     stage_assets.add_argument("--output-dir", type=Path, required=True)
+
+    validate_release_branch = subparsers.add_parser("validate-release-branch")
+    validate_release_branch.add_argument("--source-ref", required=True)
+    validate_release_branch.add_argument("--repo-root", type=Path, default=Path("."))
 
     return parser
 
@@ -248,6 +421,8 @@ def main() -> int:
             )
             for asset_name in staged:
                 print(asset_name)
+        elif args.command == "validate-release-branch":
+            validate_release_branch_versions(args.repo_root.resolve(), args.source_ref)
         else:
             raise AssertionError(args.command)
     except VersionProjectionError as err:

@@ -1960,7 +1960,7 @@ wheels = [
 
 [[package]]
 name = "scriptscore"
-version = "0.1.0.dev0"
+version = "0.2.0.dev0"
 source = { editable = "." }
 dependencies = [
     { name = "easyocr", marker = "platform_machine != 'x86_64' or sys_platform != 'darwin'" },
