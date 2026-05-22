@@ -125,19 +125,42 @@ packages across the platform matrix and publishes them to GitHub Releases with
 CI-managed release tags. Maintainers do not need to create semver tags or bump
 checked-in prerelease versions before running the workflow.
 
-Successful `CI` runs for push events on `main` and `release/**` publish the
-`latest` preview channel. Failed CI runs, pull request CI runs, and manually
-dispatched CI runs do not start preview package publishing. Manual workflow
-dispatch can publish either `latest` or `rc`, and can limit the build to one
-package platform while iterating. The workflow computes versions from the
-checked-in base desktop version plus the GitHub Actions run number, for example
-`0.1.0-latest.123` or `0.1.0-rc.124`. GitHub Releases require tags, so the
-workflow owns internal tags such as the moving `ci/latest` tag and immutable RC
-tags like `ci/rc/0.1.0-rc.124`; those tags are implementation details and
-should not be created manually. The moving `ci/latest` release replaces its
-asset set on each successful branch build, while RC releases keep their
-versioned per-run assets. Manual `latest` runs only publish to `ci/latest` when
-`package_platform=all`; single-platform manual runs retain their workflow
+Successful `CI` runs for push events on `main` publish the `latest` preview
+channel. Successful push CI on `release/**` publishes the `rc` preview channel
+only; release branches do not receive automatic `latest` publishes. Failed CI
+runs, pull request CI runs, and manually dispatched CI runs do not start
+preview package publishing.
+
+Automatic publishing checks out the exact CI commit from
+`github.event.workflow_run.head_sha`, not the current branch tip. Automatic RC
+publishing from `release/**` additionally requires that commit to be
+GitHub-verified (`verified=true`, `reason=valid`). Unverified release-branch
+commits fail the workflow before packaging starts.
+
+Before packaging on `release/X.Y.Z`, the workflow validates that checked-in
+version metadata matches the branch:
+
+- `desktop/src-tauri/tauri.conf.json` stable version `X.Y.Z`
+- `cli/pyproject.toml`, `cli/src/scriptscore/__init__.py`, and the local
+  `scriptscore` entry in `cli/uv.lock` use `X.Y.Z.dev0`
+- `desktop/src-tauri/Cargo.toml`, `desktop/src-tauri/Cargo.lock`,
+  `desktop/frontend/package.json`, and `desktop/frontend/package-lock.json`
+  use semver-compatible development version `X.Y.Z-dev.0`
+
+A mismatch fails before any package matrix work and reports every mismatched
+file with expected and actual values.
+
+Manual workflow dispatch can publish either `latest` or `rc`, including
+exceptional `latest` rebuilds from a `release/**` branch, and can limit the
+build to one package platform while iterating. The workflow computes versions
+from the checked-in base desktop version plus the GitHub Actions run number, for
+example `0.1.0-latest.123` or `0.1.0-rc.124`. GitHub Releases require tags, so
+the workflow owns internal tags such as the moving `ci/latest` tag and
+immutable RC tags like `ci/rc/0.1.0-rc.124`; those tags are implementation
+details and should not be created manually. The moving `ci/latest` release
+replaces its asset set on each successful `main` build, while RC releases keep
+their versioned per-run assets. Manual `latest` runs only publish to `ci/latest`
+when `package_platform=all`; single-platform manual runs retain their workflow
 artifacts without replacing the full latest release asset set. Automatic
 `latest` publishing also verifies that the successful CI commit is still the
 source branch tip before moving `ci/latest`.

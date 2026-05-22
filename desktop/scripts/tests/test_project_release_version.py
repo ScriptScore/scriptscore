@@ -153,6 +153,99 @@ class ProjectReleaseVersionTests(unittest.TestCase):
             self.assertEqual(projected["productName"], "ScriptScore Desktop")
             self.assertEqual(projected["version"], "0.1.0-3001")
 
+    def test_parse_release_branch_accepts_release_semver(self) -> None:
+        self.assertEqual(MODULE.parse_release_branch("release/0.1.1"), "0.1.1")
+
+    def test_parse_release_branch_rejects_non_release_refs(self) -> None:
+        for source_ref in ("main", "release/0.1", "release/0.1.0-rc.1", "feature/foo"):
+            with self.subTest(source_ref=source_ref):
+                self.assertIsNone(MODULE.parse_release_branch(source_ref))
+
+    def _write_release_branch_tree(self, root: Path, branch_version: str) -> None:
+        python_dev = f"{branch_version}.dev0"
+        semver_dev = f"{branch_version}-dev.0"
+        (root / "desktop/src-tauri").mkdir(parents=True)
+        (root / "cli/src/scriptscore").mkdir(parents=True)
+        (root / "desktop/frontend").mkdir(parents=True)
+
+        (root / "desktop/src-tauri/tauri.conf.json").write_text(
+            json.dumps({"version": branch_version}) + "\n",
+            encoding="utf-8",
+        )
+        (root / "cli/pyproject.toml").write_text(
+            f'[project]\nname = "scriptscore"\nversion = "{python_dev}"\n',
+            encoding="utf-8",
+        )
+        (root / "cli/src/scriptscore/__init__.py").write_text(
+            f'__version__ = "{python_dev}"\n',
+            encoding="utf-8",
+        )
+        (root / "cli/uv.lock").write_text(
+            f'[[package]]\nname = "scriptscore"\nversion = "{python_dev}"\n',
+            encoding="utf-8",
+        )
+        (root / "desktop/src-tauri/Cargo.toml").write_text(
+            f'[package]\nname = "scriptscore-desktop-host"\nversion = "{semver_dev}"\n',
+            encoding="utf-8",
+        )
+        (root / "desktop/src-tauri/Cargo.lock").write_text(
+            f'[[package]]\nname = "scriptscore-desktop-host"\nversion = "{semver_dev}"\n',
+            encoding="utf-8",
+        )
+        (root / "desktop/frontend/package.json").write_text(
+            json.dumps({"version": semver_dev}) + "\n",
+            encoding="utf-8",
+        )
+        (root / "desktop/frontend/package-lock.json").write_text(
+            json.dumps({"version": semver_dev, "packages": {"": {"version": semver_dev}}}) + "\n",
+            encoding="utf-8",
+        )
+
+    def test_validate_release_branch_versions_passes_matching_tree(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            self._write_release_branch_tree(root, "0.1.1")
+            MODULE.validate_release_branch_versions(root, "release/0.1.1")
+
+    def test_validate_release_branch_versions_reports_multiple_mismatches(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            self._write_release_branch_tree(root, "0.1.1")
+            (root / "desktop/src-tauri/tauri.conf.json").write_text(
+                json.dumps({"version": "9.9.9"}) + "\n",
+                encoding="utf-8",
+            )
+            (root / "cli/pyproject.toml").write_text(
+                '[project]\nname = "scriptscore"\nversion = "0.0.0.dev0"\n',
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(MODULE.VersionProjectionError, "does not match"):
+                MODULE.validate_release_branch_versions(root, "release/0.1.1")
+
+            mismatches = MODULE.collect_release_branch_version_mismatches(root, "0.1.1")
+            paths = {item.path for item in mismatches}
+            self.assertIn("desktop/src-tauri/tauri.conf.json", paths)
+            self.assertIn("cli/pyproject.toml", paths)
+            self.assertGreaterEqual(len(mismatches), 2)
+
+    def test_collect_release_branch_version_mismatches_flags_package_lock_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            self._write_release_branch_tree(root, "0.2.0")
+            package_lock = json.loads(
+                (root / "desktop/frontend/package-lock.json").read_text(encoding="utf-8")
+            )
+            package_lock["packages"][""]["version"] = "0.2.0-dev.9"
+            (root / "desktop/frontend/package-lock.json").write_text(
+                json.dumps(package_lock) + "\n",
+                encoding="utf-8",
+            )
+
+            mismatches = MODULE.collect_release_branch_version_mismatches(root, "0.2.0")
+            fields = {(item.path, item.field) for item in mismatches}
+            self.assertIn(("desktop/frontend/package-lock.json", 'packages[""].version'), fields)
+
 
 if __name__ == "__main__":
     unittest.main()

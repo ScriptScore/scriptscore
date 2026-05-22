@@ -1,6 +1,10 @@
 name: Desktop Preview Packages
 run-name: >-
-  Desktop Preview Packages ${{ inputs.channel || 'latest' }}
+  Desktop Preview Packages ${{
+    github.event_name == 'workflow_run' && (
+      startsWith(github.event.workflow_run.head_branch, 'release/') && 'rc' || 'latest'
+    ) || inputs.channel || 'latest'
+  }}
   ${{ github.event.workflow_run.head_branch || github.ref_name }}
   ${{ github.event.workflow_run.head_sha || github.sha }}
 
@@ -63,12 +67,91 @@ jobs:
         with:
           ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
 
+      - name: Resolve preview channel
+        id: context
+        env:
+          DISPATCH_CHANNEL: ${{ inputs.channel || 'latest' }}
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch || '' }}
+          SOURCE_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+          SOURCE_REF: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_branch || github.ref_name }}
+        run: |
+          if [[ "${EVENT_NAME}" == "workflow_run" ]]; then
+            if [[ "${HEAD_BRANCH}" == release/* ]]; then
+              release_channel="rc"
+            elif [[ "${HEAD_BRANCH}" == "main" ]]; then
+              release_channel="latest"
+            else
+              echo "error: unsupported workflow_run branch ${HEAD_BRANCH}" >&2
+              exit 1
+            fi
+          else
+            release_channel="${DISPATCH_CHANNEL}"
+          fi
+
+          {
+            echo "release_channel=${release_channel}"
+            echo "source_sha=${SOURCE_SHA}"
+            echo "source_ref=${SOURCE_REF}"
+          } >> "${GITHUB_OUTPUT}"
+
+          {
+            echo "## Preview channel"
+            echo
+            echo "- \`release_channel\`: \`${release_channel}\`"
+            echo "- \`source_ref\`: \`${SOURCE_REF}\`"
+            echo "- \`source_sha\`: \`${SOURCE_SHA}\`"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Validate release branch version metadata
+        if: ${{ startsWith(steps.context.outputs.source_ref, 'release/') }}
+        run: |
+          python3 desktop/scripts/project_release_version.py validate-release-branch \
+            --source-ref "${{ steps.context.outputs.source_ref }}" \
+            --repo-root .
+
+      - name: Verify commit signature for automatic RC
+        if: ${{ github.event_name == 'workflow_run' && steps.context.outputs.release_channel == 'rc' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ steps.context.outputs.source_sha }}
+        run: |
+          verification=$(
+            gh api "repos/${GITHUB_REPOSITORY}/commits/${SOURCE_SHA}" \
+              --jq '.commit.verification'
+          )
+          verified=$(echo "${verification}" | jq -r '.verified')
+          reason=$(echo "${verification}" | jq -r '.reason')
+          if [[ "${verified}" != "true" || "${reason}" != "valid" ]]; then
+            {
+              echo "error: commit ${SOURCE_SHA} is not verified for automatic RC publishing"
+              echo "verified=${verified}"
+              echo "reason=${reason}"
+              echo "${verification}"
+            } >&2
+            {
+              echo "## Automatic RC publish blocked"
+              echo
+              echo "Commit \`${SOURCE_SHA}\` is not GitHub-verified (\`verified=${verified}\`, \`reason=${reason}\`)."
+              echo
+              echo '```json'
+              echo "${verification}"
+              echo '```'
+            } >> "${GITHUB_STEP_SUMMARY}"
+            exit 1
+          fi
+          {
+            echo "## Commit verification"
+            echo
+            echo "Commit \`${SOURCE_SHA}\` is verified for automatic RC publishing."
+          } >> "${GITHUB_STEP_SUMMARY}"
+
       - name: Resolve generated version
         id: metadata
         env:
-          RELEASE_CHANNEL: ${{ inputs.channel || 'latest' }}
-          SOURCE_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
-          SOURCE_REF: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_branch || github.ref_name }}
+          RELEASE_CHANNEL: ${{ steps.context.outputs.release_channel }}
+          SOURCE_SHA: ${{ steps.context.outputs.source_sha }}
+          SOURCE_REF: ${{ steps.context.outputs.source_ref }}
         run: |
           base_version=$(
             python3 desktop/scripts/project_release_version.py \
@@ -109,6 +192,8 @@ jobs:
 
   define-package-matrix:
     name: Define package matrix
+    needs:
+      - resolve-release
     if: ${{ github.event_name != 'workflow_run' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push') }}
     runs-on: ubuntu-latest
     outputs:
@@ -173,6 +258,8 @@ jobs:
 
   prepare-paddle-models:
     name: Prepare Paddle models
+    needs:
+      - resolve-release
     if: ${{ github.event_name != 'workflow_run' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push') }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
