@@ -32,7 +32,11 @@ jobs:
         run: uv sync --group dev
 
       - name: Dependency audit
-        run: uv run pip-audit
+        run: |
+          # Torch currently has no published fixed version for CVE-2025-3000.
+          # Keep the audit strict for any new or fixable findings, and remove
+          # this ignore when an upstream patched release is available. Tracking: #108.
+          uv run pip-audit --ignore-vuln CVE-2025-3000
 
       - name: Bandit scan
         run: uv run bandit -q -r src/scriptscore -x tests -ll
