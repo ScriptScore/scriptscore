@@ -10,17 +10,18 @@ license = { text = "AGPL-3.0-only" }
 requires-python = ">=3.12,<3.14"
 dependencies = [
   "easyocr>=1.7,<2; sys_platform != 'darwin' or platform_machine != 'x86_64'",
-  "json-repair>=0.39,<1",
+  "json-repair>=0.60.1,<1",
   "numpy>=2,<3",
   "opencv-contrib-python-headless>=4.10,<5",
   "ollama>=0.4,<1",
   "paddleocr>=3.0,<4",
   "paddlepaddle>=3.0,<4; sys_platform != 'darwin' or platform_machine != 'x86_64'",
-  "Pillow>=12.2,<13",
-  "PyMuPDF>=1.24,<2",
+  "Pillow>=12.3,<13",
+  "PyMuPDF>=1.24,<1.28",
   "PyYAML>=6.0,<7",
   "pydantic>=2.10,<3.0",
-  "torch>=2.5,<3; sys_platform != 'darwin' or platform_machine != 'x86_64'",
+  "setuptools>=83,<85",
+  "torch>=2.13,<3; sys_platform != 'darwin' or platform_machine != 'x86_64'",
 ]
 
 [project.urls]
@@ -31,12 +32,12 @@ scriptscore = "scriptscore.cli:main"
 
 [dependency-groups]
 ci-runtime = [
-  "json-repair>=0.39,<1",
+  "json-repair>=0.60.1,<1",
   "numpy>=2,<3",
   "opencv-contrib-python-headless>=4.10,<5",
   "ollama>=0.4,<1",
-  "Pillow>=12.2,<13",
-  "PyMuPDF>=1.24,<2",
+  "Pillow>=12.3,<13",
+  "PyMuPDF>=1.24,<1.28",
   "PyYAML>=6.0,<7",
   "pydantic>=2.10,<3.0",
 ]

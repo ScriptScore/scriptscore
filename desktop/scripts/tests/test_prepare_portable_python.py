@@ -164,15 +164,15 @@ class PreparePortablePythonTests(unittest.TestCase):
                         "    # via paddlex",
                         "opencv-contrib-python-headless==4.13.0.92",
                         "    # via scriptscore",
-                        "torch==2.11.0",
+                        "torch==2.13.0",
                         "    # via scriptscore",
-                        "nvidia-cublas==13.1.0.3 ; sys_platform == 'linux'",
+                        "nvidia-cublas==13.1.1.3 ; sys_platform == 'linux'",
                         "    # via torch",
-                        "cuda-toolkit==13.0.2 ; sys_platform == 'linux'",
+                        "cuda-toolkit==13.0.3.0 ; sys_platform == 'linux'",
                         "    # via torch",
-                        "triton==3.6.0 ; sys_platform == 'linux'",
+                        "triton==3.7.1 ; sys_platform == 'linux'",
                         "    # via torch",
-                        "torchvision==0.26.0",
+                        "torchvision==0.28.0",
                         "    # via easyocr",
                         "",
                     ]
@@ -183,8 +183,8 @@ class PreparePortablePythonTests(unittest.TestCase):
             MODULE.filter_portable_runtime_requirements(requirements_path)
 
             filtered = requirements_path.read_text(encoding="utf-8")
-            self.assertIn("torch==2.11.0", filtered)
-            self.assertIn("torchvision==0.26.0", filtered)
+            self.assertIn("torch==2.13.0", filtered)
+            self.assertIn("torchvision==0.28.0", filtered)
             self.assertIn("opencv-contrib-python-headless", filtered)
             self.assertNotIn("aistudio-sdk", filtered)
             self.assertNotIn("bce-python-sdk", filtered)
@@ -290,9 +290,9 @@ class PreparePortablePythonTests(unittest.TestCase):
                         "easyocr==1.7.2",
                         "    # via scriptscore",
                         "numpy==2.2.0",
-                        "torch==2.11.0",
+                        "torch==2.13.0",
                         "    # via easyocr",
-                        "torchvision==0.26.0",
+                        "torchvision==0.28.0",
                         "    # via easyocr",
                         "paddleocr==3.4.1",
                         "",
