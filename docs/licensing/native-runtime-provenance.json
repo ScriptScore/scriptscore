@@ -116,7 +116,7 @@
         "desktop/dist/bundled-runtime/python/**/site-packages/torchvision/**/*.dylib"
       ],
       "source_package": "torch 2.13.0 and torchvision 0.28.0 wheels",
-      "license": "BSD-3-Clause",
+      "license": "Apache-2.0 AND Apache-2.0 WITH LLVM-exception AND BSD-2-Clause AND BSD-3-Clause AND BSL-1.0 AND MIT",
       "obligations": "Include PyTorch/TorchVision notices and bundled native-library attributions from the wheel metadata.",
       "evidence": [
         "torch-2.13.0.dist-info/METADATA",
