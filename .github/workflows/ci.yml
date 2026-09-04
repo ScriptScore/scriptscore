@@ -682,7 +682,7 @@ jobs:
           workspaces: desktop/src-tauri -> target
 
       - name: Install cargo-tauri
-        run: cargo install tauri-cli --version '^2'
+        run: cargo install tauri-cli --version '=2.11.3' --locked
 
       - name: Prepare bundled runtime
         working-directory: .
@@ -771,7 +771,7 @@ jobs:
           workspaces: desktop/src-tauri -> target
 
       - name: Install cargo-tauri
-        run: cargo install tauri-cli --version '^2'
+        run: cargo install tauri-cli --version '=2.11.3' --locked
 
       - name: Prepare bundled runtime
         run: ./desktop/scripts/prepare-bundled-runtime.sh
