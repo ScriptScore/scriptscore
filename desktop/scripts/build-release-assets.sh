@@ -8,3 +8,9 @@ DESKTOP_ROOT=$(cd -- "${SCRIPT_DIR}/.." && pwd)
 "${SCRIPT_DIR}/prepare-bundled-runtime.sh"
 npm --prefix "${DESKTOP_ROOT}/frontend" run build
 "${SCRIPT_DIR}/generate_legal_artifacts.py"
+
+if [[ "${RUNNER_OS:-}" == "Windows" ||
+  "${OS:-}" == "Windows_NT" ||
+  "${SCRIPTSCORE_DESKTOP_TARGET:-}" == *-windows-* ]]; then
+  python "${SCRIPT_DIR}/compact_windows_runtime_licenses.py"
+fi

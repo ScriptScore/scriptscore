@@ -9,6 +9,7 @@ import zipfile
 from pathlib import Path, PureWindowsPath
 
 MODULE_PATH = Path(__file__).resolve().parents[1] / "compact_windows_runtime_licenses.py"
+BUILD_RELEASE_ASSETS_PATH = MODULE_PATH.parent / "build-release-assets.sh"
 SPEC = importlib.util.spec_from_file_location("compact_windows_runtime_licenses", MODULE_PATH)
 assert SPEC is not None and SPEC.loader is not None
 MODULE = importlib.util.module_from_spec(SPEC)
@@ -17,6 +18,17 @@ SPEC.loader.exec_module(MODULE)
 
 
 class CompactWindowsRuntimeLicensesTests(unittest.TestCase):
+    def test_release_asset_build_compacts_after_legal_artifact_generation(self) -> None:
+        script = BUILD_RELEASE_ASSETS_PATH.read_text(encoding="utf-8")
+
+        legal_generation = script.index('"${SCRIPT_DIR}/generate_legal_artifacts.py"')
+        compaction = script.index('python "${SCRIPT_DIR}/compact_windows_runtime_licenses.py"')
+
+        self.assertLess(legal_generation, compaction)
+        self.assertIn('${RUNNER_OS:-}" == "Windows"', script)
+        self.assertIn('${OS:-}" == "Windows_NT"', script)
+        self.assertIn('${SCRIPTSCORE_DESKTOP_TARGET:-}" == *-windows-*', script)
+
     def test_compacts_failing_torch_path_and_preserves_license_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
