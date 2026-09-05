@@ -114,6 +114,23 @@ class GenerateLegalArtifactsTests(unittest.TestCase):
     def test_ujson_license_expression_is_allowed(self) -> None:
         self.assertTrue(MODULE.license_expression_is_allowed("BSD-3-Clause AND TCL"))
 
+    def test_current_torch_license_expression_is_allowed(self) -> None:
+        license_expression = (
+            "Apache-2.0 AND Apache-2.0 WITH LLVM-exception AND BSD-2-Clause AND "
+            "BSD-3-Clause AND BSL-1.0 AND MIT"
+        )
+        item = MODULE.InventoryItem(
+            name="torch",
+            version="2.13.0",
+            license=license_expression,
+            source="python",
+            scope="python-runtime",
+            runtime=True,
+        )
+
+        self.assertTrue(MODULE.license_expression_is_allowed(license_expression))
+        self.assertIsNone(MODULE.classify_item(item))
+
     def test_lmdb_openldap_license_is_allowed(self) -> None:
         self.assertTrue(MODULE.license_expression_is_allowed("OLDAP-2.8"))
 
