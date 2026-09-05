@@ -106,6 +106,7 @@ cargo test --all-targets
 ```
 
 These host checks are general development checks. Passing them does not mean Windows or macOS desktop installers have been validated.
+They work from a clean checkout without generating desktop bundle resources.
 
 ## Legal Artifacts
 
@@ -117,6 +118,9 @@ python desktop/scripts/generate_legal_artifacts.py
 
 The generated files are placed under `desktop/dist/legal/` for desktop bundling and release review.
 Do not commit `desktop/dist/`; it is generated output and may contain machine-local paths.
+`desktop/scripts/build-desktop-package.sh` layers
+`desktop/src-tauri/tauri.bundle-resources.conf.json` onto the development Tauri
+configuration so these generated resources are included only in packaged builds.
 
 ## Desktop Preview Packages
 

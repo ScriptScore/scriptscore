@@ -61,6 +61,9 @@ cargo fmt --check
 cargo test --all-targets
 ```
 
+These development checks do not require generated desktop bundle resources.
+Use the packaging scripts when building installers or release artifacts.
+
 See [Getting Started](docs/getting-started.md) and [Building From Source](docs/building-from-source.md) for fuller setup instructions.
 
 ## Documentation

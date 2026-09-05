@@ -21,6 +21,10 @@ cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --all-targets
 ```
 
+The default Tauri configuration keeps generated packaging resources out of
+development checks. `desktop/scripts/build-desktop-package.sh` adds
+`src-tauri/tauri.bundle-resources.conf.json` when producing packages.
+
 ## Development
 
 Use the scripts under `desktop/scripts/` for local desktop development and packaging experiments. Public preview packaging must include generated legal artifacts under `desktop/dist/legal/`.

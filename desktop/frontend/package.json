@@ -4,6 +4,9 @@
   "version": "0.2.0-dev.0",
   "license": "AGPL-3.0-only",
   "type": "module",
+  "engines": {
+    "node": "^20.19.0 || ^22.13.0 || >=24.0.0"
+  },
   "scripts": {
     "dev": "svelte-kit sync && vite dev",
     "build": "svelte-kit sync && vite build",

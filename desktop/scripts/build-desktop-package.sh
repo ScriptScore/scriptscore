@@ -10,6 +10,7 @@ TARGET="${SCRIPTSCORE_DESKTOP_TARGET:-}"
 AUTO_PORTABLE_PYTHON="${SCRIPTSCORE_DESKTOP_AUTO_PORTABLE_PYTHON:-1}"
 PORTABLE_PYTHON_DIR="${SCRIPTSCORE_DESKTOP_PORTABLE_PYTHON_DIR:-${DESKTOP_ROOT}/dist/portable-python}"
 TAURI_CONFIG="${SCRIPTSCORE_DESKTOP_TAURI_CONFIG:-${DESKTOP_ROOT}/src-tauri/tauri.conf.json}"
+BUNDLE_RESOURCES_CONFIG="${SCRIPTSCORE_DESKTOP_BUNDLE_RESOURCES_CONFIG:-${DESKTOP_ROOT}/src-tauri/tauri.bundle-resources.conf.json}"
 PYTHON_BIN="${SCRIPTSCORE_DESKTOP_PYTHON:-}"
 
 if [[ $# -gt 0 ]]; then
@@ -196,6 +197,11 @@ if ! cargo tauri --help >/dev/null 2>&1; then
   exit 1
 fi
 
+if [[ ! -f "${BUNDLE_RESOURCES_CONFIG}" ]]; then
+  echo "error: desktop bundle resources config is missing: ${BUNDLE_RESOURCES_CONFIG}" >&2
+  exit 1
+fi
+
 if bundle_selection_includes "${BUNDLES}" "appimage"; then
   missing_tools=()
 
@@ -247,6 +253,8 @@ build_desktop_packages() {
     cargo
     tauri
     build
+    --config
+    "${BUNDLE_RESOURCES_CONFIG}"
     --config
     "${config}"
   )
