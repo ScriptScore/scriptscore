@@ -505,6 +505,10 @@ jobs:
           python desktop/scripts/enforce_release_legal_policy.py
           python desktop/scripts/check_scriptscoreplus_boundary.py
 
+      - name: Compact Windows runtime license paths
+        if: ${{ runner.os == 'Windows' }}
+        run: python desktop/scripts/compact_windows_runtime_licenses.py
+
       - name: Build Tauri packages
         run: |
           if [[ "${RUNNER_OS}" == "Linux" ]]; then
