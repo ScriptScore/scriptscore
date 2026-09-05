@@ -38,6 +38,9 @@ cd desktop/src-tauri
 cargo test --all-targets
 ```
 
+This host check works from a clean checkout; generated legal notices and the
+bundled Python runtime are packaging inputs, not test prerequisites.
+
 ## Next Reading
 
 - `docs/provider-modes.md`

@@ -1,0 +1,10 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "bundle": {
+    "resources": {
+      "../../cli/models/paddle/": "models/paddle/",
+      "../dist/legal/": "legal/",
+      "../dist/bundled-runtime/": "runtime/"
+    }
+  }
+}

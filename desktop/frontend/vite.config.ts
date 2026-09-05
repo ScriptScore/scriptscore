@@ -3,6 +3,13 @@ import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vitest/config';
 
 const frontendRoot = decodeURIComponent(new URL('.', import.meta.url).pathname);
+const disableNodeWebStorageFlag = '--no-experimental-webstorage';
+const supportsDisableNodeWebStorage =
+  (
+    globalThis as typeof globalThis & {
+      process?: { allowedNodeEnvironmentFlags?: { has(flag: string): boolean } };
+    }
+  ).process?.allowedNodeEnvironmentFlags?.has(disableNodeWebStorageFlag) ?? false;
 
 function distroboxPathAliases(path: string): string[] {
   if (path.startsWith('/var/home/')) {
@@ -31,6 +38,8 @@ export default defineConfig({
   },
   test: {
     environment: 'jsdom',
+    // Node 25+ exposes Web Storage globals that shadow jsdom's per-test storage.
+    execArgv: supportsDisableNodeWebStorage ? [disableNodeWebStorageFlag] : [],
     setupFiles: ['src/test/setup.ts'],
     include: ['src/**/*.{test,spec}.{ts,js}'],
     clearMocks: true,

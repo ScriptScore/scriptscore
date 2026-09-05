@@ -187,6 +187,29 @@ jobs:
             desktop/frontend/coverage/lcov.info
             desktop/frontend/coverage/coverage-summary.json
 
+  desktop-frontend-node-current:
+    name: Desktop Frontend Tests (Node 26)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: desktop/frontend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: "26"
+          cache: npm
+          cache-dependency-path: desktop/frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Frontend tests
+        run: npm test
+
   license-policy:
     name: License Policy
     runs-on: ubuntu-latest
@@ -282,12 +305,6 @@ jobs:
           prefix-key: scriptscore-v1-rust
           cache-bin: "false"
           workspaces: desktop/src-tauri -> target
-
-      - name: Prepare bundled runtime
-        run: ./desktop/scripts/prepare-bundled-runtime.sh
-
-      - name: Generate legal artifacts
-        run: python desktop/scripts/generate_legal_artifacts.py
 
       - name: Rust format check
         run: cargo fmt --check --manifest-path desktop/src-tauri/Cargo.toml

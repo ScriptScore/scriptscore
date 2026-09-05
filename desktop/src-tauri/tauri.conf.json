@@ -54,11 +54,6 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "resources": {
-      "../../cli/models/paddle/": "models/paddle/",
-      "../dist/legal/": "legal/",
-      "../dist/bundled-runtime/": "runtime/"
-    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
